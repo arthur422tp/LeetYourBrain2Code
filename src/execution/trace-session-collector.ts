@@ -101,6 +101,9 @@ export class TraceSessionCollector {
       events: [...this.events],
       stdout: result.stdout || this.stdout,
       limits: this.options.limits,
+      ...(result.subscriptRelations
+        ? { subscriptRelations: result.subscriptRelations.map((relation) => ({ ...relation })) }
+        : {}),
       ...(result.returnValue !== undefined ? { returnValue: result.returnValue } : {}),
       ...(result.exception ? { exception: result.exception } : {})
     };

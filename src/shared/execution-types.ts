@@ -1,4 +1,4 @@
-import type { ValueSnapshot } from "./trace-types";
+import type { SubscriptRelation, ValueSnapshot } from "./trace-types";
 
 export const TRACE_SESSION_STATUSES = [
   "running",
@@ -79,6 +79,7 @@ export interface ExecutionTerminalResult {
   terminationReason: TerminationReason;
   stdout: string;
   durationMs: number;
+  subscriptRelations?: SubscriptRelation[];
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

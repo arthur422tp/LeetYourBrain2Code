@@ -95,6 +95,13 @@ export type ValueSnapshot =
   | UnknownValueSnapshot
   | CycleValueSnapshot;
 
+export interface SubscriptRelation {
+  scope: string;
+  line: number;
+  container: string;
+  index: string;
+}
+
 export type TraceEventType = "call" | "line" | "return" | "exception";
 
 export type TraceEventPayload =
@@ -131,6 +138,7 @@ export interface TraceSession {
   events: TraceEvent[];
   stdout: string;
   limits: ExecutionLimits;
+  subscriptRelations?: SubscriptRelation[];
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

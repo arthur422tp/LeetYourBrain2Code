@@ -54,13 +54,16 @@ function event(step: number): TraceEvent {
   };
 }
 
-function terminalResult(): ExecutionTerminalResult {
+function terminalResult(
+  overrides: Partial<ExecutionTerminalResult> = {}
+): ExecutionTerminalResult {
   return {
     status: "completed",
     terminationReason: "normal_return",
     stdout: "hello",
     durationMs: 4,
-    returnValue: { type: "int", value: "1" }
+    returnValue: { type: "int", value: "1" },
+    ...overrides
   };
 }
 
@@ -219,6 +222,18 @@ describe("TraceSessionCollector", () => {
     expect(session.terminationReason).toBe("normal_return");
     expect(session.stdout).toBe("hello");
     expect(session.entrypoint).toEqual(entrypoint);
+  });
+
+  it("carries static subscript relations into the session", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+
+    const relations = [
+      { scope: "Solution.one", line: 3, container: "nums", index: "i" }
+    ];
+    const session = collector.finish(terminalResult({ subscriptRelations: relations }));
+
+    expect(session.subscriptRelations).toEqual(relations);
+    expect(session.subscriptRelations).not.toBe(relations);
   });
 
   it("keeps all received batches when the controller hard-times out", async () => {

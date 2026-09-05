@@ -1,5 +1,6 @@
 import { loadPyodide as bundledLoadPyodide } from "pyodide";
 
+import { normalizeSubscriptRelation } from "../core/ast-relations";
 import type {
   ExceptionInfo,
   ExecutionRequest,
@@ -7,7 +8,9 @@ import type {
 } from "../shared/execution-types";
 import type { TraceEvent, ValueSnapshot } from "../shared/trace-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
+import astAnalyzerSource from "./python/ast_analyzer.py?raw";
 import runnerSource from "./python/runner.py?raw";
+import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
 
 export const USER_CODE_FILENAME = "<leetcode-user-code>";
@@ -58,6 +61,14 @@ __lc_runtime_namespace = {}
 exec(compile(${quotePython(runtimePrelude)}, ${quotePython(
     RUNTIME_PRELUDE_FILENAME
   )}, "exec"), __lc_runtime_namespace, __lc_runtime_namespace)
+
+__lc_ast_analyzer_module = types.ModuleType("ast_analyzer")
+exec(compile(${quotePython(astAnalyzerSource)}, "<leetcode-ast-analyzer>", "exec"), vars(__lc_ast_analyzer_module), vars(__lc_ast_analyzer_module))
+sys.modules["ast_analyzer"] = __lc_ast_analyzer_module
+
+__lc_serializer_module = types.ModuleType("serializer")
+exec(compile(${quotePython(serializerSource)}, "<leetcode-serializer>", "exec"), vars(__lc_serializer_module), vars(__lc_serializer_module))
+sys.modules["serializer"] = __lc_serializer_module
 
 __lc_tracer_module = types.ModuleType("tracer")
 exec(compile(${quotePython(tracerSource)}, "<leetcode-tracer>", "exec"), vars(__lc_tracer_module), vars(__lc_tracer_module))
@@ -213,7 +224,76 @@ function errorResult(error: unknown, durationMs: number): ExecutionTerminalResul
 }
 
 function isValueSnapshot(value: unknown): value is ValueSnapshot {
-  return isRecord(value) && typeof value.type === "string";
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return false;
+  }
+
+  switch (value.type) {
+    case "int":
+      return typeof value.value === "string";
+    case "float":
+      return (
+        (typeof value.value === "number" && Number.isFinite(value.value)) ||
+        value.value === "NaN" ||
+        value.value === "Infinity" ||
+        value.value === "-Infinity"
+      );
+    case "bool":
+      return typeof value.value === "boolean";
+    case "str":
+      return (
+        typeof value.value === "string" &&
+        typeof value.length === "number" &&
+        Number.isInteger(value.length) &&
+        value.length >= 0 &&
+        typeof value.truncated === "boolean"
+      );
+    case "none":
+      return value.value === null;
+    case "list":
+    case "tuple":
+      return (
+        typeof value.length === "number" &&
+        Number.isInteger(value.length) &&
+        value.length >= 0 &&
+        Array.isArray(value.items) &&
+        value.items.every((item) => isValueSnapshot(item)) &&
+        typeof value.truncated === "boolean"
+      );
+    case "dict":
+      return (
+        typeof value.length === "number" &&
+        Number.isInteger(value.length) &&
+        value.length >= 0 &&
+        Array.isArray(value.entries) &&
+        value.entries.every(
+          (entry) =>
+            isRecord(entry) &&
+            isValueSnapshot(entry.key) &&
+            isValueSnapshot(entry.value)
+        ) &&
+        typeof value.truncated === "boolean"
+      );
+    case "set":
+      return (
+        typeof value.length === "number" &&
+        Number.isInteger(value.length) &&
+        value.length >= 0 &&
+        Array.isArray(value.items) &&
+        value.items.every((item) => isValueSnapshot(item)) &&
+        typeof value.truncated === "boolean"
+      );
+    case "unknown":
+      return (
+        typeof value.className === "string" &&
+        typeof value.repr === "string" &&
+        (value.truncated === undefined || typeof value.truncated === "boolean")
+      );
+    case "cycle":
+      return typeof value.referenceId === "string";
+    default:
+      return false;
+  }
 }
 
 function normalizeException(value: unknown): ExceptionInfo | undefined {
@@ -250,7 +330,8 @@ export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
     typeof value.function !== "string" ||
     typeof value.call_depth !== "number" ||
     !isRecord(value.locals) ||
-    typeof value.stdout_delta !== "string"
+    typeof value.stdout_delta !== "string" ||
+    !Object.values(value.locals).every((local) => isValueSnapshot(local))
   ) {
     return null;
   }
@@ -361,6 +442,11 @@ function normalizePythonExecutionResult(
     : "tracer_internal_error";
   const returnValue = value.return_value;
   const exception = normalizeException(value.exception);
+  const subscriptRelations = Array.isArray(value.subscript_relations)
+    ? value.subscript_relations
+        .map((relation) => normalizeSubscriptRelation(relation))
+        .filter((relation): relation is NonNullable<typeof relation> => relation !== null)
+    : [];
 
   return {
     events,
@@ -369,6 +455,7 @@ function normalizePythonExecutionResult(
       terminationReason: normalizedReason,
       stdout: typeof value.stdout === "string" ? value.stdout : "",
       durationMs: typeof value.duration_ms === "number" ? value.duration_ms : durationMs,
+      ...(subscriptRelations.length > 0 ? { subscriptRelations } : {}),
       ...(isValueSnapshot(returnValue) ? { returnValue } : {}),
       ...(exception ? { exception } : {})
     }

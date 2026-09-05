@@ -5,6 +5,7 @@ import time
 import traceback
 
 from tracer import TraceCollector, TraceLimitExceeded, USER_CODE_FILENAME, _limit
+from ast_analyzer import analyze_subscript_relations, relations_as_dicts
 
 
 def _exception_info(error):
@@ -85,6 +86,8 @@ def run_request(
             exception=_exception_info(error),
         )
 
+    subscript_relations = relations_as_dicts(analyze_subscript_relations(source_code))
+
     namespace = runtime_globals if runtime_globals is not None else {}
     baseline_global_names = set(namespace)
     stdout_buffer = io.StringIO()
@@ -110,6 +113,7 @@ def run_request(
             error.reason,
             stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
             events=collector.events,
+            subscript_relations=subscript_relations,
         )
     except Exception as error:
         exception = collector.last_exception or _exception_info(error)
@@ -118,6 +122,7 @@ def run_request(
             "runtime_exception",
             stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
             events=collector.events,
+            subscript_relations=subscript_relations,
             exception=exception,
         )
     finally:
@@ -129,6 +134,7 @@ def run_request(
         "normal_return",
         stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
         events=collector.events,
+        subscript_relations=subscript_relations,
         return_value=collector.serialize_value(return_value),
         duration_ms=(time.monotonic() - started_at) * 1000,
     )

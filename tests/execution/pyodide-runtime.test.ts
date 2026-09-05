@@ -5,6 +5,7 @@ import type { TraceEvent } from "../../src/shared/trace-types";
 import {
   buildExecutionScript,
   createPyodideRuntime,
+  normalizePythonTraceEvent,
   USER_CODE_FILENAME
 } from "../../src/worker/pyodide-runtime";
 
@@ -34,7 +35,11 @@ describe("Pyodide runtime", () => {
     expect(script).toContain(`compile(`);
     expect(script).toContain(USER_CODE_FILENAME);
     expect(script).toContain("leetcode-runtime-prelude");
+    expect(script).toContain("leetcode-serializer");
     expect(script).toContain("leetcode-tracer");
+    expect(script).toContain('sys.modules["serializer"]');
+    expect(script).toContain("leetcode-ast-analyzer");
+    expect(script).toContain('sys.modules["ast_analyzer"]');
     expect(script).toContain("leetcode-runner");
     expect(script).toContain("run_request");
     expect(script).toContain(JSON.stringify(request.sourceCode));
@@ -186,5 +191,45 @@ describe("Pyodide runtime", () => {
         }
       ]
     ]);
+  });
+
+  it("rejects trace events whose locals contain a raw non-snapshot value", () => {
+    expect(normalizePythonTraceEvent({
+      step: 1,
+      event: "line",
+      frame_id: 1,
+      parent_frame_id: null,
+      function: "add",
+      line: 3,
+      call_depth: 1,
+      locals: { value: 5 },
+      stdout_delta: ""
+    })).toBeNull();
+  });
+
+  it("normalizes static subscript relations returned by the Python runner", async () => {
+    const finished: ExecutionTerminalResult[] = [];
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => ({
+          status: "completed",
+          termination_reason: "normal_return",
+          stdout: "",
+          events: [],
+          subscript_relations: [
+            { scope: "Solution.twoSum", line: 7, container: "nums", index: "left" }
+          ]
+        })
+      }),
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute(request);
+
+    expect(finished[0]).toEqual(expect.objectContaining({
+      subscriptRelations: [
+        { scope: "Solution.twoSum", line: 7, container: "nums", index: "left" }
+      ]
+    }));
   });
 });

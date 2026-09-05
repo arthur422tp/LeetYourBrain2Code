@@ -34,6 +34,35 @@ def function_events(result: dict, function_name: str) -> list[dict]:
     return [event for event in result["events"] if event["function"] == function_name]
 
 
+def test_two_sum_normal_case_returns_result_without_line_offset():
+    result = request(
+        """class Solution:
+    def twoSum(self, numbers, target):
+        for index, value in enumerate(numbers):
+            for other in range(index + 1, len(numbers)):
+                if value + numbers[other] == target:
+                    return [index, other]
+        return []
+""",
+        "twoSum",
+        2,
+        "[2,7,11,15]\n9",
+    )
+
+    assert result["status"] == "completed"
+    assert result["termination_reason"] == "normal_return"
+    assert result["return_value"] == {
+        "type": "list",
+        "length": 2,
+        "items": [
+            {"type": "int", "value": "0"},
+            {"type": "int", "value": "1"},
+        ],
+        "truncated": False,
+    }
+    assert any(event["function"] == "twoSum" and event["line"] == 3 for event in result["events"])
+
+
 def test_line_trace_records_call_lines_and_return_with_pre_line_locals():
     result = request(
         """class Solution:

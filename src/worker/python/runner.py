@@ -51,7 +51,15 @@ def _truncate_stdout(stdout, limits):
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
-def run_request(source_code, raw_testcase, entrypoint, limits, runtime_globals=None):
+def run_request(
+    source_code,
+    raw_testcase,
+    entrypoint,
+    limits,
+    runtime_globals=None,
+    session_id="session",
+    emit_batch=None,
+):
     started_at = time.monotonic()
     lines = _argument_lines(raw_testcase)
     parameter_count = int(entrypoint.get("parameter_count", entrypoint.get("parameterCount", -1)))
@@ -80,7 +88,13 @@ def run_request(source_code, raw_testcase, entrypoint, limits, runtime_globals=N
     namespace = runtime_globals if runtime_globals is not None else {}
     baseline_global_names = set(namespace)
     stdout_buffer = io.StringIO()
-    collector = TraceCollector(limits, stdout_buffer, baseline_global_names)
+    collector = TraceCollector(
+        limits,
+        stdout_buffer,
+        baseline_global_names,
+        session_id=session_id,
+        emit_batch=emit_batch,
+    )
     return_value = None
 
     collector.start()
@@ -108,6 +122,7 @@ def run_request(source_code, raw_testcase, entrypoint, limits, runtime_globals=N
         )
     finally:
         collector.stop()
+        collector.flush()
 
     return _empty_result(
         "completed",

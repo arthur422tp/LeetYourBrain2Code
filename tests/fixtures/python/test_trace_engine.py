@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "worker" / "python"))
@@ -136,3 +137,33 @@ def test_runtime_baseline_globals_are_not_copied_into_user_module_snapshots():
     assert module_events
     assert "List" not in module_events[0]["locals"]
     assert "__builtins__" not in module_events[0]["locals"]
+
+
+def test_trace_events_are_streamed_in_bounded_batches_during_execution():
+    emitted = []
+
+    def emit_batch(session_id, events_json):
+        emitted.append((session_id, json.loads(events_json)))
+
+    result = run_request(
+        """class Solution:
+    def loop(self):
+        total = 0
+        for index in range(40):
+            total += index
+        return total
+""",
+        "",
+        {"class_name": "Solution", "method_name": "loop", "parameter_count": 0},
+        LIMITS,
+        session_id="stream-session",
+        emit_batch=emit_batch,
+    )
+
+    assert result["status"] == "completed"
+    assert emitted
+    assert all(session_id == "stream-session" for session_id, _ in emitted)
+    assert all(len(events) <= 50 for _, events in emitted)
+    assert len(emitted[0][1]) == 50
+    streamed_steps = [event["step"] for _, events in emitted for event in events]
+    assert streamed_steps == list(range(1, len(streamed_steps) + 1))

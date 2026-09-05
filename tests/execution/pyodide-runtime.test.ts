@@ -125,4 +125,66 @@ describe("Pyodide runtime", () => {
       expect.objectContaining({ status: "completed", returnValue: { type: "int", value: "5" } })
     );
   });
+
+  it("installs a JSON trace callback while Python is still running", async () => {
+    const batches: TraceEvent[][] = [];
+    let callback: ((sessionId: string, eventsJson: string) => void) | undefined;
+    const globals = {
+      set: (name: string, value: unknown) => {
+        if (name === "__lc_emit_trace_batch") {
+          callback = value as (sessionId: string, eventsJson: string) => void;
+        }
+      },
+      delete: () => undefined
+    };
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        globals,
+        runPythonAsync: async () => {
+          callback?.(
+            "runtime-session",
+            JSON.stringify([
+              {
+                step: 1,
+                event: "line",
+                frame_id: 1,
+                parent_frame_id: null,
+                function: "add",
+                line: 3,
+                call_depth: 1,
+                locals: {},
+                stdout_delta: ""
+              }
+            ])
+          );
+          return {
+            status: "completed",
+            termination_reason: "normal_return",
+            stdout: "",
+            events: [],
+            return_value: { type: "int", value: "5" }
+          };
+        }
+      }),
+      onTraceBatch: (_sessionId, events) => batches.push(events)
+    });
+
+    await runtime.execute(request);
+
+    expect(batches).toEqual([
+      [
+        {
+          step: 1,
+          event: "line",
+          frameId: 1,
+          parentFrameId: null,
+          function: "add",
+          line: 3,
+          callDepth: 1,
+          locals: {},
+          stdoutDelta: ""
+        }
+      ]
+    ]);
+  });
 });

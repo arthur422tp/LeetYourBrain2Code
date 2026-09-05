@@ -15,6 +15,10 @@ const RUNTIME_PRELUDE_FILENAME = "<leetcode-runtime-prelude>";
 
 export interface PyodideApi {
   runPythonAsync(code: string): Promise<unknown>;
+  globals?: {
+    set?(name: string, value: unknown): void;
+    delete?(name: string): void;
+  };
   version?: string;
 }
 
@@ -76,6 +80,8 @@ __lc_runner_module.run_request(
         "max_stdout_bytes": ${request.limits.maxStdoutBytes},
     },
     runtime_globals=__lc_runtime_namespace,
+    session_id=${quotePython(request.sessionId)},
+    emit_batch=globals().get("__lc_emit_trace_batch"),
 )
 `;
 }
@@ -393,19 +399,55 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
       }
 
       const startedAt = Date.now();
+      let streamedEventCount = 0;
+      let callbackInstalled = false;
+      const emitTraceBatch = (sessionId: string, eventsJson: string): void => {
+        if (sessionId !== request.sessionId) {
+          return;
+        }
+        try {
+          const parsed = JSON.parse(eventsJson) as unknown;
+          const events = Array.isArray(parsed)
+            ? parsed
+                .map((event) => normalizePythonTraceEvent(event))
+                .filter((event): event is TraceEvent => event !== null)
+            : [];
+          if (events.length === 0) {
+            return;
+          }
+          streamedEventCount += events.length;
+          options.onTraceBatch?.(sessionId, events);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
+
       try {
+        if (options.onTraceBatch && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_trace_batch", emitTraceBatch);
+          callbackInstalled = true;
+        }
         const rawResult = await pyodide.runPythonAsync(buildExecutionScript(request));
         const normalized = normalizePythonExecutionResult(
           unwrapPyodideValue(rawResult),
           Date.now() - startedAt
         );
-        const batchSize = 50;
-        for (let index = 0; index < normalized.events.length; index += batchSize) {
-          options.onTraceBatch?.(request.sessionId, normalized.events.slice(index, index + batchSize));
+        if (streamedEventCount === 0) {
+          const batchSize = 50;
+          for (let index = 0; index < normalized.events.length; index += batchSize) {
+            options.onTraceBatch?.(
+              request.sessionId,
+              normalized.events.slice(index, index + batchSize)
+            );
+          }
         }
         options.onFinished?.(normalized.result);
       } catch (error) {
         options.onFinished?.(errorResult(error, Date.now() - startedAt));
+      } finally {
+        if (callbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_trace_batch");
+        }
       }
     }
   };

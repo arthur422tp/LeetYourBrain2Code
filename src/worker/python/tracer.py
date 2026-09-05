@@ -143,11 +143,21 @@ class ValueSerializer:
 
 
 class TraceCollector:
-    def __init__(self, limits, stdout_buffer, baseline_global_names=None):
+    def __init__(
+        self,
+        limits,
+        stdout_buffer,
+        baseline_global_names=None,
+        session_id="session",
+        emit_batch=None,
+    ):
         self.limits = limits
         self.stdout_buffer = stdout_buffer
         self.baseline_global_names = set(baseline_global_names or ())
+        self.session_id = session_id
+        self.emit_batch = emit_batch
         self.events = []
+        self.pending_events = []
         self.step_count = 0
         self.session_bytes = 0
         self.frame_ids = {}
@@ -251,6 +261,24 @@ class TraceCollector:
 
         self.session_bytes += event_size
         self.events.append(event)
+        self.pending_events.append(event)
+        if len(self.pending_events) >= 50:
+            self.flush()
+
+    def flush(self):
+        if not self.pending_events or self.emit_batch is None:
+            return
+        events = self.pending_events
+        self.pending_events = []
+        try:
+            self.emit_batch(
+                self.session_id,
+                json.dumps(events, ensure_ascii=False, separators=(",", ":")),
+            )
+        except Exception:
+            # Streaming is best effort. The terminal result still contains the
+            # complete trace when the worker finishes normally.
+            pass
 
     def trace(self, frame, event_name, argument):
         if frame.f_code.co_filename != USER_CODE_FILENAME:

@@ -40,7 +40,10 @@ export interface PyodideRuntime {
   execute(request: ExecutionRequest): Promise<void>;
 }
 
-export const DEFAULT_PYODIDE_INDEX_URL = new URL("../pyodide/", import.meta.url).href;
+export const DEFAULT_PYODIDE_INDEX_URL = new URL(
+  /* @vite-ignore */ "../pyodide/",
+  import.meta.url
+).href;
 
 function quotePython(value: string): string {
   return JSON.stringify(value);

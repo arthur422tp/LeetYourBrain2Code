@@ -49,7 +49,8 @@ export class ExecutionController {
   private active = false;
 
   public constructor(options: ExecutionControllerOptions = {}) {
-    const workerUrl = options.workerUrl ?? new URL("../worker/pyodide-worker.ts", import.meta.url);
+    const workerUrl =
+      options.workerUrl ?? new URL(/* @vite-ignore */ "../worker/pyodide-worker.js", import.meta.url);
     this.workerFactory =
       options.workerFactory ??
       (() => new Worker(workerUrl, { type: "module" }));

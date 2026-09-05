@@ -1,5 +1,10 @@
 import type { ExecutionRequest } from "../shared/execution-types";
 import type { TraceSession } from "../shared/trace-types";
+import {
+  LEETCODE_CONTENT_MESSAGE_TYPES,
+  validateSnapshot,
+  type LeetCodeSnapshot
+} from "../content/leetcode-adapter";
 import { createExecutionRequest } from "../execution/execution-request";
 import { ExecutionController } from "../execution/execution-controller";
 
@@ -9,6 +14,7 @@ export interface SidePanelController {
 
 export interface SidePanelDependencies {
   controller?: SidePanelController;
+  snapshotProvider?: () => Promise<LeetCodeSnapshot>;
 }
 
 const SAMPLE_SOURCE = `class Solution:
@@ -41,11 +47,46 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | undefined {
+  if (typeof chrome === "undefined" || typeof chrome.runtime?.sendMessage !== "function") {
+    return undefined;
+  }
+
+  return () =>
+    new Promise<LeetCodeSnapshot>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { type: LEETCODE_CONTENT_MESSAGE_TYPES.requestSnapshot },
+        (response: unknown) => {
+          const runtimeError = chrome.runtime.lastError;
+          if (runtimeError) {
+            reject(new Error(runtimeError.message));
+            return;
+          }
+
+          if (
+            typeof response !== "object" ||
+            response === null ||
+            !("ok" in response) ||
+            response.ok !== true ||
+            !("snapshot" in response) ||
+            !validateSnapshot(response.snapshot)
+          ) {
+            reject(new Error("No valid LeetCode snapshot was returned"));
+            return;
+          }
+          resolve(response.snapshot);
+        }
+      );
+    });
+}
+
 export function renderSidePanel(
   root: HTMLElement,
   dependencies: SidePanelDependencies = {}
 ): void {
   const controller = dependencies.controller ?? createDefaultController();
+  const snapshotProvider =
+    dependencies.snapshotProvider ?? createDefaultSnapshotProvider();
 
   const title = document.createElement("h1");
   title.textContent = "LeetCode Python Visualizer";
@@ -72,6 +113,11 @@ export function renderSidePanel(
   testcase.rows = 4;
   testcase.value = SAMPLE_TESTCASE;
 
+  const loadButton = document.createElement("button");
+  loadButton.id = "load-snapshot";
+  loadButton.type = "button";
+  loadButton.textContent = "Load current LeetCode";
+
   const runButton = document.createElement("button");
   runButton.id = "run";
   runButton.type = "button";
@@ -85,6 +131,30 @@ export function renderSidePanel(
   traceOutput.textContent = "[]";
 
   let running = false;
+  loadButton.addEventListener("click", () => {
+    if (!snapshotProvider || running) {
+      status.textContent = "Runtime: page adapter unavailable";
+      return;
+    }
+
+    running = true;
+    loadButton.disabled = true;
+    status.textContent = "Runtime: loading";
+    void snapshotProvider()
+      .then((snapshot) => {
+        source.value = snapshot.code;
+        testcase.value = snapshot.testcase;
+        status.textContent = "Runtime: ready";
+      })
+      .catch((error: unknown) => {
+        status.textContent = `Runtime: ${errorText(error)}`;
+      })
+      .finally(() => {
+        running = false;
+        loadButton.disabled = false;
+      });
+  });
+
   runButton.addEventListener("click", () => {
     if (running) {
       return;
@@ -131,6 +201,7 @@ export function renderSidePanel(
     source,
     testcaseLabel,
     testcase,
+    loadButton,
     runButton,
     traceLabel,
     traceOutput

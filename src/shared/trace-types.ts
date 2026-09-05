@@ -74,6 +74,7 @@ export interface UnknownValueSnapshot {
   type: "unknown";
   className: string;
   repr: string;
+  truncated?: boolean;
 }
 
 export interface CycleValueSnapshot {

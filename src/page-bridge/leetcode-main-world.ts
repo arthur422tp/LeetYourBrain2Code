@@ -101,9 +101,12 @@ export function installMainWorldBridge(
   pageWindow: LeetCodePageWindow,
   doc: Document
 ): () => void {
+  const pageOrigin = pageWindow.location.origin;
+  const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
   const onMessage = (event: MessageEvent): void => {
     if (
       (event.source !== null && event.source !== pageWindow) ||
+      (event.origin !== "" && event.origin !== pageOrigin) ||
       typeof event.data !== "object" ||
       event.data === null
     ) {
@@ -126,7 +129,7 @@ export function installMainWorldBridge(
         requestId: message.requestId,
         snapshot: extractPageState(doc, pageWindow)
       },
-      "*"
+      targetOrigin
     );
   };
 

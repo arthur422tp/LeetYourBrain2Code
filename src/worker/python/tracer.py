@@ -1,11 +1,13 @@
 import json
 import math
 import sys
+import time
 import traceback
 
 
 USER_CODE_FILENAME = "<leetcode-user-code>"
 TRACE_BATCH_MAX_BYTES = 256_000
+TRACE_BATCH_MAX_LATENCY_SECONDS = 0.05
 
 
 class TraceLimitExceeded(Exception):
@@ -30,6 +32,9 @@ class ValueSerializer:
         self.max_nesting_depth = max(
             0, int(_limit(limits, "max_nesting_depth", "maxNestingDepth", 12))
         )
+        self.max_snapshot_bytes = max(
+            0, int(_limit(limits, "max_snapshot_bytes", "maxSnapshotBytes", 256_000))
+        )
         self.active_objects = set()
         self.references = {}
         self.next_reference_id = 1
@@ -48,6 +53,7 @@ class ValueSerializer:
             representation = repr(value)
         except Exception:
             representation = "<unrepresentable>"
+        representation = self._truncate_text(representation, self.max_snapshot_bytes)
         snapshot = {
             "type": "unknown",
             "className": type(value).__name__,
@@ -57,7 +63,55 @@ class ValueSerializer:
             snapshot["truncated"] = True
         return snapshot
 
+    def _truncate_text(self, value, max_bytes):
+        encoded = value.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return value
+        return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+    def _encoded_size(self, snapshot):
+        return len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    def _truncated_snapshot(self, value):
+        return {
+            "type": "unknown",
+            "className": type(value).__name__,
+            "repr": "<snapshot truncated>",
+            "truncated": True,
+        }
+
+    def _fit_snapshot(self, snapshot, value):
+        if self.max_snapshot_bytes <= 0:
+            return self._truncated_snapshot(value)
+        if self._encoded_size(snapshot) <= self.max_snapshot_bytes:
+            return snapshot
+
+        if isinstance(value, str):
+            low = 0
+            high = len(value)
+            best = None
+            while low <= high:
+                middle = (low + high) // 2
+                candidate = {
+                    "type": "str",
+                    "value": self._truncate_text(value, middle),
+                    "length": len(value),
+                    "truncated": True,
+                }
+                if self._encoded_size(candidate) <= self.max_snapshot_bytes:
+                    best = candidate
+                    low = middle + 1
+                else:
+                    high = middle - 1
+            if best is not None:
+                return best
+
+        return self._truncated_snapshot(value)
+
     def serialize(self, value, depth=0):
+        return self._fit_snapshot(self._serialize(value, depth), value)
+
+    def _serialize(self, value, depth=0):
         if value is None:
             return {"type": "none", "value": None}
         if isinstance(value, bool):
@@ -160,6 +214,7 @@ class TraceCollector:
         self.events = []
         self.pending_events = []
         self.pending_bytes = 2
+        self.last_flush_at = time.monotonic()
         self.step_count = 0
         self.session_bytes = 0
         self.frame_ids = {}
@@ -269,7 +324,11 @@ class TraceCollector:
         separator_bytes = 1 if self.pending_events else 0
         self.pending_events.append(event)
         self.pending_bytes += separator_bytes + event_size
-        if len(self.pending_events) >= 50 or self.pending_bytes >= TRACE_BATCH_MAX_BYTES:
+        if (
+            len(self.pending_events) >= 50
+            or self.pending_bytes >= TRACE_BATCH_MAX_BYTES
+            or time.monotonic() - self.last_flush_at >= TRACE_BATCH_MAX_LATENCY_SECONDS
+        ):
             self.flush()
 
     def flush(self):
@@ -278,6 +337,7 @@ class TraceCollector:
         events = self.pending_events
         self.pending_events = []
         self.pending_bytes = 2
+        self.last_flush_at = time.monotonic()
         if self.emit_batch is None:
             return
         try:

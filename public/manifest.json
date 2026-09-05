@@ -12,6 +12,19 @@
   "side_panel": {
     "default_path": "sidepanel/index.html"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": ["page-bridge/leetcode-main-world.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": ["content/leetcode-adapter.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }

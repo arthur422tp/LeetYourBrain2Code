@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_EXECUTION_LIMITS } from "../../src/shared/execution-types";
 import type { ExecutionRequest } from "../../src/shared/execution-types";
 import type { TraceSession } from "../../src/shared/trace-types";
+import type { LeetCodeSnapshot } from "../../src/content/leetcode-adapter";
 import { renderSidePanel, type SidePanelController } from "../../src/sidepanel/bootstrap";
 
 describe("renderSidePanel", () => {
@@ -69,5 +70,24 @@ describe("renderSidePanel", () => {
     );
     expect(root.querySelector("#runtime-status")?.textContent).toBe("Runtime: completed");
     expect(traceOutput?.textContent).toContain('"event": "call"');
+  });
+
+  it("loads the current LeetCode snapshot into the temporary harness", async () => {
+    const root = document.createElement("main");
+    const snapshot: LeetCodeSnapshot = {
+      code: "class Solution:\n    def one(self, value):\n        return value\n",
+      language: "python",
+      testcase: "7",
+      metadata: { slug: "one", title: "One" }
+    };
+
+    renderSidePanel(root, { snapshotProvider: async () => snapshot });
+
+    root.querySelector<HTMLButtonElement>("#load-snapshot")?.click();
+    await vi.waitFor(() =>
+      expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(snapshot.code)
+    );
+    expect(root.querySelector<HTMLTextAreaElement>("#testcase")?.value).toBe(snapshot.testcase);
+    expect(root.querySelector("#runtime-status")?.textContent).toBe("Runtime: ready");
   });
 });

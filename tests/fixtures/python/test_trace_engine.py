@@ -1,5 +1,6 @@
 import sys
 import json
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "worker" / "python"))
@@ -222,3 +223,52 @@ def test_trace_stream_flushes_large_batches_before_fifty_events():
     assert result["status"] == "completed"
     assert len(emitted) >= 2
     assert len(emitted[0][1]) < 50
+
+
+def test_value_snapshots_respect_max_snapshot_bytes():
+    result = run_request(
+        """class Solution:
+    def snapshot(self):
+        payload = "x" * 10000
+        return payload
+""",
+        "",
+        {"class_name": "Solution", "method_name": "snapshot", "parameter_count": 0},
+        {**LIMITS, "max_snapshot_bytes": 128, "max_session_bytes": 2_000_000},
+    )
+
+    assert result["status"] == "completed"
+    payload_snapshots = [
+        event["locals"]["payload"]
+        for event in result["events"]
+        if "payload" in event["locals"]
+    ]
+    assert payload_snapshots
+    assert payload_snapshots[-1]["truncated"] is True
+    assert len(json.dumps(payload_snapshots[-1], separators=(",", ":")).encode("utf-8")) <= 128
+
+
+def test_trace_stream_flushes_after_latency_before_user_execution_resumes():
+    markers = []
+
+    def emit_batch(_session_id, _events_json):
+        markers.append("batch")
+
+    result = run_request(
+        """import time
+class Solution:
+    def delayed(self):
+        time.sleep(0.06)
+        stream_markers.append("after")
+        return 1
+""",
+        "",
+        {"class_name": "Solution", "method_name": "delayed", "parameter_count": 0},
+        {**LIMITS, "max_session_bytes": 2_000_000},
+        runtime_globals={"stream_markers": markers},
+        session_id="latency-stream-session",
+        emit_batch=emit_batch,
+    )
+
+    assert result["status"] == "completed"
+    assert markers[:2] == ["batch", "after"]

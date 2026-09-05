@@ -20,6 +20,14 @@ export const LEETCODE_MESSAGE_TYPES = {
   responseSnapshot: "response_snapshot"
 } as const;
 
+export const LEETCODE_CONTENT_MESSAGE_TYPES = {
+  requestSnapshot: "request_leetcode_snapshot"
+} as const;
+
+const MAX_SNAPSHOT_CODE_LENGTH = 1_000_000;
+const MAX_SNAPSHOT_TESTCASE_LENGTH = 100_000;
+const MAX_SNAPSHOT_LANGUAGE_LENGTH = 64;
+
 /**
  * All page-specific selectors live here so the rest of the extension does not
  * need to know about LeetCode's editor implementation.
@@ -165,9 +173,12 @@ export function validateSnapshot(value: unknown): value is LeetCodeSnapshot {
   if (
     typeof value.code !== "string" ||
     value.code.length === 0 ||
+    value.code.length > MAX_SNAPSHOT_CODE_LENGTH ||
     typeof value.language !== "string" ||
     value.language.length === 0 ||
+    value.language.length > MAX_SNAPSHOT_LANGUAGE_LENGTH ||
     typeof value.testcase !== "string" ||
+    value.testcase.length > MAX_SNAPSHOT_TESTCASE_LENGTH ||
     !isRecord(value.metadata)
   ) {
     return false;
@@ -185,7 +196,14 @@ export function requestMainWorldSnapshot(
   pageWindow: Window,
   timeoutMs = 750
 ): Promise<LeetCodeSnapshot> {
-  const requestId = `snapshot-${Date.now()}-${requestSequence++}`;
+  // The window message channel is visible to page scripts by design. Treat
+  // every returned value as untrusted data: validate its shape and size, and
+  // never use it for privileged extension operations.
+  const randomUuid = pageWindow.crypto?.randomUUID?.();
+  const requestId =
+    randomUuid ?? `snapshot-${Date.now()}-${requestSequence++}-${Math.random().toString(36).slice(2)}`;
+  const pageOrigin = pageWindow.location.origin;
+  const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
 
   return new Promise((resolve, reject) => {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -198,7 +216,11 @@ export function requestMainWorldSnapshot(
     };
 
     const onMessage = (event: MessageEvent): void => {
-      if ((event.source !== null && event.source !== pageWindow) || !isRecord(event.data)) {
+      if (
+        (event.source !== null && event.source !== pageWindow) ||
+        (event.origin !== "" && event.origin !== pageOrigin) ||
+        !isRecord(event.data)
+      ) {
         return;
       }
       if (
@@ -224,7 +246,7 @@ export function requestMainWorldSnapshot(
         type: LEETCODE_MESSAGE_TYPES.requestSnapshot,
         requestId
       },
-      "*"
+      targetOrigin
     );
 
     timeoutId = setTimeout(() => {

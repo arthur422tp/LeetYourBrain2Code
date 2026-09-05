@@ -28,10 +28,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function internalErrorResult(message: string): ExecutionTerminalResult {
+function internalErrorResult(
+  message: string,
+  duringInitialization = false
+): ExecutionTerminalResult {
   return {
     status: "internal_error",
-    terminationReason: "worker_initialization_failed",
+    terminationReason: duringInitialization
+      ? "worker_initialization_failed"
+      : "tracer_internal_error",
     stdout: "",
     durationMs: 0,
     exception: {
@@ -76,7 +81,9 @@ export class ExecutionController {
       worker = this.workerFactory();
     } catch (error) {
       this.active = false;
-      return Promise.resolve(collector.finish(internalErrorResult(errorMessage(error))));
+      return Promise.resolve(
+        collector.finish(internalErrorResult(errorMessage(error), true))
+      );
     }
 
     return new Promise<TraceSession>((resolve) => {
@@ -132,12 +139,16 @@ export class ExecutionController {
         }
 
         if (!message.sessionId || message.sessionId === request.sessionId) {
-          finish(collector.finish(internalErrorResult(message.message)));
+          finish(collector.finish(internalErrorResult(message.message, !executeSent)));
         }
       };
 
       const onError = (event: ErrorEvent): void => {
-        finish(collector.finish(internalErrorResult(event.message || "Worker execution failed")));
+        finish(
+          collector.finish(
+            internalErrorResult(event.message || "Worker execution failed", !executeSent)
+          )
+        );
       };
 
       worker.addEventListener("message", onMessage);

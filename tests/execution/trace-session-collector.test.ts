@@ -144,6 +144,69 @@ class FakeWorker implements WorkerLike {
   }
 }
 
+class PartialWorker implements WorkerLike {
+  private messageListeners: Array<(event: MessageEvent) => void> = [];
+  private errorListeners: Array<(event: ErrorEvent) => void> = [];
+  terminated = false;
+
+  addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
+  addEventListener(type: "error", listener: (event: ErrorEvent) => void): void;
+  addEventListener(
+    type: "message" | "error",
+    listener: ((event: MessageEvent) => void) | ((event: ErrorEvent) => void)
+  ): void {
+    if (type === "message") {
+      this.messageListeners.push(listener as (event: MessageEvent) => void);
+      if (this.messageListeners.length === 1) {
+        queueMicrotask(() => this.emit({ type: "ready" }));
+      }
+    } else {
+      this.errorListeners.push(listener as (event: ErrorEvent) => void);
+    }
+  }
+
+  removeEventListener(type: "message", listener: (event: MessageEvent) => void): void;
+  removeEventListener(type: "error", listener: (event: ErrorEvent) => void): void;
+  removeEventListener(
+    type: "message" | "error",
+    listener: ((event: MessageEvent) => void) | ((event: ErrorEvent) => void)
+  ): void {
+    if (type === "message") {
+      this.messageListeners = this.messageListeners.filter((candidate) => candidate !== listener);
+    } else {
+      this.errorListeners = this.errorListeners.filter((candidate) => candidate !== listener);
+    }
+  }
+
+  postMessage(message: unknown): void {
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      "type" in message &&
+      message.type === "execute"
+    ) {
+      queueMicrotask(() =>
+        this.emit({
+          type: "trace_batch",
+          sessionId: request.sessionId,
+          events: [event(1), event(2)]
+        })
+      );
+    }
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+
+  private emit(data: unknown): void {
+    const message = new MessageEvent("message", { data });
+    for (const listener of this.messageListeners) {
+      void listener(message);
+    }
+  }
+}
+
 describe("TraceSessionCollector", () => {
   it("preserves batch order and carries terminal metadata into a session", () => {
     const collector = new TraceSessionCollector(createCollectorOptions());
@@ -173,6 +236,23 @@ describe("TraceSessionCollector", () => {
     expect(session.events).toHaveLength(100);
     expect(session.events[0]?.step).toBe(1);
     expect(session.events.at(-1)?.step).toBe(100);
+    expect(session.status).toBe("timeout");
+    expect(session.terminationReason).toBe("hard_timeout");
+  });
+
+  it("keeps a partial received batch when the controller hard-times out", async () => {
+    let worker: PartialWorker | undefined;
+    const controller = new ExecutionController({
+      workerFactory: () => {
+        worker = new PartialWorker();
+        return worker;
+      }
+    });
+
+    const session = await controller.execute(request);
+
+    expect(worker?.terminated).toBe(true);
+    expect(session.events.map((item) => item.step)).toEqual([1, 2]);
     expect(session.status).toBe("timeout");
     expect(session.terminationReason).toBe("hard_timeout");
   });

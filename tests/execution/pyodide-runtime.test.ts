@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ExecutionRequest, ExecutionTerminalResult } from "../../src/shared/execution-types";
+import type { TraceEvent } from "../../src/shared/trace-types";
 import {
   buildExecutionScript,
   createPyodideRuntime,
@@ -33,6 +34,9 @@ describe("Pyodide runtime", () => {
     expect(script).toContain(`compile(`);
     expect(script).toContain(USER_CODE_FILENAME);
     expect(script).toContain("leetcode-runtime-prelude");
+    expect(script).toContain("leetcode-tracer");
+    expect(script).toContain("leetcode-runner");
+    expect(script).toContain("run_request");
     expect(script).toContain(JSON.stringify(request.sourceCode));
     expect(script).not.toContain(`${JSON.stringify(request.sourceCode)} +`);
   });
@@ -69,5 +73,56 @@ describe("Pyodide runtime", () => {
         stdout: ""
       })
     ]);
+  });
+
+  it("normalizes Python trace events and forwards them before the terminal result", async () => {
+    const batches: TraceEvent[][] = [];
+    const finished: ExecutionTerminalResult[] = [];
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => ({
+          status: "completed",
+          termination_reason: "normal_return",
+          stdout: "",
+          duration_ms: 12,
+          events: [
+            {
+              step: 1,
+              event: "line",
+              frame_id: 2,
+              parent_frame_id: null,
+              function: "add",
+              line: 3,
+              call_depth: 1,
+              locals: { value: { type: "int", value: "5" } },
+              stdout_delta: ""
+            }
+          ],
+          return_value: { type: "int", value: "5" }
+        })
+      }),
+      onTraceBatch: (_sessionId, events) => batches.push(events),
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute(request);
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toEqual([
+      {
+        step: 1,
+        event: "line",
+        frameId: 2,
+        parentFrameId: null,
+        function: "add",
+        line: 3,
+        callDepth: 1,
+        locals: { value: { type: "int", value: "5" } },
+        stdoutDelta: ""
+      }
+    ]);
+    expect(finished[0]).toEqual(
+      expect.objectContaining({ status: "completed", returnValue: { type: "int", value: "5" } })
+    );
   });
 });

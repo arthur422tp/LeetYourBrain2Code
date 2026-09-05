@@ -5,8 +5,10 @@ import type {
   ExecutionRequest,
   ExecutionTerminalResult
 } from "../shared/execution-types";
-import type { ValueSnapshot } from "../shared/trace-types";
+import type { TraceEvent, ValueSnapshot } from "../shared/trace-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
+import runnerSource from "./python/runner.py?raw";
+import tracerSource from "./python/tracer.py?raw";
 
 export const USER_CODE_FILENAME = "<leetcode-user-code>";
 const RUNTIME_PRELUDE_FILENAME = "<leetcode-runtime-prelude>";
@@ -25,6 +27,7 @@ export type PyodideLoader = (options: PyodideLoadOptions) => Promise<PyodideApi>
 export interface PyodideRuntimeOptions {
   indexURL?: string;
   loadPyodide?: PyodideLoader;
+  onTraceBatch?: (sessionId: string, events: TraceEvent[]) => void;
   onFinished?: (result: ExecutionTerminalResult) => void;
 }
 
@@ -41,29 +44,39 @@ function quotePython(value: string): string {
 
 export function buildExecutionScript(request: ExecutionRequest): string {
   return `
-import ast
-import contextlib
-import io
+import sys
+import types
 
-__lc_namespace = {}
+__lc_runtime_namespace = {}
 exec(compile(${quotePython(runtimePrelude)}, ${quotePython(
     RUNTIME_PRELUDE_FILENAME
-  )}, "exec"), __lc_namespace, __lc_namespace)
-__lc_arguments = [
-    ast.literal_eval(line)
-    for line in ${quotePython(request.rawTestcase)}.splitlines()
-    if line.strip()
-]
-exec(compile(${quotePython(request.sourceCode)}, ${quotePython(
-    USER_CODE_FILENAME
-  )}, "exec"), __lc_namespace, __lc_namespace)
-__lc_stdout = io.StringIO()
-with contextlib.redirect_stdout(__lc_stdout):
-    __lc_instance = __lc_namespace[${quotePython(request.entrypoint.className)}]()
-    __lc_return = getattr(__lc_instance, ${quotePython(
-      request.entrypoint.methodName
-    )})(*__lc_arguments)
-(__lc_return, __lc_stdout.getvalue())
+  )}, "exec"), __lc_runtime_namespace, __lc_runtime_namespace)
+
+__lc_tracer_module = types.ModuleType("tracer")
+exec(compile(${quotePython(tracerSource)}, "<leetcode-tracer>", "exec"), vars(__lc_tracer_module), vars(__lc_tracer_module))
+sys.modules["tracer"] = __lc_tracer_module
+
+__lc_runner_module = types.ModuleType("runner")
+exec(compile(${quotePython(runnerSource)}, "<leetcode-runner>", "exec"), vars(__lc_runner_module), vars(__lc_runner_module))
+
+__lc_runner_module.run_request(
+    ${quotePython(request.sourceCode)},
+    ${quotePython(request.rawTestcase)},
+    {
+        "class_name": ${quotePython(request.entrypoint.className)},
+        "method_name": ${quotePython(request.entrypoint.methodName)},
+        "parameter_count": ${request.entrypoint.parameterCount},
+    },
+    {
+        "max_trace_steps": ${request.limits.maxTraceSteps},
+        "max_container_items": ${request.limits.maxContainerItems},
+        "max_nesting_depth": ${request.limits.maxNestingDepth},
+        "max_snapshot_bytes": ${request.limits.maxSnapshotBytes},
+        "max_session_bytes": ${request.limits.maxSessionBytes},
+        "max_stdout_bytes": ${request.limits.maxStdoutBytes},
+    },
+    runtime_globals=__lc_runtime_namespace,
+)
 `;
 }
 
@@ -190,6 +203,169 @@ function errorResult(error: unknown, durationMs: number): ExecutionTerminalResul
   };
 }
 
+function isValueSnapshot(value: unknown): value is ValueSnapshot {
+  return isRecord(value) && typeof value.type === "string";
+}
+
+function normalizeException(value: unknown): ExceptionInfo | undefined {
+  if (!isRecord(value) || typeof value.type !== "string" || typeof value.message !== "string") {
+    return undefined;
+  }
+
+  const frameId = value.frame_id ?? value.frameId;
+  return {
+    type: value.type,
+    message: value.message,
+    line: typeof value.line === "number" ? value.line : null,
+    stack: Array.isArray(value.stack) ? value.stack.filter((item): item is string => typeof item === "string") : [],
+    frameId: typeof frameId === "number" ? frameId : null
+  };
+}
+
+export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const eventName = value.event;
+  if (
+    eventName !== "call" &&
+    eventName !== "line" &&
+    eventName !== "return" &&
+    eventName !== "exception"
+  ) {
+    return null;
+  }
+  if (
+    typeof value.step !== "number" ||
+    typeof value.frame_id !== "number" ||
+    typeof value.function !== "string" ||
+    typeof value.call_depth !== "number" ||
+    !isRecord(value.locals) ||
+    typeof value.stdout_delta !== "string"
+  ) {
+    return null;
+  }
+
+  const eventPayload = isRecord(value.event_payload) ? value.event_payload : undefined;
+  let normalizedPayload: TraceEvent["eventPayload"];
+  if (eventName === "return" && eventPayload && "return_value" in eventPayload) {
+    normalizedPayload = {
+      type: "return",
+      value: isValueSnapshot(eventPayload.return_value) ? eventPayload.return_value : null
+    };
+  } else if (eventName === "exception" && eventPayload) {
+    const exception = normalizeException(eventPayload.exception);
+    if (exception) {
+      normalizedPayload = { type: "exception", exception };
+    }
+  }
+
+  const parentFrameId = value.parent_frame_id ?? value.parentFrameId;
+  return {
+    step: value.step,
+    event: eventName,
+    frameId: value.frame_id,
+    parentFrameId: typeof parentFrameId === "number" ? parentFrameId : null,
+    function: value.function,
+    line: typeof value.line === "number" ? value.line : null,
+    callDepth: value.call_depth,
+    locals: value.locals as Record<string, ValueSnapshot>,
+    stdoutDelta: value.stdout_delta,
+    ...(normalizedPayload ? { eventPayload: normalizedPayload } : {})
+  };
+}
+
+function normalizePythonExecutionResult(
+  value: unknown,
+  durationMs: number
+): { result: ExecutionTerminalResult; events: TraceEvent[] } {
+  if (Array.isArray(value)) {
+    const [returnValue, stdout] = value;
+    return {
+      result: {
+        status: "completed",
+        terminationReason: "normal_return",
+        stdout: typeof stdout === "string" ? stdout : String(stdout ?? ""),
+        durationMs,
+        returnValue: toValueSnapshot(returnValue)
+      },
+      events: []
+    };
+  }
+
+  if (!isRecord(value)) {
+    return {
+      result: {
+        status: "internal_error",
+        terminationReason: "tracer_internal_error",
+        stdout: "",
+        durationMs,
+        exception: {
+          type: "RuntimeProtocolError",
+          message: "Python runner returned a non-object result",
+          line: null,
+          stack: [],
+          frameId: null
+        }
+      },
+      events: []
+    };
+  }
+
+  const events = Array.isArray(value.events)
+    ? value.events
+        .map((event) => normalizePythonTraceEvent(event))
+        .filter((event): event is TraceEvent => event !== null)
+    : [];
+  const status = value.status;
+  const terminationReason = value.termination_reason;
+  const terminalStatuses = new Set([
+    "completed",
+    "exception",
+    "trace_limit",
+    "timeout",
+    "parse_error",
+    "input_error",
+    "internal_error"
+  ]);
+  const allowedReasons = new Set([
+    "normal_return",
+    "runtime_exception",
+    "step_limit",
+    "trace_byte_limit",
+    "stdout_limit",
+    "hard_timeout",
+    "syntax_error",
+    "unsupported_testcase_format",
+    "entrypoint_resolution_failed",
+    "worker_initialization_failed",
+    "pyodide_initialization_failed",
+    "tracer_internal_error"
+  ]);
+  const normalizedStatus =
+    typeof status === "string" && terminalStatuses.has(status)
+      ? (status as ExecutionTerminalResult["status"])
+      : "internal_error";
+  const normalizedReason =
+    typeof terminationReason === "string" && allowedReasons.has(terminationReason)
+    ? (terminationReason as ExecutionTerminalResult["terminationReason"])
+    : "tracer_internal_error";
+  const returnValue = value.return_value;
+  const exception = normalizeException(value.exception);
+
+  return {
+    events,
+    result: {
+      status: normalizedStatus,
+      terminationReason: normalizedReason,
+      stdout: typeof value.stdout === "string" ? value.stdout : "",
+      durationMs: typeof value.duration_ms === "number" ? value.duration_ms : durationMs,
+      ...(isValueSnapshot(returnValue) ? { returnValue } : {}),
+      ...(exception ? { exception } : {})
+    }
+  };
+}
+
 export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): PyodideRuntime {
   const loadPyodide = options.loadPyodide ?? (bundledLoadPyodide as PyodideLoader);
   const indexURL = options.indexURL ?? DEFAULT_PYODIDE_INDEX_URL;
@@ -219,15 +395,15 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
       const startedAt = Date.now();
       try {
         const rawResult = await pyodide.runPythonAsync(buildExecutionScript(request));
-        const result = unwrapPyodideValue(rawResult);
-        const [returnValue, stdout] = Array.isArray(result) ? result : [result, ""];
-        options.onFinished?.({
-          status: "completed",
-          terminationReason: "normal_return",
-          stdout: typeof stdout === "string" ? stdout : String(stdout ?? ""),
-          durationMs: Date.now() - startedAt,
-          returnValue: toValueSnapshot(returnValue)
-        });
+        const normalized = normalizePythonExecutionResult(
+          unwrapPyodideValue(rawResult),
+          Date.now() - startedAt
+        );
+        const batchSize = 50;
+        for (let index = 0; index < normalized.events.length; index += batchSize) {
+          options.onTraceBatch?.(request.sessionId, normalized.events.slice(index, index + batchSize));
+        }
+        options.onFinished?.(normalized.result);
       } catch (error) {
         options.onFinished?.(errorResult(error, Date.now() - startedAt));
       }

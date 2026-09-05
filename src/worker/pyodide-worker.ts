@@ -4,7 +4,8 @@ import {
 } from "../shared/worker-protocol";
 import {
   createPyodideRuntime,
-  type PyodideRuntime
+  type PyodideRuntime,
+  type PyodideRuntimeOptions
 } from "./pyodide-runtime";
 
 export interface WorkerScopeLike {
@@ -19,8 +20,34 @@ export interface WorkerScopeLike {
   postMessage(message: WorkerOutboundMessage): void;
 }
 
+export type WorkerRuntimeFactory = (options: PyodideRuntimeOptions) => PyodideRuntime;
+export type ActiveSessionIdProvider = () => string | undefined;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function createWorkerRuntime(
+  scope: WorkerScopeLike,
+  runtimeFactory: WorkerRuntimeFactory = createPyodideRuntime,
+  activeSessionId: ActiveSessionIdProvider = () => undefined
+): PyodideRuntime {
+  return runtimeFactory({
+    onTraceBatch: (sessionId, events) => {
+      scope.postMessage({ type: "trace_batch", sessionId, events });
+    },
+    onFinished: (result) => {
+      const sessionId = activeSessionId();
+      if (!sessionId) {
+        return;
+      }
+      scope.postMessage({
+        type: "execution_finished",
+        sessionId,
+        result
+      });
+    }
+  });
 }
 
 export function installPyodideWorker(
@@ -31,19 +58,7 @@ export function installPyodideWorker(
   let initialized = false;
 
   const runtime =
-    suppliedRuntime ??
-    createPyodideRuntime({
-      onFinished: (result) => {
-        if (!activeSessionId) {
-          return;
-        }
-        scope.postMessage({
-          type: "execution_finished",
-          sessionId: activeSessionId,
-          result
-        });
-      }
-    });
+    suppliedRuntime ?? createWorkerRuntime(scope, createPyodideRuntime, () => activeSessionId);
 
   const initialization = (async (): Promise<void> => {
     try {

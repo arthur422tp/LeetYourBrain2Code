@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { ExecutionRequest } from "../../src/shared/execution-types";
-import type { PyodideRuntime } from "../../src/worker/pyodide-runtime";
+import type {
+  ExecutionTerminalResult
+} from "../../src/shared/execution-types";
+import type { TraceEvent } from "../../src/shared/trace-types";
+import type {
+  PyodideRuntime,
+  PyodideRuntimeOptions
+} from "../../src/worker/pyodide-runtime";
 import {
+  createWorkerRuntime,
   installPyodideWorker,
   type WorkerScopeLike
 } from "../../src/worker/pyodide-worker";
@@ -73,5 +81,54 @@ describe("Pyodide worker", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(posted).toEqual([{ type: "worker_error", message: "cannot initialize" }]);
+  });
+
+  it("forwards runtime trace batches and terminal results to the worker scope", () => {
+    const posted: unknown[] = [];
+    const scope: WorkerScopeLike = {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      postMessage: (message) => {
+        posted.push(message);
+      }
+    };
+    let callbacks: PyodideRuntimeOptions | undefined;
+    const fakeRuntime: PyodideRuntime = {
+      initialize: async () => undefined,
+      execute: async () => undefined
+    };
+    const trace: TraceEvent = {
+      step: 1,
+      event: "line",
+      frameId: 1,
+      parentFrameId: null,
+      function: "one",
+      line: 1,
+      callDepth: 1,
+      locals: {},
+      stdoutDelta: ""
+    };
+    const result: ExecutionTerminalResult = {
+      status: "completed",
+      terminationReason: "normal_return",
+      stdout: "",
+      durationMs: 1
+    };
+
+    createWorkerRuntime(
+      scope,
+      (options) => {
+        callbacks = options;
+        return fakeRuntime;
+      },
+      () => "worker-session"
+    );
+    callbacks?.onTraceBatch?.("worker-session", [trace]);
+    callbacks?.onFinished?.(result);
+
+    expect(posted).toEqual([
+      { type: "trace_batch", sessionId: "worker-session", events: [trace] },
+      { type: "execution_finished", sessionId: "worker-session", result }
+    ]);
   });
 });

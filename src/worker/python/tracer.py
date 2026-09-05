@@ -5,6 +5,7 @@ import traceback
 
 
 USER_CODE_FILENAME = "<leetcode-user-code>"
+TRACE_BATCH_MAX_BYTES = 256_000
 
 
 class TraceLimitExceeded(Exception):
@@ -158,6 +159,7 @@ class TraceCollector:
         self.emit_batch = emit_batch
         self.events = []
         self.pending_events = []
+        self.pending_bytes = 2
         self.step_count = 0
         self.session_bytes = 0
         self.frame_ids = {}
@@ -259,17 +261,25 @@ class TraceCollector:
         if self.session_bytes + event_size > self._max_session_bytes():
             raise TraceLimitExceeded("trace_byte_limit")
 
+        if self.pending_events and self.pending_bytes + 1 + event_size > TRACE_BATCH_MAX_BYTES:
+            self.flush()
+
         self.session_bytes += event_size
         self.events.append(event)
+        separator_bytes = 1 if self.pending_events else 0
         self.pending_events.append(event)
-        if len(self.pending_events) >= 50:
+        self.pending_bytes += separator_bytes + event_size
+        if len(self.pending_events) >= 50 or self.pending_bytes >= TRACE_BATCH_MAX_BYTES:
             self.flush()
 
     def flush(self):
-        if not self.pending_events or self.emit_batch is None:
+        if not self.pending_events:
             return
         events = self.pending_events
         self.pending_events = []
+        self.pending_bytes = 2
+        if self.emit_batch is None:
+            return
         try:
             self.emit_batch(
                 self.session_id,

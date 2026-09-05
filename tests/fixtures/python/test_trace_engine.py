@@ -196,3 +196,29 @@ def test_trace_events_are_streamed_in_bounded_batches_during_execution():
     assert len(emitted[0][1]) == 50
     streamed_steps = [event["step"] for _, events in emitted for event in events]
     assert streamed_steps == list(range(1, len(streamed_steps) + 1))
+
+
+def test_trace_stream_flushes_large_batches_before_fifty_events():
+    emitted = []
+
+    def emit_batch(session_id, events_json):
+        emitted.append((session_id, json.loads(events_json)))
+
+    result = run_request(
+        """class Solution:
+    def large_trace(self):
+        payload = "x" * 20000
+        for index in range(30):
+            payload = payload
+        return len(payload)
+""",
+        "",
+        {"class_name": "Solution", "method_name": "large_trace", "parameter_count": 0},
+        {**LIMITS, "max_session_bytes": 2_000_000, "max_snapshot_bytes": 250_000},
+        session_id="large-stream-session",
+        emit_batch=emit_batch,
+    )
+
+    assert result["status"] == "completed"
+    assert len(emitted) >= 2
+    assert len(emitted[0][1]) < 50

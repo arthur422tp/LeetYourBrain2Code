@@ -1,0 +1,249 @@
+import type { EntryPoint } from "../shared/execution-types";
+
+export type EntrypointResolution =
+  | { ok: true; entrypoint: EntryPoint }
+  | { ok: false; reason: "entrypoint_resolution_failed" };
+
+interface MethodCandidate {
+  name: string;
+  parameterSource: string;
+}
+
+function indentationWidth(line: string): number {
+  let width = 0;
+  for (const character of line) {
+    if (character === " ") {
+      width += 1;
+    } else if (character === "\t") {
+      width += 4;
+    } else {
+      break;
+    }
+  }
+  return width;
+}
+
+function findClosingParenthesis(source: string, openingIndex: number): number {
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (let index = openingIndex; index < source.length; index += 1) {
+    const character = source[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function splitTopLevel(source: string, delimiter: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let roundDepth = 0;
+  let squareDepth = 0;
+  let curlyDepth = 0;
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === "(") {
+      roundDepth += 1;
+    } else if (character === ")") {
+      roundDepth -= 1;
+    } else if (character === "[") {
+      squareDepth += 1;
+    } else if (character === "]") {
+      squareDepth -= 1;
+    } else if (character === "{") {
+      curlyDepth += 1;
+    } else if (character === "}") {
+      curlyDepth -= 1;
+    } else if (
+      character === delimiter &&
+      roundDepth === 0 &&
+      squareDepth === 0 &&
+      curlyDepth === 0
+    ) {
+      parts.push(source.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  parts.push(source.slice(start));
+  return parts;
+}
+
+function findTopLevelEquals(source: string): number {
+  let roundDepth = 0;
+  let squareDepth = 0;
+  let curlyDepth = 0;
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === "(") {
+      roundDepth += 1;
+    } else if (character === ")") {
+      roundDepth -= 1;
+    } else if (character === "[") {
+      squareDepth += 1;
+    } else if (character === "]") {
+      squareDepth -= 1;
+    } else if (character === "{") {
+      curlyDepth += 1;
+    } else if (character === "}") {
+      curlyDepth -= 1;
+    } else if (
+      character === "=" &&
+      roundDepth === 0 &&
+      squareDepth === 0 &&
+      curlyDepth === 0
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function countParameters(parameterSource: string): number {
+  const parameters = splitTopLevel(parameterSource, ",")
+    .map((parameter) => parameter.trim())
+    .filter((parameter) => parameter.length > 0)
+    .filter((parameter) => parameter !== "/" && parameter !== "*");
+
+  return parameters.filter((parameter) => {
+    const equalsIndex = findTopLevelEquals(parameter);
+    const withoutDefault = equalsIndex < 0 ? parameter : parameter.slice(0, equalsIndex);
+    const name = withoutDefault.replace(/^\*+/, "").split(":", 1)[0].trim();
+    return name !== "self" && name !== "cls" && name.length > 0;
+  }).length;
+}
+
+function findSolutionClass(lines: string[]): { indent: number; start: number } | null {
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\s*class\s+Solution\b[^:]*:\s*(?:#.*)?$/.test(lines[index])) {
+      return { indent: indentationWidth(lines[index]), start: index + 1 };
+    }
+  }
+  return null;
+}
+
+function findMethods(lines: string[], classInfo: { indent: number; start: number }): MethodCandidate[] {
+  const methods: MethodCandidate[] = [];
+  let methodIndent: number | null = null;
+
+  for (let index = classInfo.start; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim().length > 0 && indentationWidth(line) <= classInfo.indent) {
+      break;
+    }
+
+    const methodMatch = line.match(/^(\s*)def\s+([A-Za-z_]\w*)\s*\(/);
+    if (!methodMatch) {
+      continue;
+    }
+
+    const currentIndent = indentationWidth(methodMatch[1]);
+    if (methodIndent === null) {
+      methodIndent = currentIndent;
+    }
+    if (currentIndent !== methodIndent) {
+      continue;
+    }
+
+    const openingIndex = line.indexOf("(", methodMatch.index ?? 0);
+    let signature = line.slice(openingIndex);
+    let closingIndex = findClosingParenthesis(signature, 0);
+    let nextLine = index + 1;
+    while (closingIndex < 0 && nextLine < lines.length) {
+      signature += `\n${lines[nextLine]}`;
+      closingIndex = findClosingParenthesis(signature, 0);
+      nextLine += 1;
+    }
+
+    if (closingIndex < 0) {
+      continue;
+    }
+
+    methods.push({
+      name: methodMatch[2],
+      parameterSource: signature.slice(1, closingIndex)
+    });
+  }
+
+  return methods;
+}
+
+export function resolveEntrypoint(sourceCode: string): EntrypointResolution {
+  const lines = sourceCode.replace(/\r\n?/g, "\n").split("\n");
+  const classInfo = findSolutionClass(lines);
+  if (!classInfo) {
+    return { ok: false, reason: "entrypoint_resolution_failed" };
+  }
+
+  const candidates = findMethods(lines, classInfo).filter(
+    (method) => method.name !== "__init__" && !method.name.startsWith("_")
+  );
+  if (candidates.length !== 1) {
+    return { ok: false, reason: "entrypoint_resolution_failed" };
+  }
+
+  const [candidate] = candidates;
+  return {
+    ok: true,
+    entrypoint: {
+      className: "Solution",
+      methodName: candidate.name,
+      parameterCount: countParameters(candidate.parameterSource)
+    }
+  };
+}

@@ -13,7 +13,11 @@ export interface SidePanelDependencies {
 
 const SAMPLE_SOURCE = `class Solution:
     def twoSum(self, numbers, target):
-        return numbers[0] + numbers[1]
+        for index, value in enumerate(numbers):
+            for other in range(index + 1, len(numbers)):
+                if value + numbers[other] == target:
+                    return [index, other]
+        return []
 `;
 
 const SAMPLE_TESTCASE = `[2, 7]

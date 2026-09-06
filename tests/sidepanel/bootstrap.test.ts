@@ -5,10 +5,14 @@ import type { ExecutionRequest } from "../../src/shared/execution-types";
 import type { TraceSession } from "../../src/shared/trace-types";
 import type { LeetCodeSnapshot } from "../../src/content/leetcode-adapter";
 import {
-  createResilientSnapshotProvider,
   renderSidePanel,
   type SidePanelController
 } from "../../src/sidepanel/bootstrap";
+import type {
+  ActiveTabSource,
+  ActiveTabSourceOptions,
+  ActiveTabSnapshot
+} from "../../src/sidepanel/active-tab-source";
 
 function snapshot(overrides: Partial<LeetCodeSnapshot> = {}): LeetCodeSnapshot {
   return {
@@ -36,87 +40,36 @@ function completedSession(request: ExecutionRequest): TraceSession {
   };
 }
 
+function fakeActiveTabSourceFactory() {
+  let callbacks!: ActiveTabSourceOptions;
+  const refresh = vi.fn<() => Promise<ActiveTabSnapshot | null>>()
+    .mockResolvedValue(null);
+  const dispose = vi.fn();
+  const start = vi.fn(async () => undefined);
+
+  const factory = vi.fn((options: ActiveTabSourceOptions): ActiveTabSource => {
+    callbacks = options;
+    return { start, refresh, dispose };
+  });
+
+  return {
+    factory,
+    start,
+    refresh,
+    dispose,
+    callbacks: () => callbacks
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe("renderSidePanel", () => {
-  it("reconnects the LeetCode content script after a missing receiver error", async () => {
-    const current = snapshot();
-    const request = vi.fn<() => Promise<LeetCodeSnapshot>>()
-      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
-      .mockResolvedValueOnce(current);
-    const reconnect = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-
-    const provider = createResilientSnapshotProvider(request, reconnect);
-
-    await expect(provider()).resolves.toEqual(current);
-    expect(reconnect).toHaveBeenCalledTimes(1);
-    expect(request).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not reconnect for snapshot errors unrelated to a missing receiver", async () => {
-    const request = vi.fn<() => Promise<LeetCodeSnapshot>>()
-      .mockRejectedValue(new Error("No valid LeetCode snapshot was returned"));
-    const reconnect = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-
-    const provider = createResilientSnapshotProvider(request, reconnect);
-
-    await expect(provider()).rejects.toThrow("No valid LeetCode snapshot was returned");
-    expect(reconnect).not.toHaveBeenCalled();
-    expect(request).toHaveBeenCalledTimes(1);
-  });
-
-  it("requests the snapshot from the active LeetCode tab", async () => {
-    const root = document.createElement("main");
-    const current = snapshot();
-    const sendMessageToRuntime = vi.fn(
-      (_message: unknown, callback: (response: unknown) => void) => callback(undefined)
-    );
-    const sendMessageToTab = vi.fn(
-      (_tabId: number, _message: unknown, callback: (response: unknown) => void) =>
-        callback({ ok: true, snapshot: current })
-    );
-    const chromeApi = {
-      runtime: {
-        lastError: undefined,
-        sendMessage: sendMessageToRuntime,
-        onMessage: {
-          addListener: vi.fn(),
-          removeListener: vi.fn()
-        }
-      },
-      tabs: {
-        query: vi.fn(
-          (_query: unknown, callback: (tabs: Array<{ id: number; url: string }>) => void) =>
-            callback([{ id: 42, url: "https://leetcode.com/problems/one/" }])
-        ),
-        sendMessage: sendMessageToTab
-      },
-      scripting: {
-        executeScript: vi.fn().mockResolvedValue([])
-      }
-    } as unknown as typeof chrome;
-
-    vi.stubGlobal("chrome", chromeApi);
-    try {
-      const handle = renderSidePanel(root, {
-        controller: { execute: vi.fn(async (request) => completedSession(request)) },
-        liveDebounceMs: 0
-      });
-
-      await vi.waitFor(() =>
-        expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value)
-          .toBe(current.code)
-      );
-      expect(sendMessageToRuntime).not.toHaveBeenCalled();
-      expect(sendMessageToTab).toHaveBeenCalledWith(
-        42,
-        { type: "request_leetcode_snapshot" },
-        expect.any(Function)
-      );
-      handle.dispose();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
   it("renders the initial live status", () => {
     const root = document.createElement("main");
     const controller: SidePanelController = { execute: vi.fn() };
@@ -176,16 +129,19 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
-  it("automatically visualizes the initial synced Python snapshot", async () => {
+  it("visualizes the canonical snapshot emitted by the active tab source", async () => {
     const root = document.createElement("main");
-    const current = snapshot();
+    const source = fakeActiveTabSourceFactory();
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
-
     const handle = renderSidePanel(root, {
       controller: { execute },
-      snapshotProvider: async () => current,
+      activeTabSourceFactory: source.factory,
       liveDebounceMs: 0
     });
+
+    expect(source.start).toHaveBeenCalledTimes(1);
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
 
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: synced");
@@ -193,27 +149,26 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
-  it("automatically executes a newer snapshot from the subscription", async () => {
+  it("automatically executes a newer snapshot from the active tab source", async () => {
     const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
     const first = snapshot();
     const second = snapshot({
       code: "class Solution:\n    def one(self, value):\n        return value + 1\n"
     });
-    let onSnapshot: ((next: LeetCodeSnapshot) => void) | undefined;
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
 
     const handle = renderSidePanel(root, {
       controller: { execute },
-      snapshotProvider: async () => first,
-      snapshotSubscription: (listener) => {
-        onSnapshot = listener;
-        return () => undefined;
-      },
+      activeTabSourceFactory: source.factory,
       liveDebounceMs: 0
     });
 
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: first });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    onSnapshot?.(second);
+
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: second });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(execute.mock.calls[1]?.[0].sourceCode).toBe(second.code);
     handle.dispose();
@@ -221,15 +176,18 @@ describe("renderSidePanel", () => {
 
   it("automatically executes the selected testcase case", async () => {
     const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
     const current = snapshot({ testcase: "7\n8\n9" });
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
 
     const handle = renderSidePanel(root, {
       controller: { execute },
-      snapshotProvider: async () => current,
+      activeTabSourceFactory: source.factory,
       liveDebounceMs: 0
     });
 
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: current });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(execute.mock.calls[0]?.[0].rawTestcase).toBe("7");
 
@@ -244,24 +202,26 @@ describe("renderSidePanel", () => {
 
   it("keeps the previous visualization while the latest code is incomplete", async () => {
     const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
     const initial = snapshot();
-    let onSnapshot: ((next: LeetCodeSnapshot) => void) | undefined;
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
 
     const handle = renderSidePanel(root, {
       controller: { execute },
-      snapshotProvider: async () => initial,
-      snapshotSubscription: (listener) => {
-        onSnapshot = listener;
-        return () => undefined;
-      },
+      activeTabSourceFactory: source.factory,
       liveDebounceMs: 0
     });
 
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: initial });
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
-    onSnapshot?.({
-      ...initial,
-      code: "class Solution:\n    def one(self, value):"
+
+    source.callbacks().onSnapshot({
+      tabId: 11,
+      snapshot: {
+        ...initial,
+        code: "class Solution:\n    def one(self, value):"
+      }
     });
 
     await vi.waitFor(() =>
@@ -282,6 +242,7 @@ describe("renderSidePanel", () => {
     expectedText
   ) => {
     const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
     const current = snapshot();
     const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({
       ...completedSession(request),
@@ -291,10 +252,12 @@ describe("renderSidePanel", () => {
 
     const handle = renderSidePanel(root, {
       controller: { execute },
-      snapshotProvider: async () => current,
+      activeTabSourceFactory: source.factory,
       liveDebounceMs: 0
     });
 
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: current });
     await vi.waitFor(() =>
       expect(root.querySelector("#runtime-status")?.textContent).toBe(expectedText)
     );
@@ -302,46 +265,138 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
-  it("Run now fetches the latest snapshot and bypasses the debounce", async () => {
+  it("prevents the old tab execution from overwriting a newly owned tab", async () => {
     const root = document.createElement("main");
-    const initial = snapshot();
-    const latest = snapshot({ testcase: "8" });
-    const snapshotProvider = vi.fn<() => Promise<LeetCodeSnapshot>>()
-      .mockResolvedValueOnce(initial)
-      .mockResolvedValueOnce(latest);
-    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
-
+    const source = fakeActiveTabSourceFactory();
+    const first = deferred<TraceSession>();
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      requests.push(request);
+      return requests.length === 1
+        ? first.promise
+        : Promise.resolve(completedSession(request));
+    });
     const handle = renderSidePanel(root, {
       controller: { execute },
-      snapshotProvider,
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    const binary = snapshot({
+      code: "class Solution:\n    def search(self, value):\n        return value\n",
+      metadata: { slug: "binary-search", title: "Binary Search" }
+    });
+    const twoSum = snapshot({
+      code: "class Solution:\n    def twoSum(self, value):\n        return value\n",
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: binary });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    source.callbacks().onOwnershipInvalidated();
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 22 });
+    source.callbacks().onSnapshot({ tabId: 22, snapshot: twoSum });
+
+    first.resolve(completedSession(requests[0]!));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(twoSum.code)
+    );
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(twoSum.code);
+    handle.dispose();
+  });
+
+  it("pauses without clearing the last visualization and resumes on the next LeetCode owner", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.callbacks().onOwnershipInvalidated();
+    source.callbacks().onStateChange({ kind: "paused" });
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: paused · No active LeetCode tab");
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const resumed = snapshot({ testcase: "8" });
+    source.callbacks().onOwnershipInvalidated();
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 22 });
+    source.callbacks().onSnapshot({ tabId: 22, snapshot: resumed });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute.mock.calls[1]?.[0].rawTestcase).toBe("8");
+    handle.dispose();
+  });
+
+  it("Run now refreshes the exact owned tab snapshot and executes it immediately", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
       liveDebounceMs: 1_000
     });
 
-    await vi.waitFor(() =>
-      expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(initial.code)
-    );
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot({ testcase: "7" }) });
+    source.refresh.mockResolvedValue({
+      tabId: 11,
+      snapshot: snapshot({ testcase: "8" })
+    });
+
     root.querySelector<HTMLButtonElement>("#run")?.click();
 
+    await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    expect(snapshotProvider).toHaveBeenCalledTimes(2);
     expect(execute.mock.calls[0]?.[0].rawTestcase).toBe("8");
     handle.dispose();
   });
 
-  it("disposes the scheduler subscription and persistent controller", () => {
+  it("shows a current active-source error without clearing the existing visualization", async () => {
     const root = document.createElement("main");
-    const unsubscribe = vi.fn();
-    const dispose = vi.fn();
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
     const handle = renderSidePanel(root, {
-      controller: {
-        execute: vi.fn(),
-        dispose
-      },
-      snapshotSubscription: () => unsubscribe
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.callbacks().onError(new Error("No valid LeetCode snapshot was returned"));
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: No valid LeetCode snapshot was returned");
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    handle.dispose();
+  });
+
+  it("disposes the active tab source and persistent controller", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const controllerDispose = vi.fn();
+    const handle = renderSidePanel(root, {
+      controller: { execute: vi.fn(), dispose: controllerDispose },
+      activeTabSourceFactory: source.factory
     });
 
     handle.dispose();
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
-    expect(dispose).toHaveBeenCalledTimes(1);
+
+    expect(source.dispose).toHaveBeenCalledTimes(1);
+    expect(controllerDispose).toHaveBeenCalledTimes(1);
   });
 });

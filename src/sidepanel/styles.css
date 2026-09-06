@@ -95,6 +95,10 @@ button.is-primary:hover:not(:disabled) {
   color: #64748b;
 }
 
+#runtime-status[data-live-status="paused"] {
+  color: #64748b;
+}
+
 #runtime-status[data-live-status="runtime_error"],
 #runtime-status[data-live-status="timeout"] {
   color: #b45309;

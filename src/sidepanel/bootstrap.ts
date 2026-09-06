@@ -1,16 +1,17 @@
 import type { ExecutionRequest } from "../shared/execution-types";
 import type { TraceSession } from "../shared/trace-types";
-import {
-  LEETCODE_CONTENT_MESSAGE_TYPES,
-  validateSnapshot,
-  type LeetCodeSnapshot
-} from "../content/leetcode-adapter";
+import type { LeetCodeSnapshot } from "../content/leetcode-adapter";
 import {
   LiveExecutionScheduler,
   type LiveStatus
 } from "../execution/live-execution-scheduler";
 import { getTestcaseCases } from "../execution/testcase-selection";
 import { ExecutionController } from "../execution/execution-controller";
+import {
+  createActiveTabSource,
+  type ActiveTabSource,
+  type ActiveTabSourceOptions
+} from "./active-tab-source";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
 import "./styles.css";
 
@@ -19,14 +20,13 @@ export interface SidePanelController {
   dispose?(): void;
 }
 
-export type SnapshotSubscription = (
-  listener: (snapshot: LeetCodeSnapshot) => void
-) => () => void;
+export type ActiveTabSourceFactory = (
+  options: ActiveTabSourceOptions
+) => ActiveTabSource;
 
 export interface SidePanelDependencies {
   controller?: SidePanelController;
-  snapshotProvider?: () => Promise<LeetCodeSnapshot>;
-  snapshotSubscription?: SnapshotSubscription;
+  activeTabSourceFactory?: ActiveTabSourceFactory;
   liveDebounceMs?: number;
 }
 
@@ -64,166 +64,15 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isMissingReceiverError(error: unknown): boolean {
-  const message = errorText(error);
-  return message.includes("Receiving end does not exist") ||
-    message.includes("Could not establish connection");
-}
-
-export function createResilientSnapshotProvider(
-  request: () => Promise<LeetCodeSnapshot>,
-  reconnect: () => Promise<void>
-): () => Promise<LeetCodeSnapshot> {
-  return async () => {
-    try {
-      return await request();
-    } catch (error: unknown) {
-      if (!isMissingReceiverError(error)) {
-        throw error;
-      }
-      await reconnect();
-      return request();
-    }
-  };
-}
-
-function isLeetCodeUrl(url: string | undefined): boolean {
-  if (!url) {
-    return false;
-  }
-  try {
-    return new URL(url).origin === "https://leetcode.com";
-  } catch {
-    return false;
-  }
-}
-
-function queryActiveLeetCodeTab(): Promise<chrome.tabs.Tab> {
-  if (typeof chrome === "undefined" || typeof chrome.tabs?.query !== "function") {
-    return Promise.reject(new Error("Chrome tab access is unavailable"));
-  }
-
-  return new Promise((resolve, reject) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        reject(new Error(runtimeError.message));
-        return;
-      }
-
-      const tab = tabs.find(
-        (candidate) => isLeetCodeUrl(candidate.url) && candidate.id !== undefined
-      );
-      if (!tab) {
-        reject(new Error("No active LeetCode tab was found"));
-        return;
-      }
-      resolve(tab);
-    });
-  });
-}
-
-async function injectLeetCodeContentScripts(): Promise<void> {
-  if (
-    typeof chrome === "undefined" ||
-    typeof chrome.scripting?.executeScript !== "function"
-  ) {
-    throw new Error("Chrome script injection is unavailable");
-  }
-
-  const tab = await queryActiveLeetCodeTab();
-  const target = { tabId: tab.id! };
-  await chrome.scripting.executeScript({
-    target,
-    files: ["page-bridge/leetcode-main-world.js"],
-    world: "MAIN"
-  });
-  await chrome.scripting.executeScript({
-    target,
-    files: ["content/leetcode-adapter.js"]
-  });
-}
-
-function requestSnapshotFromActiveLeetCodeTab(): Promise<LeetCodeSnapshot> {
-  if (typeof chrome === "undefined" || typeof chrome.tabs?.sendMessage !== "function") {
-    return Promise.reject(new Error("Chrome tab messaging is unavailable"));
-  }
-
-  return queryActiveLeetCodeTab().then(
-    (tab) => new Promise<LeetCodeSnapshot>((resolve, reject) => {
-      chrome.tabs.sendMessage(
-        tab.id!,
-        { type: LEETCODE_CONTENT_MESSAGE_TYPES.requestSnapshot },
-        (response: unknown) => {
-          const runtimeError = chrome.runtime.lastError;
-          if (runtimeError) {
-            reject(new Error(runtimeError.message));
-            return;
-          }
-
-          if (
-            typeof response !== "object" ||
-            response === null ||
-            !("ok" in response) ||
-            response.ok !== true ||
-            !("snapshot" in response) ||
-            !validateSnapshot(response.snapshot)
-          ) {
-            reject(new Error("No valid LeetCode snapshot was returned"));
-            return;
-          }
-          resolve(response.snapshot);
-        }
-      );
-    })
-  );
-}
-
-function snapshotErrorText(error: unknown): string {
-  if (isMissingReceiverError(error)) {
-    return "Unable to connect to the LeetCode page. Refresh the LeetCode tab and reopen the side panel.";
-  }
-  return errorText(error);
-}
-
-function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | undefined {
-  if (typeof chrome === "undefined" || typeof chrome.tabs?.sendMessage !== "function") {
-    return undefined;
-  }
-
-  return createResilientSnapshotProvider(
-    requestSnapshotFromActiveLeetCodeTab,
-    injectLeetCodeContentScripts
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function createDefaultSnapshotSubscription(): SnapshotSubscription | undefined {
-  if (
-    typeof chrome === "undefined" ||
-    typeof chrome.runtime?.onMessage?.addListener !== "function"
-  ) {
-    return undefined;
-  }
-
-  return (listener) => {
-    const onMessage = (message: unknown): void => {
-      if (
-        !isRecord(message) ||
-        message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.snapshotUpdated ||
-        !validateSnapshot(message.snapshot)
-      ) {
-        return;
-      }
-      listener(message.snapshot);
-    };
-
-    chrome.runtime.onMessage.addListener(onMessage);
-    return () => chrome.runtime.onMessage.removeListener(onMessage);
-  };
+function hasChromeTabSource(): boolean {
+  return typeof chrome !== "undefined" &&
+    typeof chrome.tabs?.query === "function" &&
+    typeof chrome.tabs?.get === "function" &&
+    typeof chrome.tabs?.sendMessage === "function" &&
+    typeof chrome.tabs?.onActivated?.addListener === "function" &&
+    typeof chrome.tabs?.onUpdated?.addListener === "function" &&
+    typeof chrome.runtime?.onMessage?.addListener === "function" &&
+    typeof chrome.scripting?.executeScript === "function";
 }
 
 export function renderSidePanel(
@@ -231,10 +80,10 @@ export function renderSidePanel(
   dependencies: SidePanelDependencies = {}
 ): SidePanelHandle {
   const controller = dependencies.controller ?? createDefaultController();
-  const snapshotProvider =
-    dependencies.snapshotProvider ?? createDefaultSnapshotProvider();
-  const snapshotSubscription =
-    dependencies.snapshotSubscription ?? createDefaultSnapshotSubscription();
+  const activeTabSourceFactory =
+    dependencies.activeTabSourceFactory ??
+    (hasChromeTabSource() ? ((options: ActiveTabSourceOptions) => createActiveTabSource(options)) : undefined);
+  const hasActiveTabSource = activeTabSourceFactory !== undefined;
 
   const app = document.createElement("main");
   app.className = "app-shell";
@@ -269,7 +118,7 @@ export function renderSidePanel(
   source.id = "source-code";
   source.rows = 14;
   source.readOnly = true;
-  source.value = snapshotProvider ? "" : SAMPLE_SOURCE;
+  source.value = hasActiveTabSource ? "" : SAMPLE_SOURCE;
 
   const testcaseLabel = document.createElement("label");
   testcaseLabel.htmlFor = "testcase";
@@ -279,7 +128,7 @@ export function renderSidePanel(
   testcase.id = "testcase";
   testcase.rows = 4;
   testcase.readOnly = true;
-  testcase.value = snapshotProvider ? "" : SAMPLE_TESTCASE;
+  testcase.value = hasActiveTabSource ? "" : SAMPLE_TESTCASE;
 
   const caseLabel = document.createElement("label");
   caseLabel.htmlFor = "testcase-case";
@@ -317,7 +166,7 @@ export function renderSidePanel(
   result.append(placeholder);
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
-  let currentSnapshot: LeetCodeSnapshot | null = snapshotProvider
+  let currentSnapshot: LeetCodeSnapshot | null = hasActiveTabSource
     ? null
     : {
         code: SAMPLE_SOURCE,
@@ -397,26 +246,59 @@ export function renderSidePanel(
 
   refreshCaseSelector(source.value, testcase.value);
 
-  const unsubscribeSnapshot = snapshotSubscription?.(applySnapshot);
-  if (snapshotProvider) {
+  const activeTabSource = activeTabSourceFactory?.({
+    onOwnershipInvalidated: () => {
+      if (disposed) return;
+      currentSnapshot = null;
+      scheduler.invalidate();
+      status.dataset.liveStatus = "updating";
+      status.textContent = "Live: updating";
+    },
+    onStateChange: (state) => {
+      if (disposed) return;
+      if (state.kind === "paused") {
+        currentSnapshot = null;
+        status.dataset.liveStatus = "paused";
+        status.textContent = "Live: paused · No active LeetCode tab";
+        return;
+      }
+      status.dataset.liveStatus = "updating";
+      status.textContent = "Live: updating";
+    },
+    onSnapshot: ({ snapshot: acceptedSnapshot }) => {
+      applySnapshot(acceptedSnapshot);
+    },
+    onError: (error) => {
+      if (disposed) return;
+      status.removeAttribute("data-live-status");
+      status.textContent = `Live: ${errorText(error)}`;
+    }
+  });
+
+  app.append(header, status, inputPanel, result);
+  root.replaceChildren(app);
+
+  if (activeTabSource) {
     status.textContent = "Live: syncing";
-    void snapshotProvider()
-      .then(applySnapshot)
-      .catch((error: unknown) => {
-        if (!disposed) {
-          status.textContent = `Live: ${snapshotErrorText(error)}`;
-        }
-      });
+    void activeTabSource.start().catch((error: unknown) => {
+      if (!disposed) {
+        status.textContent = `Live: ${errorText(error)}`;
+      }
+    });
   }
 
   runButton.addEventListener("click", () => {
     const runLatest = async (): Promise<void> => {
       if (disposed) return;
-      if (snapshotProvider) {
+      if (activeTabSource) {
         try {
-          applySnapshot(await snapshotProvider(), { schedule: false });
+          const latest = await activeTabSource.refresh();
+          if (!latest || disposed) return;
+          applySnapshot(latest.snapshot, { schedule: false });
         } catch (error: unknown) {
-          status.textContent = `Live: ${snapshotErrorText(error)}`;
+          if (!disposed) {
+            status.textContent = `Live: ${errorText(error)}`;
+          }
           return;
         }
       }
@@ -425,14 +307,11 @@ export function renderSidePanel(
     void runLatest();
   });
 
-  app.append(header, status, inputPanel, result);
-  root.replaceChildren(app);
-
   return {
     dispose(): void {
       if (disposed) return;
       disposed = true;
-      unsubscribeSnapshot?.();
+      activeTabSource?.dispose();
       scheduler.dispose();
       activeVisualizer?.dispose();
       activeVisualizer = null;

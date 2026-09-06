@@ -109,6 +109,20 @@ export class LiveExecutionScheduler {
     return revision;
   }
 
+  public invalidate(): number {
+    if (this.disposed) {
+      return this.latestRevision;
+    }
+
+    const revision = ++this.revision;
+    this.latestRevision = revision;
+    this.latestRunnableRevision = revision;
+    this.latestInputKey = null;
+    this.clearTimer();
+    this.pending = null;
+    return revision;
+  }
+
   public dispose(): void {
     this.disposed = true;
     this.clearTimer();

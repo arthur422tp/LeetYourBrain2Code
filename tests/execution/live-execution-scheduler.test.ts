@@ -269,4 +269,92 @@ describe("LiveExecutionScheduler", () => {
     await vi.runAllTimersAsync();
     expect(statuses.at(-1)).toBe(expectedLiveStatus);
   });
+
+  it("invalidates a running result without emitting a replacement status", async () => {
+    const running = deferred<TraceSession>();
+    let captured!: ExecutionRequest;
+    const rendered: TraceSession[] = [];
+    const statuses: LiveStatus[] = [];
+    const scheduler = new LiveExecutionScheduler({
+      runner: {
+        execute: (request) => {
+          captured = request;
+          return running.promise;
+        }
+      },
+      createSessionId: () => "running-before-tab-switch",
+      debounceMs: 0,
+      onStatusChange: (status) => statuses.push(status),
+      onSession: (session) => rendered.push(session)
+    });
+
+    scheduler.schedule(input());
+    await vi.runAllTimersAsync();
+    const statusCountBeforeInvalidate = statuses.length;
+
+    const invalidationRevision = scheduler.invalidate();
+    expect(invalidationRevision).toBeGreaterThan(0);
+    expect(statuses).toHaveLength(statusCountBeforeInvalidate);
+
+    running.resolve(makeSession(captured));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(rendered).toEqual([]);
+  });
+
+  it("clears debounced and pending work on invalidation", async () => {
+    const first = deferred<TraceSession>();
+    const requests: ExecutionRequest[] = [];
+    let sessionId = 0;
+    const scheduler = new LiveExecutionScheduler({
+      runner: {
+        execute: (request) => {
+          requests.push(request);
+          return requests.length === 1
+            ? first.promise
+            : Promise.resolve(makeSession(request));
+        }
+      },
+      createSessionId: () => `invalidate-${++sessionId}`,
+      debounceMs: 25
+    });
+
+    scheduler.schedule(input({ rawTestcase: "1" }));
+    await vi.advanceTimersByTimeAsync(25);
+    expect(requests).toHaveLength(1);
+
+    scheduler.schedule(input({ rawTestcase: "2" }));
+    await vi.advanceTimersByTimeAsync(25);
+    scheduler.schedule(input({ rawTestcase: "3" }));
+    scheduler.invalidate();
+    await vi.advanceTimersByTimeAsync(25);
+
+    first.resolve(makeSession(requests[0]!));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(requests.map((request) => request.rawTestcase)).toEqual(["1"]);
+  });
+
+  it("allows the same execution input after ownership invalidation", async () => {
+    const execute = vi.fn(async (request: ExecutionRequest) => makeSession(request));
+    let id = 0;
+    const scheduler = new LiveExecutionScheduler({
+      runner: { execute },
+      createSessionId: () => `same-input-${++id}`,
+      debounceMs: 0
+    });
+
+    scheduler.schedule(input());
+    await vi.runAllTimersAsync();
+    scheduler.schedule(input());
+    await vi.runAllTimersAsync();
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    scheduler.invalidate();
+    scheduler.schedule(input());
+    await vi.runAllTimersAsync();
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
 });

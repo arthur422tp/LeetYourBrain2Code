@@ -553,7 +553,7 @@ describe("createActiveTabSource", () => {
     }, chromeFake.api);
     await source.start();
 
-    await expect(source.refresh()).rejects.toThrow("No valid LeetCode snapshot was returned");
+    await expect(source.refresh()).resolves.toBeNull();
     await vi.waitFor(() =>
       expect(emitted.at(-1)).toEqual({ tabId: 22, snapshot: snapshot("twoSum") })
     );

@@ -182,6 +182,7 @@ export function renderSidePanel(
         metadata: { slug: "sample", title: "Sample" }
       };
   let selectedCaseIndex = 0;
+  let ownershipGeneration = 0;
   let disposed = false;
 
   const refreshCaseSelector = (sourceCode: string, rawTestcase: string): void => {
@@ -256,6 +257,7 @@ export function renderSidePanel(
   const activeTabSource = activeTabSourceFactory?.({
     onOwnershipInvalidated: () => {
       if (disposed) return;
+      ownershipGeneration += 1;
       currentSnapshot = null;
       scheduler.invalidate();
       status.dataset.liveStatus = "updating";
@@ -263,6 +265,7 @@ export function renderSidePanel(
     },
     onStateChange: (state) => {
       if (disposed) return;
+      ownershipGeneration += 1;
       if (state.kind === "paused") {
         currentSnapshot = null;
         status.dataset.liveStatus = "paused";
@@ -298,12 +301,17 @@ export function renderSidePanel(
     const runLatest = async (): Promise<void> => {
       if (disposed) return;
       if (activeTabSource) {
+        const refreshOwnershipGeneration = ownershipGeneration;
         try {
           const latest = await activeTabSource.refresh();
           if (!latest || disposed) return;
           applySnapshot(latest.snapshot, { schedule: false });
         } catch (error: unknown) {
-          if (!disposed && status.dataset.liveStatus !== "paused") {
+          if (
+            !disposed &&
+            ownershipGeneration === refreshOwnershipGeneration &&
+            status.dataset.liveStatus !== "paused"
+          ) {
             status.textContent = `Live: ${errorText(error)}`;
           }
           return;

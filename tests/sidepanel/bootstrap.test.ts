@@ -395,6 +395,35 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("does not show an old-owner refresh error after a new owner takes over", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.refresh.mockImplementation(async () => {
+      source.callbacks().onOwnershipInvalidated();
+      source.callbacks().onStateChange({ kind: "leetcode", tabId: 22 });
+      throw new Error("Old owner is unavailable");
+    });
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+
+    await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: updating");
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    handle.dispose();
+  });
+
   it("shows a current active-source error without clearing the existing visualization", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

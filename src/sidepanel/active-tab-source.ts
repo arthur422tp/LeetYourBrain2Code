@@ -34,6 +34,12 @@ interface FetchContext {
   sequence: number;
 }
 
+type FailureReconciliation =
+  | "ownership-changed"
+  | "superseded"
+  | "unchanged"
+  | "unresolved";
+
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -246,20 +252,20 @@ export function createActiveTabSource(
     epoch: number,
     retrySameTab: boolean,
     fetchContext?: FetchContext
-  ): Promise<void> => {
+  ): Promise<FailureReconciliation> => {
     if (
       disposed ||
       epoch !== activeTabEpoch ||
       (fetchContext !== undefined && !isCurrentFetch(fetchContext))
     ) {
-      return;
+      return "superseded";
     }
 
     let active: chrome.tabs.Tab | null;
     try {
       active = await queryCurrentActiveTab(chromeApi);
     } catch {
-      return;
+      return "unresolved";
     }
 
     if (
@@ -267,29 +273,36 @@ export function createActiveTabSource(
       epoch !== activeTabEpoch ||
       (fetchContext !== undefined && !isCurrentFetch(fetchContext))
     ) {
-      return;
+      return "superseded";
     }
 
     if (active === null || active.id === undefined) {
       enterPaused(undefined, true);
-      return;
+      return "ownership-changed";
     }
 
-    if (active.windowId !== currentWindowId) return;
+    if (active.windowId !== currentWindowId) return "unresolved";
 
     if (active.id !== currentActiveTabId) {
       void activate(active.id, active.windowId);
-      return;
+      return "ownership-changed";
     }
 
     if (!isLeetCodeUrl(active.url)) {
       enterPaused(active.url, false);
-      return;
+      return "ownership-changed";
+    }
+
+    if (active.url !== currentTabUrl) {
+      const nextEpoch = invalidateForUpdatedTab(active);
+      void applyResolvedTab(active, nextEpoch);
+      return "ownership-changed";
     }
 
     if (retrySameTab) {
       await applyResolvedTab(active, epoch);
     }
+    return "unchanged";
   };
 
   const onActivated = (info: chrome.tabs.TabActiveInfo): void => {
@@ -400,7 +413,17 @@ export function createActiveTabSource(
       return await fetchCurrent(context);
     } catch (error) {
       if (!isCurrentFetch(context)) return null;
-      await reconcileAfterFailure(context.epoch, false, context);
+      const reconciliation = await reconcileAfterFailure(
+        context.epoch,
+        false,
+        context
+      );
+      if (
+        reconciliation === "ownership-changed" ||
+        reconciliation === "superseded"
+      ) {
+        return null;
+      }
       throw error;
     }
   };

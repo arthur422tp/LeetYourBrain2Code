@@ -95,7 +95,7 @@ function hasChromeTabSource(): boolean {
 
 function sourceReadiness(state: LeetCodePageState): SourceReadiness {
   if (state.code === null || state.code.length === 0) return "waiting_for_editor";
-  if (state.language === null) return "waiting_for_language";
+  if (state.language === null || state.language.length === 0) return "waiting_for_language";
   if (state.testcase === null) return "waiting_for_testcase";
   return "candidate";
 }

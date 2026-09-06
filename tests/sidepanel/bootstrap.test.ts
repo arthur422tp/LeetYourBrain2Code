@@ -280,6 +280,45 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("shows editing after a synced session when the latest page state has an empty language", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+    const synced = pageState({
+      code: "class Solution:\n    def one(self, value):\n        return value\n",
+      language: "python",
+      testcase: "7",
+      metadata: { slug: "one", title: "One" }
+    });
+    const missingLanguage = pageState({
+      code: "class Solution:\n    def one(self, value):\n        return value + 1\n",
+      language: "",
+      testcase: "8",
+      metadata: { slug: "one", title: "One" }
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: synced });
+    await vi.waitFor(() =>
+      expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: synced")
+    );
+
+    source.callbacks().onPageState({ tabId: 11, state: missingLanguage });
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value)
+      .toBe(missingLanguage.code);
+    expect(root.querySelector<HTMLTextAreaElement>("#testcase")?.value).toBe("8");
+    expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: editing");
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    expect(execute).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
   it("executes the latest mirrored code when testcase appears without another code change", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

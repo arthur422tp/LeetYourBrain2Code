@@ -80,10 +80,6 @@ export function normalizeLanguage(value: string): string | null {
   return LANGUAGE_ALIASES[key] ?? (key.length > 0 ? key : null);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function readLanguageFromDom(doc: Document): string | null {
   const buttons = Array.from(
     doc.querySelectorAll<HTMLButtonElement>(LEETCODE_ACCESSORS.languageButtons)
@@ -194,7 +190,8 @@ export function requestMainWorldSnapshot(
       if (
         (event.source !== null && event.source !== pageWindow) ||
         (event.origin !== "" && event.origin !== pageOrigin) ||
-        !isRecord(event.data)
+        typeof event.data !== "object" ||
+        event.data === null
       ) {
         return;
       }

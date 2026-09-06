@@ -79,3 +79,33 @@ Tests       151 passed (151)
 ## Commit
 
 Pending at report write time; the change set is ready to be committed as `refactor: separate leetcode page state`.
+
+## Fix Report: Remove Adapter-Local Record Guard
+
+Review finding addressed:
+
+- `src/content/leetcode-adapter.ts` no longer defines a local `isRecord` helper.
+- The adapter now uses an inline object/null check only at the `requestMainWorldSnapshot` message boundary.
+
+Verification:
+
+```bash
+npm test -- tests/execution/leetcode-adapter.test.ts
+```
+
+Result:
+
+```text
+✓ tests/execution/leetcode-adapter.test.ts (11 tests) 128ms
+```
+
+```bash
+npm run typecheck
+```
+
+Result:
+
+```text
+> leetcode-python-execution-visualizer@0.1.0 typecheck
+> tsc --noEmit
+```

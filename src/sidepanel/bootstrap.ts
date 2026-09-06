@@ -6,8 +6,10 @@ import {
   type LeetCodeSnapshot
 } from "../content/leetcode-adapter";
 import { createExecutionRequest } from "../execution/execution-request";
-import { resolveEntrypoint } from "../execution/entrypoint-resolver";
-import { splitTestcaseIntoCases } from "../execution/testcase-parser";
+import {
+  getSelectedTestcase,
+  getTestcaseCases
+} from "../execution/testcase-selection";
 import { ExecutionController } from "../execution/execution-controller";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
 import "./styles.css";
@@ -216,24 +218,6 @@ function createDefaultSnapshotSubscription(): SnapshotSubscription | undefined {
     chrome.runtime.onMessage.addListener(onMessage);
     return () => chrome.runtime.onMessage.removeListener(onMessage);
   };
-}
-
-function getTestcaseCases(sourceCode: string, rawTestcase: string): string[] {
-  const resolution = resolveEntrypoint(sourceCode);
-  if (!resolution.ok) {
-    return [];
-  }
-
-  const result = splitTestcaseIntoCases(rawTestcase, resolution.entrypoint.parameterCount);
-  return result.ok ? result.cases : [];
-}
-
-function getSelectedTestcase(
-  sourceCode: string,
-  rawTestcase: string,
-  selectedCaseIndex: number
-): string | null {
-  return getTestcaseCases(sourceCode, rawTestcase)[selectedCaseIndex] ?? null;
 }
 
 export function renderSidePanel(

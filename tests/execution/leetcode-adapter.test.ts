@@ -221,6 +221,32 @@ describe("LeetCode adapter", () => {
     }).getSnapshot()).resolves.toEqual(expected);
   });
 
+  it("does not recover a non-runnable page state with a legacy snapshot", async () => {
+    document.body.innerHTML = "";
+    const staleSnapshot: LeetCodeSnapshot = {
+      code: "class Solution:\n    def twoSum(self, nums, target):\n        return [1, 0]",
+      language: "python",
+      testcase: "[2,7,11,15]\n9",
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    };
+    const requestMainWorldSnapshot = vi.fn(async () => staleSnapshot);
+
+    await expect(
+      createLeetCodeAdapter({
+        document,
+        preferMainWorldSnapshot: true,
+        requestMainWorldPageState: async () => ({
+          code: "class Solution:\n    def twoSum(self, nums, target):\n        pass",
+          language: "python",
+          testcase: null,
+          metadata: { slug: "two-sum", title: "Two Sum" }
+        }),
+        requestMainWorldSnapshot
+      }).getSnapshot()
+    ).rejects.toThrow("No valid LeetCode snapshot was returned");
+    expect(requestMainWorldSnapshot).not.toHaveBeenCalled();
+  });
+
   it("falls back to a validated main-world snapshot", async () => {
     document.body.innerHTML = "";
     const expected: LeetCodeSnapshot = {

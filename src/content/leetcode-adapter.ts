@@ -344,7 +344,7 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
 
     async getSnapshot(): Promise<LeetCodeSnapshot> {
       if (options.preferMainWorldSnapshot) {
-        if (options.requestMainWorldSnapshot) {
+        if (options.requestMainWorldSnapshot && !options.requestMainWorldPageState) {
           try {
             return await getBridgeSnapshot();
           } catch (bridgeError) {
@@ -356,13 +356,9 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
           }
         }
 
+        let bridgeState: LeetCodePageState;
         try {
-          const bridgeState = await getBridgePageState();
-          const snapshot = toRunnableSnapshot(bridgeState);
-          if (snapshot) {
-            return snapshot;
-          }
-          throw noValidSnapshotError;
+          bridgeState = await getBridgePageState();
         } catch (bridgeError) {
           const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
           if (isolatedSnapshot) {
@@ -374,6 +370,12 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
             throw bridgeError;
           }
         }
+
+        const snapshot = toRunnableSnapshot(bridgeState);
+        if (snapshot) {
+          return snapshot;
+        }
+        throw noValidSnapshotError;
       }
 
       const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);

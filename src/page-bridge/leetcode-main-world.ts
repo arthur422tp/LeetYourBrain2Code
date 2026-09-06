@@ -4,7 +4,6 @@ import {
   LEETCODE_MESSAGE_TYPES,
   extractMetadata,
   normalizeLanguage,
-  toRunnableSnapshot,
   validatePageState
 } from "../content/leetcode-adapter";
 import type { LeetCodePageState } from "../content/leetcode-adapter";
@@ -124,18 +123,6 @@ export function installMainWorldBridge(
       },
       targetOrigin
     );
-
-    const snapshot = toRunnableSnapshot(state);
-    if (snapshot) {
-      pageWindow.postMessage(
-        {
-          source: LEETCODE_MESSAGE_SOURCE,
-          type: LEETCODE_MESSAGE_TYPES.snapshotUpdated,
-          snapshot
-        },
-        targetOrigin
-      );
-    }
   };
 
   const onMessage = (event: MessageEvent): void => {
@@ -161,19 +148,6 @@ export function installMainWorldBridge(
           type: LEETCODE_MESSAGE_TYPES.responsePageState,
           requestId: message.requestId,
           state
-        },
-        targetOrigin
-      );
-      return;
-    }
-
-    if (message.type === LEETCODE_MESSAGE_TYPES.requestSnapshot) {
-      pageWindow.postMessage(
-        {
-          source: LEETCODE_MESSAGE_SOURCE,
-          type: LEETCODE_MESSAGE_TYPES.responseSnapshot,
-          requestId: message.requestId,
-          snapshot: toRunnableSnapshot(state)
         },
         targetOrigin
       );

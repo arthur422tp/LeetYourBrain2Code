@@ -28,9 +28,14 @@ Runtime state + state diff
 Chrome Side Panel visualization
 ```
 
-Live Visualization follows the latest runnable Python draft. When the LeetCode code, testcase, or selected testcase case changes, the Side Panel automatically re-executes after a short debounce. Temporarily incomplete code keeps the previous visualization visible until the draft becomes runnable again; `Run now` remains available as an immediate retry.
+The Side Panel mirrors the active LeetCode editor while you type; pressing
+LeetCode Run or Submit is not required to start source synchronization.
+If the current testcase is already available, the latest runnable Python draft
+is re-executed automatically after the live debounce. If testcase state is not
+yet available, code continues to sync and execution waits without clearing the
+last runnable visualization.
 
-The Side Panel follows the active LeetCode tab in its current Chrome window. Switching between already-open LeetCode problems triggers an exact-tab snapshot refresh even when the editor content did not change. Snapshot updates from background LeetCode tabs are ignored.
+The Side Panel follows the active LeetCode tab in its current Chrome window. Switching between already-open LeetCode problems triggers an exact-tab page-state refresh even when the editor content did not change. Page-state updates from background LeetCode tabs are ignored.
 
 When the active tab is not LeetCode, Live Visualization pauses without clearing the last trace. Returning to LeetCode resumes from the newly active tab automatically.
 

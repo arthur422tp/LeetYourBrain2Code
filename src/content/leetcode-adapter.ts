@@ -7,27 +7,21 @@ export {
   type ProblemMetadata
 } from "./leetcode-page-state";
 
-import { toRunnableSnapshot, validatePageState, validateSnapshot } from "./leetcode-page-state";
+import { toRunnableSnapshot, validatePageState } from "./leetcode-page-state";
 import type { LeetCodePageState, LeetCodeSnapshot, ProblemMetadata } from "./leetcode-page-state";
 
 export interface LeetCodeAdapter {
   getPageState(): Promise<LeetCodePageState>;
-  getSnapshot(): Promise<LeetCodeSnapshot>;
 }
 
 export const LEETCODE_MESSAGE_SOURCE = "leetcode-python-visualizer";
 export const LEETCODE_MESSAGE_TYPES = {
-  requestSnapshot: "request_snapshot",
-  responseSnapshot: "response_snapshot",
-  snapshotUpdated: "snapshot_updated",
   requestPageState: "request_page_state",
   responsePageState: "response_page_state",
   pageStateUpdated: "page_state_updated"
 } as const;
 
 export const LEETCODE_CONTENT_MESSAGE_TYPES = {
-  requestSnapshot: "request_leetcode_snapshot",
-  snapshotUpdated: "leetcode_snapshot_updated",
   requestPageState: "request_leetcode_page_state",
   pageStateUpdated: "leetcode_page_state_updated"
 } as const;
@@ -73,9 +67,7 @@ export interface AdapterOptions {
   document?: Document;
   window?: Window;
   requestMainWorldPageState?: () => Promise<unknown>;
-  requestMainWorldSnapshot?: () => Promise<unknown>;
   bridgeTimeoutMs?: number;
-  preferMainWorldSnapshot?: boolean;
 }
 
 function normalizeLanguageKey(value: string): string {
@@ -175,69 +167,6 @@ function createRequestId(pageWindow: Window, prefix: string): string {
   );
 }
 
-export function requestMainWorldSnapshot(
-  pageWindow: Window,
-  timeoutMs = 750
-): Promise<LeetCodeSnapshot> {
-  // The window message channel is visible to page scripts by design. Treat
-  // every returned value as untrusted data: validate its shape and size, and
-  // never use it for privileged extension operations.
-  const requestId = createRequestId(pageWindow, "snapshot");
-  const pageOrigin = pageWindow.location.origin;
-  const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
-
-  return new Promise((resolve, reject) => {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    const cleanup = (): void => {
-      pageWindow.removeEventListener("message", onMessage);
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-    };
-
-    const onMessage = (event: MessageEvent): void => {
-      if (
-        (event.source !== null && event.source !== pageWindow) ||
-        (event.origin !== "" && event.origin !== pageOrigin) ||
-        typeof event.data !== "object" ||
-        event.data === null
-      ) {
-        return;
-      }
-      if (
-        event.data.source !== LEETCODE_MESSAGE_SOURCE ||
-        event.data.type !== LEETCODE_MESSAGE_TYPES.responseSnapshot ||
-        event.data.requestId !== requestId
-      ) {
-        return;
-      }
-
-      cleanup();
-      if (validateSnapshot(event.data.snapshot)) {
-        resolve(event.data.snapshot);
-      } else {
-        reject(new Error("LeetCode main-world bridge returned an invalid snapshot"));
-      }
-    };
-
-    pageWindow.addEventListener("message", onMessage);
-    pageWindow.postMessage(
-      {
-        source: LEETCODE_MESSAGE_SOURCE,
-        type: LEETCODE_MESSAGE_TYPES.requestSnapshot,
-        requestId
-      },
-      targetOrigin
-    );
-
-    timeoutId = setTimeout(() => {
-      cleanup();
-      reject(new Error("Timed out waiting for the LeetCode main-world bridge"));
-    }, timeoutMs);
-  });
-}
-
 export function requestMainWorldPageState(
   pageWindow: Window,
   timeoutMs = 750
@@ -307,9 +236,6 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
   const requestPageState =
     options.requestMainWorldPageState ??
     (() => requestMainWorldPageState(pageWindow, options.bridgeTimeoutMs));
-  const requestSnapshot =
-    options.requestMainWorldSnapshot ??
-    (() => requestMainWorldSnapshot(pageWindow, options.bridgeTimeoutMs));
 
   const getBridgePageState = async (): Promise<LeetCodePageState> => {
     const bridgeState = await requestPageState();
@@ -318,16 +244,6 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
     }
     return bridgeState;
   };
-
-  const getBridgeSnapshot = async (): Promise<LeetCodeSnapshot> => {
-    const bridgeSnapshot = await requestSnapshot();
-    if (!validateSnapshot(bridgeSnapshot)) {
-      throw new Error("LeetCode adapter received an invalid snapshot");
-    }
-    return bridgeSnapshot;
-  };
-
-  const noValidSnapshotError = new Error("No valid LeetCode snapshot was returned");
 
   return {
     async getPageState(): Promise<LeetCodePageState> {
@@ -340,60 +256,6 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
         }
         throw bridgeError;
       }
-    },
-
-    async getSnapshot(): Promise<LeetCodeSnapshot> {
-      if (options.preferMainWorldSnapshot) {
-        if (options.requestMainWorldSnapshot && !options.requestMainWorldPageState) {
-          try {
-            return await getBridgeSnapshot();
-          } catch (bridgeError) {
-            const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
-            if (isolatedSnapshot) {
-              return isolatedSnapshot;
-            }
-            throw bridgeError;
-          }
-        }
-
-        let bridgeState: LeetCodePageState;
-        try {
-          bridgeState = await getBridgePageState();
-        } catch (bridgeError) {
-          const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
-          if (isolatedSnapshot) {
-            return isolatedSnapshot;
-          }
-          try {
-            return await getBridgeSnapshot();
-          } catch {
-            throw bridgeError;
-          }
-        }
-
-        const snapshot = toRunnableSnapshot(bridgeState);
-        if (snapshot) {
-          return snapshot;
-        }
-        throw noValidSnapshotError;
-      }
-
-      const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
-      if (isolatedSnapshot) {
-        return isolatedSnapshot;
-      }
-
-      try {
-        const bridgeState = await getBridgePageState();
-        const snapshot = toRunnableSnapshot(bridgeState);
-        if (snapshot) {
-          return snapshot;
-        }
-      } catch {
-        return getBridgeSnapshot();
-      }
-
-      throw noValidSnapshotError;
     }
   };
 }

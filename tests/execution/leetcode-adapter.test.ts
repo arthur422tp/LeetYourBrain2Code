@@ -10,8 +10,7 @@ import {
   extractIsolatedSnapshot,
   LEETCODE_MESSAGE_SOURCE,
   LEETCODE_MESSAGE_TYPES,
-  requestMainWorldSnapshot,
-  type LeetCodeSnapshot,
+  requestMainWorldPageState,
   validateSnapshot
 } from "../../src/content/leetcode-adapter";
 import {
@@ -45,9 +44,9 @@ describe("LeetCode adapter", () => {
   it("extracts the current code, language, testcase, and metadata from the page", async () => {
     installTwoSumPage();
 
-    const snapshot = await createLeetCodeAdapter({ document }).getSnapshot();
+    const state = await createLeetCodeAdapter({ document }).getPageState();
 
-    expect(snapshot).toEqual({
+    expect(state).toEqual({
       code: "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]",
       language: "python",
       testcase: "[2,7,11,15]\n9",
@@ -205,76 +204,12 @@ describe("LeetCode adapter", () => {
     }
   });
 
-  it("prefers the main-world snapshot for the live content-script path", async () => {
-    installTwoSumPage();
-    const expected: LeetCodeSnapshot = {
-      code: "class Solution:\n    def twoSum(self, nums, target):\n        return [1, 0]",
-      language: "python",
-      testcase: "[2,7,11,15]\n9",
-      metadata: { slug: "two-sum", title: "Two Sum" }
-    };
-
-    await expect(createLeetCodeAdapter({
-      document,
-      preferMainWorldSnapshot: true,
-      requestMainWorldSnapshot: async () => expected
-    }).getSnapshot()).resolves.toEqual(expected);
-  });
-
-  it("does not recover a non-runnable page state with a legacy snapshot", async () => {
-    document.body.innerHTML = "";
-    const staleSnapshot: LeetCodeSnapshot = {
-      code: "class Solution:\n    def twoSum(self, nums, target):\n        return [1, 0]",
-      language: "python",
-      testcase: "[2,7,11,15]\n9",
-      metadata: { slug: "two-sum", title: "Two Sum" }
-    };
-    const requestMainWorldSnapshot = vi.fn(async () => staleSnapshot);
-
-    await expect(
-      createLeetCodeAdapter({
-        document,
-        preferMainWorldSnapshot: true,
-        requestMainWorldPageState: async () => ({
-          code: "class Solution:\n    def twoSum(self, nums, target):\n        pass",
-          language: "python",
-          testcase: null,
-          metadata: { slug: "two-sum", title: "Two Sum" }
-        }),
-        requestMainWorldSnapshot
-      }).getSnapshot()
-    ).rejects.toThrow("No valid LeetCode snapshot was returned");
-    expect(requestMainWorldSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("falls back to a validated main-world snapshot", async () => {
-    document.body.innerHTML = "";
-    const expected: LeetCodeSnapshot = {
-      code: "class Solution:\n    def twoSum(self, nums, target):\n        pass",
-      language: "python",
-      testcase: "[2,7,11,15]\n9",
-      metadata: { slug: "two-sum", title: "Two Sum" }
-    };
-    let requests = 0;
-
-    const snapshot = await createLeetCodeAdapter({
-      document,
-      requestMainWorldSnapshot: async () => {
-        requests += 1;
-        return expected;
-      }
-    }).getSnapshot();
-
-    expect(requests).toBe(1);
-    expect(snapshot).toEqual(expected);
-  });
-
   it("round-trips page extraction through the main-world message bridge", async () => {
     installTwoSumPage();
     const cleanup = installMainWorldBridge(window, document);
 
     try {
-      await expect(requestMainWorldSnapshot(window, 250)).resolves.toEqual({
+      await expect(requestMainWorldPageState(window, 250)).resolves.toEqual({
         code: "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]",
         language: "python",
         testcase: "[2,7,11,15]\n9",
@@ -285,23 +220,25 @@ describe("LeetCode adapter", () => {
     }
   });
 
-  it("publishes a snapshot update when the LeetCode editor changes", async () => {
+  it("publishes exactly one page-state update when the LeetCode editor changes", async () => {
     installTwoSumPage();
-    const updates: LeetCodeSnapshot[] = [];
+    const messages: unknown[] = [];
     const onMessage = (event: MessageEvent): void => {
-      if (
-        event.data?.source === LEETCODE_MESSAGE_SOURCE &&
-        event.data?.type === LEETCODE_MESSAGE_TYPES.snapshotUpdated &&
-        event.data.snapshot
-      ) {
-        updates.push(event.data.snapshot as LeetCodeSnapshot);
+      if (event.data?.source === LEETCODE_MESSAGE_SOURCE) {
+        messages.push(event.data);
       }
     };
     window.addEventListener("message", onMessage);
     const cleanup = installMainWorldBridge(window, document, { watchIntervalMs: 10 });
 
     try {
-      await vi.waitFor(() => expect(updates[0]?.code).toContain("return [0, 1]"));
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
+      expect(messages[0]).toMatchObject({
+        type: LEETCODE_MESSAGE_TYPES.pageStateUpdated,
+        state: {
+          code: expect.stringContaining("return [0, 1]")
+        }
+      });
 
       const editor = document.querySelector<HTMLTextAreaElement>(
         'textarea[aria-label="Code editor"]'
@@ -309,7 +246,13 @@ describe("LeetCode adapter", () => {
       expect(editor).not.toBeNull();
       editor!.value = "class Solution:\n    def twoSum(self, nums, target):\n        return [1, 0]";
 
-      await vi.waitFor(() => expect(updates.at(-1)?.code).toContain("return [1, 0]"));
+      await vi.waitFor(() => expect(messages).toHaveLength(2));
+      expect(messages[1]).toMatchObject({
+        type: LEETCODE_MESSAGE_TYPES.pageStateUpdated,
+        state: {
+          code: expect.stringContaining("return [1, 0]")
+        }
+      });
     } finally {
       cleanup();
       window.removeEventListener("message", onMessage);

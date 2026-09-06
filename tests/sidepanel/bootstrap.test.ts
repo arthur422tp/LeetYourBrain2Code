@@ -232,6 +232,51 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("prevents an in-flight runnable execution from rendering after a non-runnable page state", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const first = pageState({
+      code: "class Solution:\n    def first(self, value):\n        return value\n"
+    });
+    const second = pageState({
+      code: "class Solution:\n    def second(self, value):\n        return value\n"
+    });
+    const secondRun = deferred<TraceSession>();
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      requests.push(request);
+      return requests.length === 2
+        ? secondRun.promise
+        : Promise.resolve(completedSession(request));
+    });
+
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: first });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+    expect(root.querySelector("#trace-viewer")?.textContent).toContain("first");
+
+    source.callbacks().onPageState({ tabId: 11, state: second });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: null })
+    });
+    secondRun.resolve(completedSession(requests[1]!));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(root.querySelector("#trace-viewer")?.textContent).toContain("first");
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    handle.dispose();
+  });
+
   it.each([
     ["timeout", "hard_timeout", "Live: timeout"],
     ["exception", "runtime_exception", "Live: runtime_error"],
@@ -361,6 +406,33 @@ describe("renderSidePanel", () => {
     await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(execute.mock.calls[0]?.[0].rawTestcase).toBe("8");
+    handle.dispose();
+  });
+
+  it("Run now does not execute stale input when refresh returns a non-runnable page state", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 1_000
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState({ testcase: "7" }) });
+    source.refresh.mockResolvedValue({
+      tabId: 11,
+      state: pageState({ testcase: null })
+    });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+
+    await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(root.querySelector("#trace-viewer")).toBeNull();
     handle.dispose();
   });
 

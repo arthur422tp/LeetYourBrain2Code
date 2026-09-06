@@ -260,10 +260,14 @@ export function renderSidePanel(
     state: LeetCodePageState,
     options: { schedule?: boolean } = {}
   ): void => {
+    if (disposed) return;
     const runnable = toRunnableSnapshot(state);
     if (runnable) {
       applySnapshot(runnable, options);
+      return;
     }
+    currentPageState = null;
+    scheduler.invalidate();
   };
 
   refreshCaseSelector(source.value, testcase.value);

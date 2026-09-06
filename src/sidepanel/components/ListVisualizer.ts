@@ -1,14 +1,36 @@
 import type { ListVisualModel } from "../../core/visual-model";
 import { formatValue } from "./value-format";
 
+export interface ListVisualizerHandle {
+  element: HTMLElement;
+  update(model: ListVisualModel): void;
+  dispose(): void;
+}
+
+type ListPointer = ListVisualModel["pointers"][number];
+
 function createPointerMarker(
-  pointer: ListVisualModel["pointers"][number]
+  pointer: ListPointer,
+  pointedValue?: ListVisualModel["items"][number]
 ): HTMLSpanElement {
   const marker = document.createElement("span");
   marker.className = "list-visualizer__pointer";
   marker.dataset.pointerName = pointer.name;
+  marker.dataset.pointerIndex = String(pointer.index);
+  if (pointer.source) {
+    marker.dataset.pointerSource = pointer.source;
+  }
+  if (pointer.valueVariable) {
+    marker.dataset.pointerValueVariable = pointer.valueVariable;
+  }
   marker.title = `${pointer.name} = ${pointer.index}`;
-  marker.setAttribute("aria-label", `${pointer.name} pointer at index ${pointer.index}`);
+  const pointedValueLabel = pointer.valueVariable && pointedValue !== undefined
+    ? `, ${pointer.valueVariable} = ${formatValue(pointedValue)}`
+    : "";
+  marker.setAttribute(
+    "aria-label",
+    `${pointer.name} pointer at index ${pointer.index}${pointedValueLabel}`
+  );
 
   const name = document.createElement("span");
   name.className = "list-visualizer__pointer-name";
@@ -21,6 +43,34 @@ function createPointerMarker(
 
   marker.append(name, arrow);
   return marker;
+}
+
+function updatePointerMarker(
+  marker: HTMLSpanElement,
+  pointer: ListPointer,
+  pointedValue?: ListVisualModel["items"][number]
+): void {
+  marker.dataset.pointerName = pointer.name;
+  marker.dataset.pointerIndex = String(pointer.index);
+  if (pointer.source) {
+    marker.dataset.pointerSource = pointer.source;
+  } else {
+    delete marker.dataset.pointerSource;
+  }
+  if (pointer.valueVariable) {
+    marker.dataset.pointerValueVariable = pointer.valueVariable;
+  } else {
+    delete marker.dataset.pointerValueVariable;
+  }
+  marker.title = `${pointer.name} = ${pointer.index}`;
+  const pointedValueLabel = pointer.valueVariable && pointedValue !== undefined
+    ? `, ${pointer.valueVariable} = ${formatValue(pointedValue)}`
+    : "";
+  marker.setAttribute(
+    "aria-label",
+    `${pointer.name} pointer at index ${pointer.index}${pointedValueLabel}`
+  );
+  marker.querySelector<HTMLElement>(".list-visualizer__pointer-name")!.textContent = pointer.name;
 }
 
 function createListItem(
@@ -36,7 +86,10 @@ function createListItem(
 
   const pointerRow = document.createElement("div");
   pointerRow.className = "list-visualizer__pointers";
-  pointerRow.append(...pointers.map(createPointerMarker));
+  pointerRow.append(...pointers.map((pointer) => createPointerMarker(
+    pointer,
+    model.items[effectiveIndex(pointer.index, model.items.length)]
+  )));
 
   const value = document.createElement("div");
   value.className = "list-visualizer__value";
@@ -49,6 +102,9 @@ function createListItem(
   if (model.changedIndexes.includes(index)) {
     item.classList.add("is-changed");
     item.dataset.changed = "true";
+  }
+  if (pointers.length > 0) {
+    item.classList.add("is-pointer-target");
   }
 
   item.append(pointerRow, value, itemIndex);
@@ -67,7 +123,7 @@ function createRequestedItem(
 
   const pointerRow = document.createElement("div");
   pointerRow.className = "list-visualizer__pointers";
-  pointerRow.append(...pointers.map(createPointerMarker));
+  pointerRow.append(...pointers.map((pointer) => createPointerMarker(pointer)));
 
   const value = document.createElement("div");
   value.className = "list-visualizer__value";
@@ -130,4 +186,150 @@ export function renderListVisualizer(model: ListVisualModel): HTMLElement {
 
   section.append(heading, list);
   return section;
+}
+
+function requestedPointerSignature(model: ListVisualModel): string {
+  return model.pointers
+    .filter((pointer) => pointer.outOfBounds)
+    .map((pointer) => `${pointer.name}:${pointer.index}`)
+    .sort()
+    .join("|");
+}
+
+function currentRequestedPointerSignature(list: HTMLElement): string {
+  return [...list.querySelectorAll<HTMLElement>("[data-requested-index]")]
+    .flatMap((item) => [...item.querySelectorAll<HTMLElement>("[data-pointer-name]")]
+      .map((pointer) => `${pointer.dataset.pointerName}:${item.dataset.requestedIndex}`))
+    .sort()
+    .join("|");
+}
+
+function updateListItems(list: HTMLElement, model: ListVisualModel): void {
+  const pointerIndexes = new Set(
+    model.pointers
+      .filter((pointer) => !pointer.outOfBounds)
+      .map((pointer) => effectiveIndex(pointer.index, model.items.length))
+  );
+  for (let index = 0; index < model.items.length; index += 1) {
+    const item = list.querySelector<HTMLElement>(`[data-list-item-index="${index}"]`);
+    if (!item) {
+      continue;
+    }
+    item.setAttribute("aria-label", `Index ${index}: ${formatValue(model.items[index]!)}`);
+    item.classList.toggle("is-changed", model.changedIndexes.includes(index));
+    if (model.changedIndexes.includes(index)) {
+      item.dataset.changed = "true";
+    } else {
+      delete item.dataset.changed;
+    }
+    item.classList.toggle("is-pointer-target", pointerIndexes.has(index));
+    if (pointerIndexes.has(index)) {
+      item.classList.remove("is-pointer-focus");
+      void item.offsetWidth;
+      item.classList.add("is-pointer-focus");
+    }
+    item.querySelector<HTMLElement>(".list-visualizer__value")!.textContent =
+      `[${formatValue(model.items[index]!)}]`;
+  }
+}
+
+function animatePointerMove(
+  marker: HTMLSpanElement,
+  from: DOMRect,
+  to: DOMRect,
+  animations: Animation[]
+): void {
+  const deltaX = from.left - to.left;
+  const deltaY = from.top - to.top;
+  if (
+    deltaX === 0 && deltaY === 0 ||
+    typeof marker.animate !== "function" ||
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  ) {
+    return;
+  }
+  const animation = marker.animate(
+    [
+      { transform: `translate(${deltaX}px, ${deltaY}px)` },
+      { transform: "translate(0, 0)" }
+    ],
+    { duration: 260, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
+  );
+  animations.push(animation);
+  animation.finished.finally(() => {
+    const index = animations.indexOf(animation);
+    if (index >= 0) {
+      animations.splice(index, 1);
+    }
+  }).catch(() => undefined);
+}
+
+export function createListVisualizer(initialModel: ListVisualModel): ListVisualizerHandle {
+  const section = renderListVisualizer(initialModel);
+  const list = section.querySelector<HTMLElement>(".list-visualizer__list")!;
+  const animations: Animation[] = [];
+
+  const update = (model: ListVisualModel): void => {
+    const requiresRebuild =
+      list.querySelectorAll("[data-list-item-index]").length !== model.items.length ||
+      currentRequestedPointerSignature(list) !== requestedPointerSignature(model);
+
+    if (requiresRebuild) {
+      const replacement = renderListVisualizer(model);
+      list.replaceChildren(...Array.from(replacement.querySelector(".list-visualizer__list")!.children));
+      return;
+    }
+
+    updateListItems(list, model);
+
+    const desiredPointers = new Map(model.pointers.map((pointer) => [pointer.name, pointer]));
+    const existingPointers = new Map(
+      [...list.querySelectorAll<HTMLSpanElement>("[data-pointer-name]")]
+        .map((pointer) => [pointer.dataset.pointerName!, pointer] as const)
+    );
+
+    for (const [name, marker] of existingPointers) {
+      if (!desiredPointers.has(name)) {
+        marker.remove();
+      }
+    }
+
+    for (const pointer of model.pointers) {
+      if (pointer.outOfBounds) {
+        continue;
+      }
+      const targetIndex = effectiveIndex(pointer.index, model.items.length);
+      const targetItem = list.querySelector<HTMLElement>(`[data-list-item-index="${targetIndex}"]`);
+      const targetRow = targetItem?.querySelector<HTMLElement>(".list-visualizer__pointers");
+      if (!targetRow) {
+        continue;
+      }
+
+      let marker = existingPointers.get(pointer.name);
+      if (!marker) {
+        marker = createPointerMarker(pointer, model.items[targetIndex]);
+      } else {
+        const fromItem = marker.closest<HTMLElement>("[data-list-item-index]");
+        const from = fromItem ? marker.getBoundingClientRect() : new DOMRect();
+        updatePointerMarker(marker, pointer, model.items[targetIndex]);
+        if (fromItem !== targetItem) {
+          targetRow.append(marker);
+          animatePointerMove(marker, from, marker.getBoundingClientRect(), animations);
+          continue;
+        }
+      }
+      targetRow.append(marker);
+    }
+  };
+
+  return {
+    element: section,
+    update,
+    dispose: () => {
+      for (const animation of animations) {
+        animation.cancel();
+      }
+      animations.splice(0);
+    }
+  };
 }

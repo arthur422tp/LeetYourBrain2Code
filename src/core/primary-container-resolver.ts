@@ -1,5 +1,5 @@
 import type { PointerBinding } from "./binding-resolver";
-import { relationMatchesFrameScope, type SubscriptRelation } from "./ast-relations";
+import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations";
 import type { FrameDiff } from "./state-diff";
 import type { FrameState, RuntimeState } from "./runtime-state";
 import type { ValueSnapshot } from "../shared/trace-types";
@@ -26,7 +26,7 @@ export function selectPrimaryContainers(
   state: RuntimeState,
   bindings: PointerBinding[],
   diff: FrameDiff,
-  relations: SubscriptRelation[] = []
+  relations: StaticRelation[] = []
 ): ContainerSelection {
   const frame = activeFrame(state);
   if (!frame) {
@@ -65,6 +65,7 @@ export function selectPrimaryContainers(
     : [];
   const activeLineContainers = relations
     .filter((relation) =>
+      relation.kind !== "membership" &&
       state.currentLine !== null &&
       relation.line === state.currentLine &&
       relationMatchesFrameScope(relation, frame.functionName) &&

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { ListVisualModel } from "../../src/core/visual-model";
 import type { ValueSnapshot } from "../../src/shared/trace-types";
-import { renderListVisualizer } from "../../src/sidepanel/components/ListVisualizer";
+import {
+  createListVisualizer,
+  renderListVisualizer
+} from "../../src/sidepanel/components/ListVisualizer";
 
 const int = (value: number): ValueSnapshot => ({
   type: "int",
@@ -61,5 +64,40 @@ describe("renderListVisualizer", () => {
     expect(requested?.textContent).toContain("requested");
     expect(requested?.querySelector('[data-pointer-name="left"]')).not.toBeNull();
     expect(view.textContent).toContain("left");
+  });
+
+  it("marks an iteration pointer and exposes its current value variable", () => {
+    const view = renderListVisualizer(model({
+      pointers: [{
+        name: "i",
+        index: 1,
+        outOfBounds: false,
+        source: "iteration",
+        valueVariable: "x"
+      }]
+    }));
+
+    const pointer = view.querySelector('[data-pointer-name="i"]');
+    expect(pointer?.getAttribute("data-pointer-source")).toBe("iteration");
+    expect(pointer?.getAttribute("data-pointer-value-variable")).toBe("x");
+    expect(pointer?.getAttribute("aria-label")).toContain("x = 7");
+  });
+
+  it("updates a pointer in place so step changes can animate its movement", () => {
+    const handle = createListVisualizer(model({
+      pointers: [{ name: "left", index: 0, outOfBounds: false }]
+    }));
+    const section = handle.element;
+    const pointer = section.querySelector('[data-pointer-name="left"]');
+
+    handle.update(model({
+      pointers: [{ name: "left", index: 1, outOfBounds: false }]
+    }));
+
+    expect(handle.element).toBe(section);
+    expect(section.querySelector('[data-pointer-name="left"]')).toBe(pointer);
+    expect(pointer?.getAttribute("data-pointer-index")).toBe("1");
+    expect(pointer?.closest("[data-list-item-index]")?.getAttribute("data-list-item-index"))
+      .toBe("1");
   });
 });

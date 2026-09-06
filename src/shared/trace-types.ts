@@ -96,11 +96,35 @@ export type ValueSnapshot =
   | CycleValueSnapshot;
 
 export interface SubscriptRelation {
+  /** Omitted on traces created before relation kinds were introduced. */
+  kind?: "subscript";
   scope: string;
   line: number;
   container: string;
   index: string;
 }
+
+export interface IterationRelation {
+  kind: "iteration";
+  scope: string;
+  line: number;
+  container: string;
+  index: string;
+  value?: string;
+}
+
+export interface MembershipRelation {
+  kind: "membership";
+  scope: string;
+  line: number;
+  container: string;
+  index: string;
+}
+
+export type StaticRelation =
+  | SubscriptRelation
+  | IterationRelation
+  | MembershipRelation;
 
 export type TraceEventType = "call" | "line" | "return" | "exception";
 
@@ -138,7 +162,7 @@ export interface TraceSession {
   events: TraceEvent[];
   stdout: string;
   limits: ExecutionLimits;
-  subscriptRelations?: SubscriptRelation[];
+  subscriptRelations?: StaticRelation[];
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

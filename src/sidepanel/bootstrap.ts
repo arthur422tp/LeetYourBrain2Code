@@ -6,6 +6,8 @@ import {
   type LeetCodeSnapshot
 } from "../content/leetcode-adapter";
 import { createExecutionRequest } from "../execution/execution-request";
+import { resolveEntrypoint } from "../execution/entrypoint-resolver";
+import { splitTestcaseIntoCases } from "../execution/testcase-parser";
 import { ExecutionController } from "../execution/execution-controller";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
 import "./styles.css";
@@ -216,6 +218,24 @@ function createDefaultSnapshotSubscription(): SnapshotSubscription | undefined {
   };
 }
 
+function getTestcaseCases(sourceCode: string, rawTestcase: string): string[] {
+  const resolution = resolveEntrypoint(sourceCode);
+  if (!resolution.ok) {
+    return [];
+  }
+
+  const result = splitTestcaseIntoCases(rawTestcase, resolution.entrypoint.parameterCount);
+  return result.ok ? result.cases : [];
+}
+
+function getSelectedTestcase(
+  sourceCode: string,
+  rawTestcase: string,
+  selectedCaseIndex: number
+): string | null {
+  return getTestcaseCases(sourceCode, rawTestcase)[selectedCaseIndex] ?? null;
+}
+
 export function renderSidePanel(
   root: HTMLElement,
   dependencies: SidePanelDependencies = {}
@@ -271,6 +291,14 @@ export function renderSidePanel(
   testcase.readOnly = true;
   testcase.value = snapshotProvider ? "" : SAMPLE_TESTCASE;
 
+  const caseLabel = document.createElement("label");
+  caseLabel.htmlFor = "testcase-case";
+  caseLabel.textContent = "Case to visualize";
+
+  const caseSelector = document.createElement("select");
+  caseSelector.id = "testcase-case";
+  caseSelector.disabled = true;
+
   const runButton = document.createElement("button");
   runButton.id = "run";
   runButton.type = "button";
@@ -279,7 +307,15 @@ export function renderSidePanel(
   const actions = document.createElement("div");
   actions.className = "input-panel__actions";
   actions.append(runButton);
-  inputBody.append(sourceLabel, source, testcaseLabel, testcase, actions);
+  inputBody.append(
+    sourceLabel,
+    source,
+    testcaseLabel,
+    testcase,
+    caseLabel,
+    caseSelector,
+    actions
+  );
   inputPanel.append(inputBody);
 
   const result = document.createElement("section");
@@ -293,12 +329,41 @@ export function renderSidePanel(
   let activeVisualizer: TraceVisualizerHandle | null = null;
 
   let running = false;
+  let selectedCaseIndex = 0;
+
+  const refreshCaseSelector = (sourceCode: string, rawTestcase: string): void => {
+    const previousIndex = Number.parseInt(caseSelector.value, 10);
+    const cases = getTestcaseCases(sourceCode, rawTestcase);
+    caseSelector.replaceChildren();
+
+    cases.forEach((_testcase, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = `Case ${index + 1}`;
+      caseSelector.append(option);
+    });
+
+    const nextIndex = Number.isInteger(previousIndex) && previousIndex >= 0 && previousIndex < cases.length
+      ? previousIndex
+      : 0;
+    selectedCaseIndex = nextIndex;
+    caseSelector.value = String(nextIndex);
+    caseSelector.disabled = cases.length <= 1;
+  };
+
+  caseSelector.addEventListener("change", () => {
+    const nextIndex = Number.parseInt(caseSelector.value, 10);
+    selectedCaseIndex = Number.isInteger(nextIndex) && nextIndex >= 0 ? nextIndex : 0;
+  });
 
   const applySnapshot = (snapshot: LeetCodeSnapshot): void => {
     source.value = snapshot.code;
     testcase.value = snapshot.testcase;
+    refreshCaseSelector(snapshot.code, snapshot.testcase);
     status.textContent = "Runtime: ready";
   };
+
+  refreshCaseSelector(source.value, testcase.value);
 
   snapshotSubscription?.(applySnapshot);
   if (snapshotProvider) {
@@ -344,7 +409,8 @@ export function renderSidePanel(
       const requestResult = createExecutionRequest({
         sessionId: createSessionId(),
         sourceCode: source.value,
-        rawTestcase: testcase.value
+        rawTestcase:
+          getSelectedTestcase(source.value, testcase.value, selectedCaseIndex) ?? testcase.value
       });
 
       if (!requestResult.ok) {

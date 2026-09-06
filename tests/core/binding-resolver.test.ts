@@ -99,4 +99,30 @@ describe("resolvePointerBindings", () => {
       { frameId: 4, variable: "left", container: "tupleValue", index: 1, source: "subscript", confidence: 1 }
     ]);
   });
+
+  it("binds an enumerate cursor to the iterated list and preserves its value variable", () => {
+    const enumerateRelation = {
+      kind: "iteration",
+      scope: "Solution.twoSum",
+      line: 4,
+      container: "nums",
+      index: "i",
+      value: "x"
+    } as unknown as SubscriptRelation;
+
+    expect(resolvePointerBindings(
+      [enumerateRelation],
+      state({ nums: numbers, i: int(1), x: int(7) })
+    )).toEqual([
+      {
+        frameId: 4,
+        variable: "i",
+        container: "nums",
+        index: 1,
+        source: "iteration",
+        valueVariable: "x",
+        confidence: 1
+      }
+    ]);
+  });
 });

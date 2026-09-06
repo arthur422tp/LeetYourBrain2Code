@@ -144,6 +144,19 @@ describe("createTraceVisualizer", () => {
       .toBe("Step 1 / 2");
   });
 
+  it("keeps the list visualizer mounted while stepping through a trace", () => {
+    const view = createTraceVisualizer(session());
+    const list = view.element.querySelector("#list-visualizer");
+    const pointer = view.element.querySelector('[data-pointer-name="left"]');
+    const next = view.element.querySelector<HTMLButtonElement>("#trace-next");
+
+    next?.click();
+
+    expect(view.element.querySelector("#list-visualizer")).toBe(list);
+    expect(view.element.querySelector('[data-pointer-name="left"]')).toBe(pointer);
+    expect(pointer?.getAttribute("data-pointer-index")).toBe("1");
+  });
+
   it("keeps an empty trace readable when execution fails before the first event", () => {
     const view = createTraceVisualizer({
       ...session(),
@@ -178,6 +191,34 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector('[data-dict-entry-key]')).not.toBeNull();
     expect(view.element.querySelector(".trace-viewer__visual-state-body")?.textContent)
       .toContain("seen");
+  });
+
+  it("renders an enumerate cursor and dictionary membership probe for Two Sum", () => {
+    const view = createTraceVisualizer({
+      ...twoSumSession(),
+      subscriptRelations: [
+        {
+          kind: "iteration",
+          scope: "Solution.twoSum",
+          line: 4,
+          container: "nums",
+          index: "i",
+          value: "x"
+        },
+        {
+          kind: "membership",
+          scope: "Solution.twoSum",
+          line: 7,
+          container: "seen",
+          index: "need"
+        }
+      ] as unknown as SubscriptRelation[]
+    });
+
+    expect(view.element.querySelector('[data-pointer-name="i"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-pointer-source="iteration"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-dict-probe-key-variable="need"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-dict-probe-status="hit"]')).not.toBeNull();
   });
 
   it("plays forward and stops when it reaches the final step", () => {

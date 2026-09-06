@@ -1,7 +1,7 @@
 import type { FrameState, RuntimeState } from "./runtime-state";
 import {
   relationMatchesFrameScope,
-  type SubscriptRelation
+  type StaticRelation
 } from "./ast-relations";
 import type { ValueSnapshot } from "../shared/trace-types";
 
@@ -10,7 +10,8 @@ export interface PointerBinding {
   variable: string;
   container: string;
   index: number;
-  source: "subscript";
+  source: "subscript" | "iteration";
+  valueVariable?: string;
   confidence: 1;
 }
 
@@ -33,7 +34,7 @@ function isVisualizableContainer(snapshot: ValueSnapshot | undefined): boolean {
 }
 
 export function resolvePointerBindings(
-  relations: SubscriptRelation[],
+  relations: StaticRelation[],
   state: RuntimeState
 ): PointerBinding[] {
   const frame = activeFrame(state);
@@ -44,6 +45,9 @@ export function resolvePointerBindings(
   const bindings: PointerBinding[] = [];
   const seen = new Set<string>();
   for (const relation of relations) {
+    if (relation.kind === "membership") {
+      continue;
+    }
     if (!relationMatchesFrameScope(relation, frame.functionName)) {
       continue;
     }
@@ -61,14 +65,18 @@ export function resolvePointerBindings(
       continue;
     }
     seen.add(bindingKey);
-    bindings.push({
+    const binding: PointerBinding = {
       frameId: frame.frameId,
       variable: relation.index,
       container: relation.container,
       index,
-      source: "subscript",
+      source: relation.kind === "iteration" ? "iteration" : "subscript",
       confidence: 1
-    });
+    };
+    if (relation.kind === "iteration" && relation.value !== undefined) {
+      binding.valueVariable = relation.value;
+    }
+    bindings.push(binding);
   }
   return bindings;
 }

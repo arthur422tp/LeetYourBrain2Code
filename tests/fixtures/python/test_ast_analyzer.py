@@ -8,7 +8,10 @@ from runner import run_request
 
 
 def as_dicts(relations):
-    return [relation.__dict__ for relation in relations]
+    return [
+        {key: value for key, value in relation.__dict__.items() if value is not None}
+        for relation in relations
+    ]
 
 
 def test_extracts_two_pointer_relations_with_qualified_method_scope():
@@ -106,4 +109,58 @@ def test_runner_returns_static_relations_alongside_the_trace():
 
     assert result["subscript_relations"] == [
         {"scope": "Solution.twoSum", "line": 3, "container": "nums", "index": "left"}
+    ]
+
+
+def test_extracts_enumerate_cursor_relations():
+    source = """class Solution:
+    def twoSum(self, nums, target):
+        for i, x in enumerate(nums):
+            need = target - x
+            if need in seen:
+                return [i, x]
+"""
+
+    assert as_dicts(analyze_subscript_relations(source)) == [
+        {
+            "kind": "iteration",
+            "scope": "Solution.twoSum",
+            "line": 3,
+            "container": "nums",
+            "index": "i",
+            "value": "x",
+        },
+        {
+            "kind": "membership",
+            "scope": "Solution.twoSum",
+            "line": 5,
+            "container": "seen",
+            "index": "need",
+        },
+    ]
+
+
+def test_extracts_range_cursor_relations_without_nonzero_enumerate_offsets():
+    source = """class Solution:
+    def search(self, nums):
+        for i in range(len(nums)):
+            return nums[i]
+        for j, value in enumerate(nums, 1):
+            return value
+"""
+
+    assert as_dicts(analyze_subscript_relations(source)) == [
+        {
+            "kind": "iteration",
+            "scope": "Solution.search",
+            "line": 3,
+            "container": "nums",
+            "index": "i",
+        },
+        {
+            "scope": "Solution.search",
+            "line": 4,
+            "container": "nums",
+            "index": "i",
+        },
     ]

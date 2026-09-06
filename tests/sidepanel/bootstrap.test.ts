@@ -183,6 +183,51 @@ describe("renderSidePanel", () => {
     expect(root.querySelector("#runtime-status")?.textContent).toBe("Runtime: ready");
   });
 
+  it("lets the user choose which synced LeetCode testcase to visualize", async () => {
+    const root = document.createElement("main");
+    const snapshot: LeetCodeSnapshot = {
+      code: "class Solution:\n    def one(self, value):\n        return value\n",
+      language: "python",
+      testcase: "7\n8\n9",
+      metadata: { slug: "one", title: "One" }
+    };
+    const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({
+      schemaVersion: 1,
+      sessionId: request.sessionId,
+      sourceCode: request.sourceCode,
+      rawTestcase: request.rawTestcase,
+      entrypoint: request.entrypoint,
+      executionEnvironment: { runtime: "pyodide", pythonVersion: "unknown" },
+      status: "completed",
+      terminationReason: "normal_return",
+      events: [],
+      stdout: "",
+      limits: request.limits,
+      returnValue: { type: "int", value: request.rawTestcase }
+    }));
+
+    renderSidePanel(root, {
+      controller: { execute },
+      snapshotProvider: async () => snapshot
+    });
+
+    await vi.waitFor(() =>
+      expect(root.querySelector<HTMLSelectElement>("#testcase-case")?.options.length).toBe(3)
+    );
+    const caseSelector = root.querySelector<HTMLSelectElement>("#testcase-case");
+    expect(caseSelector?.value).toBe("0");
+    expect(root.querySelector<HTMLTextAreaElement>("#testcase")?.value).toBe(snapshot.testcase);
+
+    if (caseSelector) {
+      caseSelector.value = "1";
+      caseSelector.dispatchEvent(new Event("change"));
+    }
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ rawTestcase: "8" }));
+  });
+
   it("keeps a read-only LeetCode mirror synchronized without a load button", async () => {
     const root = document.createElement("main");
     const initialSnapshot: LeetCodeSnapshot = {

@@ -196,4 +196,33 @@ describe("buildVisualState", () => {
       }
     ]);
   });
+
+  it("shows a dictionary membership probe on its active source line", () => {
+    const membershipRelation = {
+      kind: "membership",
+      scope: "Solution.twoSum",
+      line: 7,
+      container: "seen",
+      index: "need"
+    } as unknown as SubscriptRelation;
+    const seen = dict([[2, 0]]);
+
+    const state = buildVisualState(
+      runtime({ seen, need: int(2) }),
+      null,
+      [membershipRelation]
+    );
+
+    expect(state.containerVisuals).toContainEqual({
+      kind: "dict",
+      variableName: "seen",
+      entries: [{ key: int(2), value: int(0), status: "unchanged" }],
+      probes: [{
+        keyVariable: "need",
+        key: int(2),
+        status: "hit",
+        operation: "membership"
+      }]
+    });
+  });
 });

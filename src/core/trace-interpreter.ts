@@ -1,4 +1,4 @@
-import type { SubscriptRelation } from "./ast-relations";
+import type { StaticRelation } from "./ast-relations";
 import { diffFrameState, type FrameDiff } from "./state-diff";
 import { reconstructStates, type RuntimeState } from "./state-reconstructor";
 import { buildVisualState, type VisualState } from "./visual-model";
@@ -19,7 +19,7 @@ function activeFrame(state: RuntimeState): FrameState | undefined {
 
 export function interpretTrace(
   events: TraceEvent[],
-  relations: SubscriptRelation[] = []
+  relations: StaticRelation[] = []
 ): TraceInterpretation {
   const runtimeStates = reconstructStates(events);
   const previousFrameStates = new Map<number, FrameState>();

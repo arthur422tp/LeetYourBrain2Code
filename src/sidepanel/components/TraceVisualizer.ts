@@ -2,8 +2,14 @@ import type { FrameDiff, VariableDiff } from "../../core/state-diff";
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
-import { renderDictVisualizer } from "./DictVisualizer";
-import { renderListVisualizer } from "./ListVisualizer";
+import {
+  createDictVisualizer,
+  type DictVisualizerHandle
+} from "./DictVisualizer";
+import {
+  createListVisualizer,
+  type ListVisualizerHandle
+} from "./ListVisualizer";
 import { formatValue } from "./value-format";
 
 const PLAY_INTERVAL_MS = 700;
@@ -78,35 +84,95 @@ function renderEmptyState(message: string): HTMLDivElement {
   return createElement("div", "trace-viewer__empty", message);
 }
 
-function renderVisualState(state: VisualState | undefined): HTMLDivElement {
+type VisualHandle =
+  | { kind: "list"; handle: ListVisualizerHandle }
+  | { kind: "dict"; handle: DictVisualizerHandle };
+
+function createVisualStateRenderer(): {
+  body: HTMLDivElement;
+  setState(state: VisualState | undefined): void;
+  dispose(): void;
+} {
   const body = createElement("div", "trace-viewer__visual-state-body");
-  if (!state) {
-    body.append(renderEmptyState("No execution steps were captured."));
-    return body;
-  }
+  const stateMeta = createElement("div", "trace-viewer__state-meta");
+  const visualsHost = createElement("div", "trace-viewer__visuals");
+  body.append(stateMeta, visualsHost);
 
-  const line = state.currentLine === null
-    ? "No source line"
-    : `Line ${state.currentLine}`;
-  body.append(createElement("div", "trace-viewer__state-meta", line));
+  const handles = new Map<string, VisualHandle>();
 
-  const visuals = state.containerVisuals.length > 0
-    ? state.containerVisuals
-    : state.primaryVisual
-      ? [state.primaryVisual]
-      : [];
-  if (visuals.length > 0) {
-    for (const visual of visuals) {
-      body.append(
-        visual.kind === "list"
-          ? renderListVisualizer(visual)
-          : renderDictVisualizer(visual)
-      );
+  const disposeHandles = (): void => {
+    for (const { handle } of handles.values()) {
+      handle.dispose();
     }
-  } else {
-    body.append(renderEmptyState("No visualizable containers for this step. See Locals below."));
-  }
-  return body;
+    handles.clear();
+  };
+
+  const setState = (state: VisualState | undefined): void => {
+    if (!state) {
+      disposeHandles();
+      body.replaceChildren(renderEmptyState("No execution steps were captured."));
+      return;
+    }
+
+    body.replaceChildren(stateMeta, visualsHost);
+    stateMeta.textContent = state.currentLine === null
+      ? "No source line"
+      : `Line ${state.currentLine}`;
+
+    const visuals = state.containerVisuals.length > 0
+      ? state.containerVisuals
+      : state.primaryVisual
+        ? [state.primaryVisual]
+        : [];
+    if (visuals.length === 0) {
+      disposeHandles();
+      visualsHost.replaceChildren(
+        renderEmptyState("No visualizable containers for this step. See Locals below.")
+      );
+      return;
+    }
+
+    const nextKeys = new Set<string>();
+    const elements: HTMLElement[] = [];
+    for (const visual of visuals) {
+      const key = `${visual.kind}:${visual.variableName}`;
+      nextKeys.add(key);
+      const existing = handles.get(key);
+      if (visual.kind === "list") {
+        if (existing?.kind === "list") {
+          existing.handle.update(visual);
+          elements.push(existing.handle.element);
+        } else {
+          existing?.handle.dispose();
+          const handle = createListVisualizer(visual);
+          handles.set(key, { kind: "list", handle });
+          elements.push(handle.element);
+        }
+      } else if (existing?.kind === "dict") {
+        existing.handle.update(visual);
+        elements.push(existing.handle.element);
+      } else {
+        existing?.handle.dispose();
+        const handle = createDictVisualizer(visual);
+        handles.set(key, { kind: "dict", handle });
+        elements.push(handle.element);
+      }
+    }
+
+    for (const [key, entry] of handles) {
+      if (!nextKeys.has(key)) {
+        entry.handle.dispose();
+        handles.delete(key);
+      }
+    }
+    visualsHost.replaceChildren(...elements);
+  };
+
+  return {
+    body,
+    setState,
+    dispose: disposeHandles
+  };
 }
 
 function renderVariableDiff(diff: VariableDiff): HTMLDivElement {
@@ -313,6 +379,8 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
 
   const codePanel = renderCodePanel(session.sourceCode);
   const visualPanel = createPanel("Visual State", "trace-viewer__visual-panel");
+  const visualStateRenderer = createVisualStateRenderer();
+  visualPanel.body.append(visualStateRenderer.body);
   const changesPanel = createPanel("State Changes", "trace-viewer__changes-panel");
   const localsPanel = createPanel("Locals", "trace-viewer__locals-panel");
   let callStackPanel = renderCallStack(undefined, "trace-viewer__call-stack-panel", false);
@@ -359,7 +427,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       currentIndex = 0;
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
-      visualPanel.body.replaceChildren(renderVisualState(undefined));
+      visualStateRenderer.setState(undefined);
       changesPanel.body.replaceChildren(renderChanges(undefined));
       localsPanel.body.replaceChildren(renderLocals(undefined));
       const emptyCallStack = renderCallStack(undefined, "trace-viewer__call-stack-panel", callStackPanel.open);
@@ -394,7 +462,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       ? "No active line"
       : `Line ${state.currentLine}`;
 
-    visualPanel.body.replaceChildren(renderVisualState(state));
+    visualStateRenderer.setState(state);
     changesPanel.body.replaceChildren(renderChanges(state));
     localsPanel.body.replaceChildren(renderLocals(state));
 
@@ -450,6 +518,9 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   return {
     element: root,
     setStep,
-    dispose: stopPlaying
+    dispose: () => {
+      stopPlaying();
+      visualStateRenderer.dispose();
+    }
   };
 }

@@ -1,7 +1,7 @@
 import type { ExceptionInfo } from "../shared/execution-types";
 import type { ValueSnapshot } from "../shared/trace-types";
 import { resolvePointerBindings, type PointerBinding } from "./binding-resolver";
-import type { SubscriptRelation } from "./ast-relations";
+import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations";
 import type { ContainerDiff, FrameDiff } from "./state-diff";
 import { selectPrimaryContainers } from "./primary-container-resolver";
 import type { RuntimeState } from "./runtime-state";
@@ -15,6 +15,8 @@ export interface ListVisualModel {
     name: string;
     index: number;
     outOfBounds: boolean;
+    source?: "subscript" | "iteration";
+    valueVariable?: string;
   }>;
   changedIndexes: number[];
 }
@@ -26,6 +28,12 @@ export interface DictVisualModel {
     key: ValueSnapshot;
     value: ValueSnapshot;
     status: "added" | "changed" | "unchanged";
+  }>;
+  probes?: Array<{
+    keyVariable: string;
+    key: ValueSnapshot;
+    status: "hit" | "miss";
+    operation: "membership" | "subscript";
   }>;
 }
 
@@ -106,7 +114,13 @@ function buildListVisual(
       .map((binding) => ({
         name: binding.variable,
         index: binding.index,
-        outOfBounds: binding.index < -snapshot.length || binding.index >= snapshot.length
+        outOfBounds: binding.index < -snapshot.length || binding.index >= snapshot.length,
+        ...(binding.source === "iteration"
+          ? {
+              source: binding.source,
+              ...(binding.valueVariable ? { valueVariable: binding.valueVariable } : {})
+            }
+          : {})
       })),
     changedIndexes: changedIndexes(diff, primary)
   };
@@ -115,14 +129,15 @@ function buildListVisual(
 function buildDictVisual(
   runtime: RuntimeState,
   container: string,
-  diff: FrameDiff | null
+  diff: FrameDiff | null,
+  relations: StaticRelation[]
 ): DictVisualModel | null {
   if (runtime.activeFrameId === null) {
     return null;
   }
   const frame = runtime.frames.get(runtime.activeFrameId);
   const snapshot = frame?.locals[container];
-  if (snapshot?.type !== "dict") {
+  if (!frame || snapshot?.type !== "dict") {
     return null;
   }
 
@@ -137,6 +152,33 @@ function buildDictVisual(
     }
   }
 
+  const probes = relations
+    .filter((relation) =>
+      relation.kind !== "iteration" &&
+      relation.container === container &&
+      relationMatchesFrameScope(relation, frame.functionName) &&
+      relation.line === runtime.currentLine
+    )
+    .map((relation) => {
+      const key = frame.locals[relation.index];
+      if (!key) {
+        return null;
+      }
+      const hit = snapshot.entries.some((entry) => valueSnapshotKey(entry.key) === valueSnapshotKey(key));
+      return {
+        keyVariable: relation.index,
+        key: cloneValueSnapshot(key),
+        status: hit ? "hit" as const : "miss" as const,
+        operation: relation.kind === "membership" ? "membership" as const : "subscript" as const
+      };
+    })
+    .filter((probe): probe is NonNullable<typeof probe> => probe !== null)
+    .filter((probe, index, all) => all.findIndex((candidate) =>
+      candidate.keyVariable === probe.keyVariable &&
+      candidate.operation === probe.operation &&
+      valueSnapshotKey(candidate.key) === valueSnapshotKey(probe.key)
+    ) === index);
+
   return {
     kind: "dict",
     variableName: container,
@@ -144,7 +186,8 @@ function buildDictVisual(
       key: cloneValueSnapshot(entry.key),
       value: cloneValueSnapshot(entry.value),
       status: statusByKey.get(valueSnapshotKey(entry.key)) ?? "unchanged"
-    }))
+    })),
+    ...(probes.length > 0 ? { probes } : {})
   };
 }
 
@@ -152,7 +195,8 @@ function buildContainerVisual(
   runtime: RuntimeState,
   bindings: PointerBinding[],
   container: string,
-  diff: FrameDiff | null
+  diff: FrameDiff | null,
+  relations: StaticRelation[]
 ): ContainerVisualModel | null {
   const frame = runtime.activeFrameId === null
     ? undefined
@@ -162,7 +206,7 @@ function buildContainerVisual(
     return buildListVisual(runtime, bindings, container, diff);
   }
   if (snapshot?.type === "dict") {
-    return buildDictVisual(runtime, container, diff);
+    return buildDictVisual(runtime, container, diff, relations);
   }
   return null;
 }
@@ -170,7 +214,7 @@ function buildContainerVisual(
 export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
-  relations: SubscriptRelation[]
+  relations: StaticRelation[]
 ): VisualState {
   const frame = runtime.activeFrameId === null
     ? undefined
@@ -187,7 +231,7 @@ export function buildVisualState(
     ...selection.secondary
   ];
   const containerVisuals = containerNames
-    .map((container) => buildContainerVisual(runtime, bindings, container, diff))
+    .map((container) => buildContainerVisual(runtime, bindings, container, diff, relations))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
   const result: VisualState = {
     step: runtime.step,

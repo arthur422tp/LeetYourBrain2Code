@@ -645,6 +645,40 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("Run now refreshes code but does not execute when the latest owned state has no testcase", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState({ testcase: "7" }) });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    source.refresh.mockResolvedValue({
+      tabId: 11,
+      state: pageState({
+        code: "class Solution:\n    def one(self, value):\n        return value + 2\n",
+        testcase: null
+      })
+    });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+
+    await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value)
+      .toContain("return value + 2");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: code synced · waiting for testcase");
+
+    handle.dispose();
+  });
+
   it("Run now does not execute stale input when refresh returns a non-runnable page state", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

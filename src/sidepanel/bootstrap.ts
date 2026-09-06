@@ -397,6 +397,13 @@ export function renderSidePanel(
           const latest = await activeTabSource.refresh();
           if (!latest || disposed) return;
           applyPageState(latest.state, { schedule: false });
+          const snapshot = toRunnableSnapshot(latest.state);
+          if (snapshot === null) {
+            scheduler.invalidate();
+            renderLiveStatus();
+            return;
+          }
+          scheduleSnapshot(snapshot, { immediate: true, force: true });
         } catch (error: unknown) {
           if (
             !disposed &&
@@ -407,6 +414,7 @@ export function renderSidePanel(
           }
           return;
         }
+        return;
       }
       scheduleCurrent({ immediate: true, force: true });
     };

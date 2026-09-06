@@ -134,21 +134,15 @@ async function injectLeetCodeContentScripts(): Promise<void> {
   });
 }
 
-function snapshotErrorText(error: unknown): string {
-  if (isMissingReceiverError(error)) {
-    return "Unable to connect to the LeetCode page. Refresh the LeetCode tab and reopen the side panel.";
-  }
-  return errorText(error);
-}
-
-function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | undefined {
-  if (typeof chrome === "undefined" || typeof chrome.runtime?.sendMessage !== "function") {
-    return undefined;
+function requestSnapshotFromActiveLeetCodeTab(): Promise<LeetCodeSnapshot> {
+  if (typeof chrome === "undefined" || typeof chrome.tabs?.sendMessage !== "function") {
+    return Promise.reject(new Error("Chrome tab messaging is unavailable"));
   }
 
-  const requestSnapshot = (): Promise<LeetCodeSnapshot> =>
-    new Promise<LeetCodeSnapshot>((resolve, reject) => {
-      chrome.runtime.sendMessage(
+  return queryActiveLeetCodeTab().then(
+    (tab) => new Promise<LeetCodeSnapshot>((resolve, reject) => {
+      chrome.tabs.sendMessage(
+        tab.id!,
         { type: LEETCODE_CONTENT_MESSAGE_TYPES.requestSnapshot },
         (response: unknown) => {
           const runtimeError = chrome.runtime.lastError;
@@ -171,9 +165,26 @@ function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | un
           resolve(response.snapshot);
         }
       );
-    });
+    })
+  );
+}
 
-  return createResilientSnapshotProvider(requestSnapshot, injectLeetCodeContentScripts);
+function snapshotErrorText(error: unknown): string {
+  if (isMissingReceiverError(error)) {
+    return "Unable to connect to the LeetCode page. Refresh the LeetCode tab and reopen the side panel.";
+  }
+  return errorText(error);
+}
+
+function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | undefined {
+  if (typeof chrome === "undefined" || typeof chrome.tabs?.sendMessage !== "function") {
+    return undefined;
+  }
+
+  return createResilientSnapshotProvider(
+    requestSnapshotFromActiveLeetCodeTab,
+    injectLeetCodeContentScripts
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

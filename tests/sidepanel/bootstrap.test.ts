@@ -42,6 +42,61 @@ describe("renderSidePanel", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it("requests the snapshot from the active LeetCode tab", async () => {
+    const root = document.createElement("main");
+    const snapshot: LeetCodeSnapshot = {
+      code: "class Solution:\n    def one(self, value):\n        return value\n",
+      language: "python",
+      testcase: "7",
+      metadata: { slug: "one", title: "One" }
+    };
+    const sendMessageToRuntime = vi.fn(
+      (_message: unknown, callback: (response: unknown) => void) => callback(undefined)
+    );
+    const sendMessageToTab = vi.fn(
+      (_tabId: number, _message: unknown, callback: (response: unknown) => void) =>
+        callback({ ok: true, snapshot })
+    );
+    const chromeApi = {
+      runtime: {
+        lastError: undefined,
+        sendMessage: sendMessageToRuntime,
+        onMessage: {
+          addListener: vi.fn(),
+          removeListener: vi.fn()
+        }
+      },
+      tabs: {
+        query: vi.fn(
+          (_query: unknown, callback: (tabs: Array<{ id: number; url: string }>) => void) =>
+            callback([{ id: 42, url: "https://leetcode.com/problems/one/" }])
+        ),
+        sendMessage: sendMessageToTab
+      },
+      scripting: {
+        executeScript: vi.fn().mockResolvedValue([])
+      }
+    } as unknown as typeof chrome;
+
+    vi.stubGlobal("chrome", chromeApi);
+    try {
+      renderSidePanel(root);
+
+      await vi.waitFor(() =>
+        expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value)
+          .toBe(snapshot.code)
+      );
+      expect(sendMessageToRuntime).not.toHaveBeenCalled();
+      expect(sendMessageToTab).toHaveBeenCalledWith(
+        42,
+        { type: "request_leetcode_snapshot" },
+        expect.any(Function)
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("renders the initial runtime status", () => {
     const root = document.createElement("main");
 

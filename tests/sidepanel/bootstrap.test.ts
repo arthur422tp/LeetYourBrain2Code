@@ -364,6 +364,37 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("keeps the paused state when Run now loses the active tab during refresh", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.refresh.mockImplementation(async () => {
+      source.callbacks().onOwnershipInvalidated();
+      source.callbacks().onStateChange({ kind: "paused" });
+      throw new Error("No active tab");
+    });
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+
+    await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    expect(root.querySelector("#runtime-status")?.textContent).toBe(
+      "Live: paused · No active LeetCode tab"
+    );
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    handle.dispose();
+  });
+
   it("shows a current active-source error without clearing the existing visualization", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

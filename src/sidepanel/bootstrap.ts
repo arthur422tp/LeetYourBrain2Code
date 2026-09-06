@@ -303,7 +303,7 @@ export function renderSidePanel(
           if (!latest || disposed) return;
           applySnapshot(latest.snapshot, { schedule: false });
         } catch (error: unknown) {
-          if (!disposed) {
+          if (!disposed && status.dataset.liveStatus !== "paused") {
             status.textContent = `Live: ${errorText(error)}`;
           }
           return;

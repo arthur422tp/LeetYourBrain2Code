@@ -385,6 +385,24 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("turns a missing content receiver error into actionable recovery guidance", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const handle = renderSidePanel(root, {
+      controller: { execute: vi.fn() },
+      activeTabSourceFactory: source.factory
+    });
+
+    source.callbacks().onError(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    );
+
+    expect(root.querySelector("#runtime-status")?.textContent).toBe(
+      "Live: Unable to connect to the LeetCode page. Refresh the LeetCode tab and reopen the side panel."
+    );
+    handle.dispose();
+  });
+
   it("disposes the active tab source and persistent controller", () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

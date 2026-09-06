@@ -61,7 +61,14 @@ function createSessionId(): string {
 }
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.includes("Receiving end does not exist") ||
+    message.includes("Could not establish connection")
+  ) {
+    return "Unable to connect to the LeetCode page. Refresh the LeetCode tab and reopen the side panel.";
+  }
+  return message;
 }
 
 function hasChromeTabSource(): boolean {

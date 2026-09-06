@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { LeetCodeSnapshot } from "../../src/content/leetcode-adapter";
+import type { LeetCodePageState } from "../../src/content/leetcode-adapter";
 import {
   createActiveTabSource,
-  type ActiveTabSnapshot,
+  type ActiveTabPageState,
   type ActiveTabState
 } from "../../src/sidepanel/active-tab-source";
 
@@ -25,13 +25,21 @@ class FakeEvent<T extends (...args: any[]) => void> {
   }
 }
 
-function snapshot(slug: string): LeetCodeSnapshot {
+function pageState(overrides: Partial<LeetCodePageState> = {}): LeetCodePageState {
   return {
-    code: `class Solution:\n    def ${slug}(self, value):\n        return value\n`,
+    code: "class Solution:\n    def one(self, value):\n        return value\n",
     language: "python",
     testcase: "7",
-    metadata: { slug, title: slug }
+    metadata: { slug: "one", title: "One" },
+    ...overrides
   };
+}
+
+function problemState(slug: string): LeetCodePageState {
+  return pageState({
+    code: `class Solution:\n    def ${slug}(self, value):\n        return value\n`,
+    metadata: { slug, title: slug }
+  });
 }
 
 function tab(
@@ -65,7 +73,7 @@ function fakeChrome(initialTab: chrome.tabs.Tab) {
   ) => void>();
 
   const tabs = new Map<number, chrome.tabs.Tab>([[initialTab.id!, initialTab]]);
-  const responses = new Map<number, LeetCodeSnapshot>();
+  const responses = new Map<number, LeetCodePageState>();
 
   const api = {
     runtime: {
@@ -82,7 +90,7 @@ function fakeChrome(initialTab: chrome.tabs.Tab) {
         _message: unknown,
         callback: (response: unknown) => void
       ) => {
-        callback({ ok: true, snapshot: responses.get(tabId) });
+        callback({ ok: true, state: responses.get(tabId) });
       }),
       onActivated,
       onUpdated
@@ -96,30 +104,54 @@ function fakeChrome(initialTab: chrome.tabs.Tab) {
 }
 
 describe("createActiveTabSource", () => {
+  it("accepts a code-only state from the active LeetCode tab", async () => {
+    const chromeFake = fakeChrome(tab(
+      11,
+      7,
+      "https://leetcode.com/problems/one/"
+    ));
+    const emitted: ActiveTabPageState[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: vi.fn(),
+      onPageState: (value) => emitted.push(value),
+      onError: vi.fn()
+    }, chromeFake.api);
+
+    chromeFake.responses.set(11, pageState({ testcase: null }));
+
+    await source.start();
+
+    await vi.waitFor(() =>
+      expect(emitted.at(-1)?.state.testcase).toBeNull()
+    );
+    expect(emitted.at(-1)?.state.code).toContain("class Solution");
+  });
+
   it("owns and fetches the initial active LeetCode tab", async () => {
     const chromeFake = fakeChrome(tab(
       11,
       7,
       "https://leetcode.com/problems/two-sum/"
     ));
-    chromeFake.responses.set(11, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("twoSum"));
     const states: ActiveTabState[] = [];
-    const snapshots: ActiveTabSnapshot[] = [];
+    const pageStates: ActiveTabPageState[] = [];
 
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: (state) => states.push(state),
-      onSnapshot: (value) => snapshots.push(value),
+      onPageState: (value) => pageStates.push(value),
       onError: vi.fn()
     }, chromeFake.api);
 
     await source.start();
 
     expect(states).toEqual([{ kind: "leetcode", tabId: 11 }]);
-    expect(snapshots).toEqual([{ tabId: 11, snapshot: snapshot("twoSum") }]);
+    expect(pageStates).toEqual([{ tabId: 11, state: problemState("twoSum") }]);
     expect(chromeFake.api.tabs.sendMessage).toHaveBeenCalledWith(
       11,
-      { type: "request_leetcode_snapshot" },
+      { type: "request_leetcode_page_state" },
       expect.any(Function)
     );
   });
@@ -129,28 +161,28 @@ describe("createActiveTabSource", () => {
     const second = tab(22, 7, "https://leetcode.com/problems/two-sum/");
     const chromeFake = fakeChrome(first);
     chromeFake.tabs.set(22, second);
-    chromeFake.responses.set(11, snapshot("search"));
-    chromeFake.responses.set(22, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("search"));
+    chromeFake.responses.set(22, problemState("twoSum"));
     const invalidated = vi.fn();
-    const snapshots: ActiveTabSnapshot[] = [];
+    const pageStates: ActiveTabPageState[] = [];
 
     const source = createActiveTabSource({
       onOwnershipInvalidated: invalidated,
       onStateChange: vi.fn(),
-      onSnapshot: (value) => snapshots.push(value),
+      onPageState: (value) => pageStates.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
-    snapshots.length = 0;
+    pageStates.length = 0;
 
     chromeFake.onActivated.emit({ tabId: 22, windowId: 7 });
-    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    await vi.waitFor(() => expect(pageStates).toHaveLength(1));
 
     expect(invalidated).toHaveBeenCalledTimes(1);
-    expect(snapshots[0]).toEqual({ tabId: 22, snapshot: snapshot("twoSum") });
+    expect(pageStates[0]).toEqual({ tabId: 22, state: problemState("twoSum") });
     expect(chromeFake.api.tabs.sendMessage).toHaveBeenLastCalledWith(
       22,
-      { type: "request_leetcode_snapshot" },
+      { type: "request_leetcode_page_state" },
       expect.any(Function)
     );
   });
@@ -160,12 +192,12 @@ describe("createActiveTabSource", () => {
     const otherWindow = tab(44, 9, "https://leetcode.com/problems/binary-search/");
     const chromeFake = fakeChrome(first);
     chromeFake.tabs.set(44, otherWindow);
-    chromeFake.responses.set(11, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("twoSum"));
     const invalidated = vi.fn();
     const source = createActiveTabSource({
       onOwnershipInvalidated: invalidated,
       onStateChange: vi.fn(),
-      onSnapshot: vi.fn(),
+      onPageState: vi.fn(),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
@@ -181,38 +213,38 @@ describe("createActiveTabSource", () => {
     );
   });
 
-  it("accepts runtime snapshots only from the active owned tab", async () => {
+  it("ignores page-state updates from a background LeetCode tab", async () => {
     const chromeFake = fakeChrome(tab(
       11,
       7,
       "https://leetcode.com/problems/two-sum/"
     ));
-    chromeFake.responses.set(11, snapshot("initial"));
-    const snapshots: ActiveTabSnapshot[] = [];
+    chromeFake.responses.set(11, problemState("initial"));
+    const pageStates: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => snapshots.push(value),
+      onPageState: (value) => pageStates.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
-    snapshots.length = 0;
+    pageStates.length = 0;
 
     chromeFake.onMessage.emit(
-      { type: "leetcode_snapshot_updated", snapshot: snapshot("background") },
+      { type: "leetcode_page_state_updated", state: problemState("background") },
       { tab: tab(99, 7, "https://leetcode.com/problems/binary-search/") },
       vi.fn()
     );
     chromeFake.onMessage.emit(
-      { type: "leetcode_snapshot_updated", snapshot: snapshot("active") },
+      { type: "leetcode_page_state_updated", state: problemState("active") },
       { tab: tab(11, 7, "https://leetcode.com/problems/two-sum/") },
       vi.fn()
     );
 
-    expect(snapshots).toEqual([{ tabId: 11, snapshot: snapshot("active") }]);
+    expect(pageStates).toEqual([{ tabId: 11, state: problemState("active") }]);
   });
 
-  it("ignores a slow snapshot and error from a previously active tab", async () => {
+  it("drops an old-owner page state that arrives after a tab switch", async () => {
     const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
     const second = tab(22, 7, "https://leetcode.com/problems/two-sum/");
     const chromeFake = fakeChrome(first);
@@ -228,12 +260,12 @@ describe("createActiveTabSource", () => {
         callbacks.set(tabId, callback);
       });
 
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const onError = vi.fn();
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError
     }, chromeFake.api);
 
@@ -242,15 +274,49 @@ describe("createActiveTabSource", () => {
 
     chromeFake.onActivated.emit({ tabId: 22, windowId: 7 });
     await vi.waitFor(() => expect(callbacks.has(22)).toBe(true));
-    callbacks.get(22)!({ ok: true, snapshot: snapshot("twoSum") });
+    callbacks.get(22)!({ ok: true, state: problemState("twoSum") });
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
 
-    callbacks.get(11)!({ ok: false });
+    callbacks.get(11)!({ ok: true, state: problemState("search") });
     await starting;
     await Promise.resolve();
 
-    expect(emitted).toEqual([{ tabId: 22, snapshot: snapshot("twoSum") }]);
+    expect(emitted).toEqual([{ tabId: 22, state: problemState("twoSum") }]);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("does not inherit the old owner testcase when the new owner reports null", async () => {
+    const chromeFake = fakeChrome(tab(
+      11,
+      7,
+      "https://leetcode.com/problems/one/"
+    ));
+    chromeFake.responses.set(11, pageState({ testcase: "7" }));
+    const emitted: ActiveTabPageState[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: vi.fn(),
+      onPageState: (value) => emitted.push(value),
+      onError: vi.fn()
+    }, chromeFake.api);
+    await source.start();
+
+    chromeFake.tabs.set(22, tab(22, 7, "https://leetcode.com/problems/two-sum/"));
+    chromeFake.responses.set(22, pageState({
+      testcase: null,
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    }));
+    chromeFake.onActivated.emit({ tabId: 22, windowId: 7 });
+
+    await vi.waitFor(() =>
+      expect(emitted.at(-1)).toEqual({
+        tabId: 22,
+        state: pageState({
+          testcase: null,
+          metadata: { slug: "two-sum", title: "Two Sum" }
+        })
+      })
+    );
   });
 
   it("pauses when the current-window active tab is not LeetCode", async () => {
@@ -258,12 +324,12 @@ describe("createActiveTabSource", () => {
     const nonLeetCode = tab(33, 7, undefined);
     const chromeFake = fakeChrome(leetcode);
     chromeFake.tabs.set(33, nonLeetCode);
-    chromeFake.responses.set(11, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("twoSum"));
     const states: ActiveTabState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: (state) => states.push(state),
-      onSnapshot: vi.fn(),
+      onPageState: vi.fn(),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
@@ -276,13 +342,13 @@ describe("createActiveTabSource", () => {
     const initial = tab(11, 7, "https://leetcode.com/problems/two-sum/");
     const updated = tab(11, 7, "https://leetcode.com/problems/binary-search/");
     const chromeFake = fakeChrome(initial);
-    chromeFake.responses.set(11, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("twoSum"));
     const invalidated = vi.fn();
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: invalidated,
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
@@ -291,7 +357,7 @@ describe("createActiveTabSource", () => {
     const sendMessageMock = chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>;
     const before = sendMessageMock.mock.calls.length;
 
-    chromeFake.responses.set(11, snapshot("search"));
+    chromeFake.responses.set(11, problemState("search"));
     chromeFake.onUpdated.emit(11, { url: updated.url }, updated);
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
 
@@ -301,31 +367,31 @@ describe("createActiveTabSource", () => {
     );
 
     expect(invalidated).toHaveBeenCalledTimes(1);
-    expect(emitted.at(-1)?.snapshot.metadata.slug).toBe("search");
+    expect(emitted.at(-1)?.state.metadata.slug).toBe("search");
   });
 
   it("refreshes after the active LeetCode tab completes a reload without a second ownership invalidation", async () => {
     const initial = tab(11, 7, "https://leetcode.com/problems/two-sum/");
     const chromeFake = fakeChrome(initial);
-    chromeFake.responses.set(11, snapshot("beforeReload"));
+    chromeFake.responses.set(11, problemState("beforeReload"));
     const invalidated = vi.fn();
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: invalidated,
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
     invalidated.mockClear();
     emitted.length = 0;
 
-    chromeFake.responses.set(11, snapshot("afterReload"));
+    chromeFake.responses.set(11, problemState("afterReload"));
     chromeFake.onUpdated.emit(11, { status: "complete" }, initial);
 
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
     expect(invalidated).not.toHaveBeenCalled();
-    expect(emitted[0]?.snapshot.metadata.slug).toBe("afterReload");
+    expect(emitted[0]?.state.metadata.slug).toBe("afterReload");
   });
 
   it("resumes when the current non-LeetCode tab navigates to LeetCode", async () => {
@@ -333,17 +399,17 @@ describe("createActiveTabSource", () => {
     const leetcode = tab(33, 7, "https://leetcode.com/problems/two-sum/");
     const chromeFake = fakeChrome(initial);
     const states: ActiveTabState[] = [];
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: (state) => states.push(state),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
     expect(states.at(-1)).toEqual({ kind: "paused" });
 
-    chromeFake.responses.set(33, snapshot("twoSum"));
+    chromeFake.responses.set(33, problemState("twoSum"));
     chromeFake.onUpdated.emit(33, { url: leetcode.url }, leetcode);
 
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
@@ -373,13 +439,13 @@ describe("createActiveTabSource", () => {
           });
           return;
         }
-        callback({ ok: true, snapshot: snapshot("twoSum") });
+        callback({ ok: true, state: problemState("twoSum") });
       });
 
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: vi.fn(),
+      onPageState: vi.fn(),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
@@ -418,24 +484,24 @@ describe("createActiveTabSource", () => {
           callback({ ok: false });
           return;
         }
-        callback({ ok: true, snapshot: snapshot("twoSum") });
+        callback({ ok: true, state: problemState("twoSum") });
       });
 
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
 
     await source.start();
     await vi.waitFor(() =>
-      expect(emitted.at(-1)).toEqual({ tabId: 22, snapshot: snapshot("twoSum") })
+      expect(emitted.at(-1)).toEqual({ tabId: 22, state: problemState("twoSum") })
     );
   });
 
-  it("pauses when the current owner disappears during a snapshot request", async () => {
+  it("pauses when the current owner disappears during a page-state request", async () => {
     const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
     const chromeFake = fakeChrome(first);
     let queryCount = 0;
@@ -458,7 +524,7 @@ describe("createActiveTabSource", () => {
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: (state) => states.push(state),
-      onSnapshot: vi.fn(),
+      onPageState: vi.fn(),
       onError: vi.fn()
     }, chromeFake.api);
 
@@ -473,8 +539,8 @@ describe("createActiveTabSource", () => {
     const replacement = tab(23, 7, "https://leetcode.com/problems/two-sum/");
     const chromeFake = fakeChrome(first);
     chromeFake.tabs.set(23, replacement);
-    chromeFake.responses.set(11, snapshot("search"));
-    chromeFake.responses.set(23, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("search"));
+    chromeFake.responses.set(23, problemState("twoSum"));
 
     let queryCount = 0;
     (chromeFake.api.tabs.query as unknown as ReturnType<typeof vi.fn>)
@@ -499,18 +565,18 @@ describe("createActiveTabSource", () => {
         callback(chromeFake.tabs.get(tabId)!);
       });
 
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
 
     chromeFake.onActivated.emit({ tabId: 22, windowId: 7 });
     await vi.waitFor(() =>
-      expect(emitted.at(-1)).toEqual({ tabId: 23, snapshot: snapshot("twoSum") })
+      expect(emitted.at(-1)).toEqual({ tabId: 23, state: problemState("twoSum") })
     );
   });
 
@@ -519,8 +585,8 @@ describe("createActiveTabSource", () => {
     const replacement = tab(22, 7, "https://leetcode.com/problems/two-sum/");
     const chromeFake = fakeChrome(first);
     chromeFake.tabs.set(22, replacement);
-    chromeFake.responses.set(11, snapshot("search"));
-    chromeFake.responses.set(22, snapshot("twoSum"));
+    chromeFake.responses.set(11, problemState("search"));
+    chromeFake.responses.set(22, problemState("twoSum"));
 
     let queryCount = 0;
     (chromeFake.api.tabs.query as unknown as ReturnType<typeof vi.fn>)
@@ -541,21 +607,21 @@ describe("createActiveTabSource", () => {
           callback({ ok: false });
           return;
         }
-        callback({ ok: true, snapshot: chromeFake.responses.get(tabId) });
+        callback({ ok: true, state: chromeFake.responses.get(tabId) });
       });
 
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
 
     await expect(source.refresh()).resolves.toBeNull();
     await vi.waitFor(() =>
-      expect(emitted.at(-1)).toEqual({ tabId: 22, snapshot: snapshot("twoSum") })
+      expect(emitted.at(-1)).toEqual({ tabId: 22, state: problemState("twoSum") })
     );
   });
 
@@ -576,17 +642,17 @@ describe("createActiveTabSource", () => {
         callbacks.push({ tabId, resolve: callback });
       });
 
-    const emitted: ActiveTabSnapshot[] = [];
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
 
     const starting = source.start();
     await vi.waitFor(() => expect(callbacks).toHaveLength(1));
-    callbacks[0]!.resolve({ ok: true, snapshot: snapshot("initial") });
+    callbacks[0]!.resolve({ ok: true, state: problemState("initial") });
     await starting;
     emitted.length = 0;
 
@@ -595,37 +661,81 @@ describe("createActiveTabSource", () => {
     chromeFake.onUpdated.emit(11, { status: "complete" }, updated);
     await vi.waitFor(() => expect(callbacks).toHaveLength(3));
 
-    callbacks[2]!.resolve({ ok: true, snapshot: snapshot("newest") });
+    callbacks[2]!.resolve({ ok: true, state: problemState("newest") });
     await vi.waitFor(() => expect(emitted).toHaveLength(1));
-    callbacks[1]!.resolve({ ok: true, snapshot: snapshot("stale") });
+    callbacks[1]!.resolve({ ok: true, state: problemState("stale") });
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(emitted).toEqual([{ tabId: 11, snapshot: snapshot("newest") }]);
+    expect(emitted).toEqual([{ tabId: 11, state: problemState("newest") }]);
   });
 
-  it("refresh returns the current exact-tab snapshot without emitting it", async () => {
+  it("refreshes the exact owned tab page state without emitting it", async () => {
     const chromeFake = fakeChrome(tab(
       11,
       7,
       "https://leetcode.com/problems/two-sum/"
     ));
-    chromeFake.responses.set(11, snapshot("initial"));
-    const emitted: ActiveTabSnapshot[] = [];
+    chromeFake.responses.set(11, problemState("initial"));
+    const emitted: ActiveTabPageState[] = [];
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot: (value) => emitted.push(value),
+      onPageState: (value) => emitted.push(value),
       onError: vi.fn()
     }, chromeFake.api);
     await source.start();
     emitted.length = 0;
 
-    chromeFake.responses.set(11, snapshot("runNow"));
+    chromeFake.responses.set(11, problemState("runNow"));
     const refreshed = await source.refresh();
 
-    expect(refreshed).toEqual({ tabId: 11, snapshot: snapshot("runNow") });
+    expect(refreshed).toEqual({ tabId: 11, state: problemState("runNow") });
     expect(emitted).toEqual([]);
+  });
+
+  it("does not surface an old-owner refresh error after ownership changes", async () => {
+    const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+    const second = tab(22, 7, "https://leetcode.com/problems/two-sum/");
+    const chromeFake = fakeChrome(first);
+    chromeFake.tabs.set(22, second);
+    chromeFake.responses.set(11, problemState("search"));
+    chromeFake.responses.set(22, problemState("twoSum"));
+    const onError = vi.fn();
+    const emitted: ActiveTabPageState[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: vi.fn(),
+      onPageState: (value) => emitted.push(value),
+      onError
+    }, chromeFake.api);
+    await source.start();
+
+    let oldOwnerRefresh!: (response: unknown) => void;
+    (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((
+        tabId: number,
+        _message: unknown,
+        callback: (response: unknown) => void
+      ) => {
+        if (tabId === 11) {
+          oldOwnerRefresh = callback;
+          return;
+        }
+        callback({ ok: true, state: chromeFake.responses.get(tabId) });
+      });
+
+    const refreshing = source.refresh();
+    await vi.waitFor(() => expect(oldOwnerRefresh).toBeDefined());
+    chromeFake.onActivated.emit({ tabId: 22, windowId: 7 });
+    await vi.waitFor(() =>
+      expect(emitted.at(-1)).toEqual({ tabId: 22, state: problemState("twoSum") })
+    );
+
+    oldOwnerRefresh({ ok: false });
+
+    await expect(refreshing).resolves.toBeNull();
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("removes all tab/runtime listeners and suppresses late callbacks after dispose", async () => {
@@ -643,21 +753,21 @@ describe("createActiveTabSource", () => {
       ) => {
         callbacks.push(callback);
       });
-    const onSnapshot = vi.fn();
+    const onPageState = vi.fn();
     const source = createActiveTabSource({
       onOwnershipInvalidated: vi.fn(),
       onStateChange: vi.fn(),
-      onSnapshot,
+      onPageState,
       onError: vi.fn()
     }, chromeFake.api);
 
     const starting = source.start();
     await vi.waitFor(() => expect(callbacks).toHaveLength(1));
     source.dispose();
-    callbacks[0]!({ ok: true, snapshot: snapshot("late") });
+    callbacks[0]!({ ok: true, state: problemState("late") });
     await starting;
 
-    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(onPageState).not.toHaveBeenCalled();
     expect(chromeFake.onActivated.listeners.size).toBe(0);
     expect(chromeFake.onUpdated.listeners.size).toBe(0);
     expect(chromeFake.onMessage.listeners.size).toBe(0);

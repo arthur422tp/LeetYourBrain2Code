@@ -1,12 +1,12 @@
 import {
   LEETCODE_CONTENT_MESSAGE_TYPES,
-  validateSnapshot,
-  type LeetCodeSnapshot
+  validatePageState,
+  type LeetCodePageState
 } from "../content/leetcode-adapter";
 
-export interface ActiveTabSnapshot {
+export interface ActiveTabPageState {
   tabId: number;
-  snapshot: LeetCodeSnapshot;
+  state: LeetCodePageState;
 }
 
 export type ActiveTabState =
@@ -16,13 +16,13 @@ export type ActiveTabState =
 export interface ActiveTabSourceOptions {
   onOwnershipInvalidated(): void;
   onStateChange(state: ActiveTabState): void;
-  onSnapshot(value: ActiveTabSnapshot): void;
+  onPageState(value: ActiveTabPageState): void;
   onError(error: Error): void;
 }
 
 export interface ActiveTabSource {
   start(): Promise<void>;
-  refresh(): Promise<ActiveTabSnapshot | null>;
+  refresh(): Promise<ActiveTabPageState | null>;
   dispose(): void;
 }
 
@@ -89,11 +89,11 @@ function getTab(api: ChromeApi, tabId: number): Promise<chrome.tabs.Tab> {
   });
 }
 
-function requestSnapshotOnce(api: ChromeApi, tabId: number): Promise<LeetCodeSnapshot> {
+function requestPageStateOnce(api: ChromeApi, tabId: number): Promise<LeetCodePageState> {
   return new Promise((resolve, reject) => {
     api.tabs.sendMessage(
       tabId,
-      { type: LEETCODE_CONTENT_MESSAGE_TYPES.requestSnapshot },
+      { type: LEETCODE_CONTENT_MESSAGE_TYPES.requestPageState },
       (response: unknown) => {
         const runtimeError = api.runtime.lastError;
         if (runtimeError) {
@@ -105,13 +105,13 @@ function requestSnapshotOnce(api: ChromeApi, tabId: number): Promise<LeetCodeSna
           response === null ||
           !("ok" in response) ||
           response.ok !== true ||
-          !("snapshot" in response) ||
-          !validateSnapshot(response.snapshot)
+          !("state" in response) ||
+          !validatePageState(response.state)
         ) {
-          reject(new Error("No valid LeetCode snapshot was returned"));
+          reject(new Error("No valid LeetCode page state was returned"));
           return;
         }
-        resolve(response.snapshot);
+        resolve(response.state);
       }
     );
   });
@@ -130,13 +130,13 @@ async function injectLeetCodeContentScripts(api: ChromeApi, tabId: number): Prom
   });
 }
 
-async function requestSnapshot(api: ChromeApi, tabId: number): Promise<LeetCodeSnapshot> {
+async function requestPageState(api: ChromeApi, tabId: number): Promise<LeetCodePageState> {
   try {
-    return await requestSnapshotOnce(api, tabId);
+    return await requestPageStateOnce(api, tabId);
   } catch (error) {
     if (!isMissingReceiverError(error)) throw error;
     await injectLeetCodeContentScripts(api, tabId);
-    return requestSnapshotOnce(api, tabId);
+    return requestPageStateOnce(api, tabId);
   }
 }
 
@@ -167,10 +167,10 @@ export function createActiveTabSource(
 
   const fetchCurrent = async (
     context: FetchContext
-  ): Promise<ActiveTabSnapshot | null> => {
-    const currentSnapshot = await requestSnapshot(chromeApi, context.tabId);
+  ): Promise<ActiveTabPageState | null> => {
+    const currentPageState = await requestPageState(chromeApi, context.tabId);
     return isCurrentFetch(context)
-      ? { tabId: context.tabId, snapshot: currentSnapshot }
+      ? { tabId: context.tabId, state: currentPageState }
       : null;
   };
 
@@ -178,7 +178,7 @@ export function createActiveTabSource(
     const context = beginFetch(tabId, epoch);
     try {
       const value = await fetchCurrent(context);
-      if (value) options.onSnapshot(value);
+      if (value) options.onPageState(value);
     } catch (error) {
       if (!isCurrentFetch(context)) return;
       options.onError(normalizeError(error));
@@ -319,16 +319,16 @@ export function createActiveTabSource(
       typeof message !== "object" ||
       message === null ||
       !("type" in message) ||
-      message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.snapshotUpdated ||
-      !("snapshot" in message) ||
-      !validateSnapshot(message.snapshot)
+      message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.pageStateUpdated ||
+      !("state" in message) ||
+      !validatePageState(message.state)
     ) {
       return;
     }
 
-    options.onSnapshot({
+    options.onPageState({
       tabId: activeLeetCodeTabId,
-      snapshot: message.snapshot
+      state: message.state
     });
   };
 
@@ -406,7 +406,7 @@ export function createActiveTabSource(
     }
   };
 
-  const refresh = async (): Promise<ActiveTabSnapshot | null> => {
+  const refresh = async (): Promise<ActiveTabPageState | null> => {
     if (disposed || activeLeetCodeTabId === null) return null;
     const context = beginFetch(activeLeetCodeTabId, activeTabEpoch);
     try {

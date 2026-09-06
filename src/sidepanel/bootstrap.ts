@@ -1,6 +1,10 @@
 import type { ExecutionRequest } from "../shared/execution-types";
 import type { TraceSession } from "../shared/trace-types";
-import type { LeetCodeSnapshot } from "../content/leetcode-adapter";
+import {
+  toRunnableSnapshot,
+  type LeetCodePageState,
+  type LeetCodeSnapshot
+} from "../content/leetcode-adapter";
 import {
   LiveExecutionScheduler,
   type LiveStatus
@@ -173,7 +177,7 @@ export function renderSidePanel(
   result.append(placeholder);
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
-  let currentSnapshot: LeetCodeSnapshot | null = hasActiveTabSource
+  let currentPageState: LeetCodeSnapshot | null = hasActiveTabSource
     ? null
     : {
         code: SAMPLE_SOURCE,
@@ -229,11 +233,11 @@ export function renderSidePanel(
   const scheduleCurrent = (
     options: { immediate?: boolean; force?: boolean } = {}
   ): void => {
-    if (!currentSnapshot || disposed) return;
+    if (!currentPageState || disposed) return;
     scheduler.schedule({
-      language: currentSnapshot.language,
-      sourceCode: currentSnapshot.code,
-      rawTestcase: currentSnapshot.testcase,
+      language: currentPageState.language,
+      sourceCode: currentPageState.code,
+      rawTestcase: currentPageState.testcase,
       selectedCaseIndex
     }, options);
   };
@@ -243,12 +247,22 @@ export function renderSidePanel(
     options: { schedule?: boolean } = {}
   ): void => {
     if (disposed) return;
-    currentSnapshot = snapshot;
+    currentPageState = snapshot;
     source.value = snapshot.code;
     testcase.value = snapshot.testcase;
     refreshCaseSelector(snapshot.code, snapshot.testcase);
     if (options.schedule !== false) {
       scheduleCurrent();
+    }
+  };
+
+  const applyPageState = (
+    state: LeetCodePageState,
+    options: { schedule?: boolean } = {}
+  ): void => {
+    const runnable = toRunnableSnapshot(state);
+    if (runnable) {
+      applySnapshot(runnable, options);
     }
   };
 
@@ -258,7 +272,7 @@ export function renderSidePanel(
     onOwnershipInvalidated: () => {
       if (disposed) return;
       ownershipGeneration += 1;
-      currentSnapshot = null;
+      currentPageState = null;
       scheduler.invalidate();
       status.dataset.liveStatus = "updating";
       status.textContent = "Live: updating";
@@ -267,7 +281,7 @@ export function renderSidePanel(
       if (disposed) return;
       ownershipGeneration += 1;
       if (state.kind === "paused") {
-        currentSnapshot = null;
+        currentPageState = null;
         status.dataset.liveStatus = "paused";
         status.textContent = "Live: paused · No active LeetCode tab";
         return;
@@ -275,8 +289,8 @@ export function renderSidePanel(
       status.dataset.liveStatus = "updating";
       status.textContent = "Live: updating";
     },
-    onSnapshot: ({ snapshot: acceptedSnapshot }) => {
-      applySnapshot(acceptedSnapshot);
+    onPageState: ({ state: acceptedState }) => {
+      applyPageState(acceptedState);
     },
     onError: (error) => {
       if (disposed) return;
@@ -305,7 +319,7 @@ export function renderSidePanel(
         try {
           const latest = await activeTabSource.refresh();
           if (!latest || disposed) return;
-          applySnapshot(latest.snapshot, { schedule: false });
+          applyPageState(latest.state, { schedule: false });
         } catch (error: unknown) {
           if (
             !disposed &&

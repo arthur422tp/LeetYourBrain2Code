@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_EXECUTION_LIMITS } from "../../src/shared/execution-types";
 import type { ExecutionRequest } from "../../src/shared/execution-types";
 import type { TraceSession } from "../../src/shared/trace-types";
-import type { LeetCodeSnapshot } from "../../src/content/leetcode-adapter";
+import type { LeetCodePageState } from "../../src/content/leetcode-adapter";
 import {
   renderSidePanel,
   type SidePanelController
@@ -11,10 +11,10 @@ import {
 import type {
   ActiveTabSource,
   ActiveTabSourceOptions,
-  ActiveTabSnapshot
+  ActiveTabPageState
 } from "../../src/sidepanel/active-tab-source";
 
-function snapshot(overrides: Partial<LeetCodeSnapshot> = {}): LeetCodeSnapshot {
+function pageState(overrides: Partial<LeetCodePageState> = {}): LeetCodePageState {
   return {
     code: "class Solution:\n    def one(self, value):\n        return value\n",
     language: "python",
@@ -42,7 +42,7 @@ function completedSession(request: ExecutionRequest): TraceSession {
 
 function fakeActiveTabSourceFactory() {
   let callbacks!: ActiveTabSourceOptions;
-  const refresh = vi.fn<() => Promise<ActiveTabSnapshot | null>>()
+  const refresh = vi.fn<() => Promise<ActiveTabPageState | null>>()
     .mockResolvedValue(null);
   const dispose = vi.fn();
   const start = vi.fn(async () => undefined);
@@ -129,7 +129,7 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
-  it("visualizes the canonical snapshot emitted by the active tab source", async () => {
+  it("visualizes the canonical page state emitted by the active tab source", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
@@ -141,7 +141,7 @@ describe("renderSidePanel", () => {
 
     expect(source.start).toHaveBeenCalledTimes(1);
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
 
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: synced");
@@ -149,11 +149,11 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
-  it("automatically executes a newer snapshot from the active tab source", async () => {
+  it("automatically executes a newer page state from the active tab source", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
-    const first = snapshot();
-    const second = snapshot({
+    const first = pageState();
+    const second = pageState({
       code: "class Solution:\n    def one(self, value):\n        return value + 1\n"
     });
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
@@ -165,10 +165,10 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: first });
+    source.callbacks().onPageState({ tabId: 11, state: first });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
 
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: second });
+    source.callbacks().onPageState({ tabId: 11, state: second });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(execute.mock.calls[1]?.[0].sourceCode).toBe(second.code);
     handle.dispose();
@@ -177,7 +177,7 @@ describe("renderSidePanel", () => {
   it("automatically executes the selected testcase case", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
-    const current = snapshot({ testcase: "7\n8\n9" });
+    const current = pageState({ testcase: "7\n8\n9" });
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
 
     const handle = renderSidePanel(root, {
@@ -187,7 +187,7 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: current });
+    source.callbacks().onPageState({ tabId: 11, state: current });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(execute.mock.calls[0]?.[0].rawTestcase).toBe("7");
 
@@ -203,7 +203,7 @@ describe("renderSidePanel", () => {
   it("keeps the previous visualization while the latest code is incomplete", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
-    const initial = snapshot();
+    const initial = pageState();
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
 
     const handle = renderSidePanel(root, {
@@ -213,12 +213,12 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: initial });
+    source.callbacks().onPageState({ tabId: 11, state: initial });
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
 
-    source.callbacks().onSnapshot({
+    source.callbacks().onPageState({
       tabId: 11,
-      snapshot: {
+      state: {
         ...initial,
         code: "class Solution:\n    def one(self, value):"
       }
@@ -243,7 +243,7 @@ describe("renderSidePanel", () => {
   ) => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
-    const current = snapshot();
+    const current = pageState();
     const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({
       ...completedSession(request),
       status: sessionStatus,
@@ -257,7 +257,7 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: current });
+    source.callbacks().onPageState({ tabId: 11, state: current });
     await vi.waitFor(() =>
       expect(root.querySelector("#runtime-status")?.textContent).toBe(expectedText)
     );
@@ -282,22 +282,22 @@ describe("renderSidePanel", () => {
       liveDebounceMs: 0
     });
 
-    const binary = snapshot({
+    const binary = pageState({
       code: "class Solution:\n    def search(self, value):\n        return value\n",
       metadata: { slug: "binary-search", title: "Binary Search" }
     });
-    const twoSum = snapshot({
+    const twoSum = pageState({
       code: "class Solution:\n    def twoSum(self, value):\n        return value\n",
       metadata: { slug: "two-sum", title: "Two Sum" }
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: binary });
+    source.callbacks().onPageState({ tabId: 11, state: binary });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
 
     source.callbacks().onOwnershipInvalidated();
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 22 });
-    source.callbacks().onSnapshot({ tabId: 22, snapshot: twoSum });
+    source.callbacks().onPageState({ tabId: 22, state: twoSum });
 
     first.resolve(completedSession(requests[0]!));
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
@@ -320,7 +320,7 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
 
     source.callbacks().onOwnershipInvalidated();
@@ -330,16 +330,16 @@ describe("renderSidePanel", () => {
     expect(root.querySelector("#trace-viewer")).not.toBeNull();
     expect(execute).toHaveBeenCalledTimes(1);
 
-    const resumed = snapshot({ testcase: "8" });
+    const resumed = pageState({ testcase: "8" });
     source.callbacks().onOwnershipInvalidated();
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 22 });
-    source.callbacks().onSnapshot({ tabId: 22, snapshot: resumed });
+    source.callbacks().onPageState({ tabId: 22, state: resumed });
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(execute.mock.calls[1]?.[0].rawTestcase).toBe("8");
     handle.dispose();
   });
 
-  it("Run now refreshes the exact owned tab snapshot and executes it immediately", async () => {
+  it("Run now refreshes the exact owned tab page state and executes it immediately", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
     const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
@@ -350,10 +350,10 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot({ testcase: "7" }) });
+    source.callbacks().onPageState({ tabId: 11, state: pageState({ testcase: "7" }) });
     source.refresh.mockResolvedValue({
       tabId: 11,
-      snapshot: snapshot({ testcase: "8" })
+      state: pageState({ testcase: "8" })
     });
 
     root.querySelector<HTMLButtonElement>("#run")?.click();
@@ -375,7 +375,7 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
 
     source.refresh.mockImplementation(async () => {
@@ -406,7 +406,7 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
 
     source.refresh.mockImplementation(async () => {
@@ -435,12 +435,12 @@ describe("renderSidePanel", () => {
     });
 
     source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
-    source.callbacks().onSnapshot({ tabId: 11, snapshot: snapshot() });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
 
-    source.callbacks().onError(new Error("No valid LeetCode snapshot was returned"));
+    source.callbacks().onError(new Error("No valid LeetCode page state was returned"));
     expect(root.querySelector("#runtime-status")?.textContent)
-      .toBe("Live: No valid LeetCode snapshot was returned");
+      .toBe("Live: No valid LeetCode page state was returned");
     expect(root.querySelector("#trace-viewer")).not.toBeNull();
     handle.dispose();
   });

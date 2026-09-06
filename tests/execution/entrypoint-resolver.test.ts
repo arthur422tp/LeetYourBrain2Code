@@ -78,4 +78,12 @@ describe("resolveEntrypoint", () => {
       reason: "entrypoint_resolution_failed"
     });
   });
+
+  it("rejects a method signature whose body is still incomplete", () => {
+    expect(resolveEntrypoint(`class Solution:
+    def one(self, value):`)).toEqual({
+      ok: false,
+      reason: "entrypoint_resolution_failed"
+    });
+  });
 });

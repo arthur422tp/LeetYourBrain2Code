@@ -7,6 +7,7 @@ export type EntrypointResolution =
 interface MethodCandidate {
   name: string;
   parameterSource: string;
+  hasBody: boolean;
 }
 
 function indentationWidth(line: string): number {
@@ -214,9 +215,29 @@ function findMethods(lines: string[], classInfo: { indent: number; start: number
       continue;
     }
 
+    const headerTail = signature.slice(closingIndex + 1);
+    const colonIndex = headerTail.lastIndexOf(":");
+    const inlineBody =
+      colonIndex >= 0 &&
+      headerTail.slice(colonIndex + 1).trim().length > 0 &&
+      !headerTail.slice(colonIndex + 1).trim().startsWith("#");
+    let hasBody = inlineBody;
+
+    if (!hasBody) {
+      for (let bodyIndex = nextLine; bodyIndex < lines.length; bodyIndex += 1) {
+        const bodyLine = lines[bodyIndex];
+        if (bodyLine.trim().length === 0) {
+          continue;
+        }
+        hasBody = indentationWidth(bodyLine) > currentIndent;
+        break;
+      }
+    }
+
     methods.push({
       name: methodMatch[2],
-      parameterSource: signature.slice(1, closingIndex)
+      parameterSource: signature.slice(1, closingIndex),
+      hasBody
     });
   }
 
@@ -233,7 +254,7 @@ export function resolveEntrypoint(sourceCode: string): EntrypointResolution {
   const candidates = findMethods(lines, classInfo).filter(
     (method) => method.name !== "__init__" && !method.name.startsWith("_")
   );
-  if (candidates.length !== 1) {
+  if (candidates.length !== 1 || !candidates[0]?.hasBody) {
     return { ok: false, reason: "entrypoint_resolution_failed" };
   }
 

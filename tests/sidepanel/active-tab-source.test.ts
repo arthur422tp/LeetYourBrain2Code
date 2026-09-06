@@ -468,6 +468,142 @@ describe("createActiveTabSource", () => {
     );
   });
 
+  it("re-resolves a replacement tab when activation metadata lookup fails", async () => {
+    const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+    const replacement = tab(23, 7, "https://leetcode.com/problems/two-sum/");
+    const chromeFake = fakeChrome(first);
+    chromeFake.tabs.set(23, replacement);
+    chromeFake.responses.set(11, snapshot("search"));
+    chromeFake.responses.set(23, snapshot("twoSum"));
+
+    let queryCount = 0;
+    (chromeFake.api.tabs.query as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((_query: unknown, callback: (tabs: chrome.tabs.Tab[]) => void) => {
+        queryCount += 1;
+        callback(queryCount <= 2 ? [first] : [replacement]);
+      });
+    (chromeFake.api.tabs.get as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((tabId: number, callback: (resolvedTab: chrome.tabs.Tab) => void) => {
+        if (tabId === 22) {
+          Object.defineProperty(chromeFake.api.runtime, "lastError", {
+            configurable: true,
+            value: { message: "No tab with id: 22" }
+          });
+          callback(undefined as unknown as chrome.tabs.Tab);
+          Object.defineProperty(chromeFake.api.runtime, "lastError", {
+            configurable: true,
+            value: undefined
+          });
+          return;
+        }
+        callback(chromeFake.tabs.get(tabId)!);
+      });
+
+    const emitted: ActiveTabSnapshot[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: vi.fn(),
+      onSnapshot: (value) => emitted.push(value),
+      onError: vi.fn()
+    }, chromeFake.api);
+    await source.start();
+
+    chromeFake.onActivated.emit({ tabId: 22, windowId: 7 });
+    await vi.waitFor(() =>
+      expect(emitted.at(-1)).toEqual({ tabId: 23, snapshot: snapshot("twoSum") })
+    );
+  });
+
+  it("re-resolves ownership when refresh fails for the current exact tab", async () => {
+    const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+    const replacement = tab(22, 7, "https://leetcode.com/problems/two-sum/");
+    const chromeFake = fakeChrome(first);
+    chromeFake.tabs.set(22, replacement);
+    chromeFake.responses.set(11, snapshot("search"));
+    chromeFake.responses.set(22, snapshot("twoSum"));
+
+    let queryCount = 0;
+    (chromeFake.api.tabs.query as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((_query: unknown, callback: (tabs: chrome.tabs.Tab[]) => void) => {
+        queryCount += 1;
+        callback(queryCount <= 2 ? [first] : [replacement]);
+      });
+
+    let requestCount = 0;
+    (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((
+        tabId: number,
+        _message: unknown,
+        callback: (response: unknown) => void
+      ) => {
+        requestCount += 1;
+        if (tabId === 11 && requestCount === 2) {
+          callback({ ok: false });
+          return;
+        }
+        callback({ ok: true, snapshot: chromeFake.responses.get(tabId) });
+      });
+
+    const emitted: ActiveTabSnapshot[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: vi.fn(),
+      onSnapshot: (value) => emitted.push(value),
+      onError: vi.fn()
+    }, chromeFake.api);
+    await source.start();
+
+    await expect(source.refresh()).rejects.toThrow("No valid LeetCode snapshot was returned");
+    await vi.waitFor(() =>
+      expect(emitted.at(-1)).toEqual({ tabId: 22, snapshot: snapshot("twoSum") })
+    );
+  });
+
+  it("ignores an older same-epoch navigation fetch after completion refresh wins", async () => {
+    const initial = tab(11, 7, "https://leetcode.com/problems/two-sum/");
+    const updated = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+    const chromeFake = fakeChrome(initial);
+    const callbacks: Array<{
+      tabId: number;
+      resolve: (response: unknown) => void;
+    }> = [];
+    (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((
+        tabId: number,
+        _message: unknown,
+        callback: (response: unknown) => void
+      ) => {
+        callbacks.push({ tabId, resolve: callback });
+      });
+
+    const emitted: ActiveTabSnapshot[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: vi.fn(),
+      onSnapshot: (value) => emitted.push(value),
+      onError: vi.fn()
+    }, chromeFake.api);
+
+    const starting = source.start();
+    await vi.waitFor(() => expect(callbacks).toHaveLength(1));
+    callbacks[0]!.resolve({ ok: true, snapshot: snapshot("initial") });
+    await starting;
+    emitted.length = 0;
+
+    chromeFake.onUpdated.emit(11, { url: updated.url }, updated);
+    await vi.waitFor(() => expect(callbacks).toHaveLength(2));
+    chromeFake.onUpdated.emit(11, { status: "complete" }, updated);
+    await vi.waitFor(() => expect(callbacks).toHaveLength(3));
+
+    callbacks[2]!.resolve({ ok: true, snapshot: snapshot("newest") });
+    await vi.waitFor(() => expect(emitted).toHaveLength(1));
+    callbacks[1]!.resolve({ ok: true, snapshot: snapshot("stale") });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(emitted).toEqual([{ tabId: 11, snapshot: snapshot("newest") }]);
+  });
+
   it("refresh returns the current exact-tab snapshot without emitting it", async () => {
     const chromeFake = fakeChrome(tab(
       11,

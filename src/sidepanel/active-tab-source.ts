@@ -28,6 +28,12 @@ export interface ActiveTabSource {
 
 type ChromeApi = Pick<typeof chrome, "runtime" | "tabs" | "scripting">;
 
+interface FetchContext {
+  tabId: number;
+  epoch: number;
+  sequence: number;
+}
+
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -137,68 +143,53 @@ export function createActiveTabSource(
   let activeLeetCodeTabId: number | null = null;
   let activeTabEpoch = 0;
   let currentTabUrl: string | undefined;
+  let fetchSequence = 0;
   let started = false;
   let disposed = false;
 
   const isCurrent = (tabId: number, epoch: number): boolean =>
     !disposed && activeLeetCodeTabId === tabId && activeTabEpoch === epoch;
 
+  const beginFetch = (tabId: number, epoch: number): FetchContext => ({
+    tabId,
+    epoch,
+    sequence: ++fetchSequence
+  });
+
+  const isCurrentFetch = (context: FetchContext): boolean =>
+    isCurrent(context.tabId, context.epoch) && context.sequence === fetchSequence;
+
   const fetchCurrent = async (
-    tabId: number,
-    epoch: number
+    context: FetchContext
   ): Promise<ActiveTabSnapshot | null> => {
-    const currentSnapshot = await requestSnapshot(chromeApi, tabId);
-    return isCurrent(tabId, epoch)
-      ? { tabId, snapshot: currentSnapshot }
+    const currentSnapshot = await requestSnapshot(chromeApi, context.tabId);
+    return isCurrentFetch(context)
+      ? { tabId: context.tabId, snapshot: currentSnapshot }
       : null;
   };
 
   const refreshAndEmit = async (tabId: number, epoch: number): Promise<void> => {
+    const context = beginFetch(tabId, epoch);
     try {
-      const value = await fetchCurrent(tabId, epoch);
+      const value = await fetchCurrent(context);
       if (value) options.onSnapshot(value);
     } catch (error) {
-      if (!isCurrent(tabId, epoch)) return;
+      if (!isCurrentFetch(context)) return;
       options.onError(normalizeError(error));
-
-      let active: chrome.tabs.Tab | null;
-      try {
-        active = await queryCurrentActiveTab(chromeApi);
-      } catch {
-        return;
-      }
-
-      if (
-        disposed ||
-        epoch !== activeTabEpoch ||
-        (active !== null && active.windowId !== currentWindowId)
-      ) {
-        return;
-      }
-
-      if (active?.id === undefined) {
-        currentActiveTabId = null;
-        activeLeetCodeTabId = null;
-        currentTabUrl = undefined;
-        ++activeTabEpoch;
-        options.onOwnershipInvalidated();
-        options.onStateChange({ kind: "paused" });
-        return;
-      }
-
-      if (active.id === currentActiveTabId) {
-        if (!isLeetCodeUrl(active.url)) {
-          activeLeetCodeTabId = null;
-          currentTabUrl = active.url;
-          ++activeTabEpoch;
-          options.onOwnershipInvalidated();
-          options.onStateChange({ kind: "paused" });
-        }
-        return;
-      }
-
-      void activate(active.id, active.windowId);
+      await reconcileAfterFailure(epoch, false, context);
     }
+  };
+
+  const enterPaused = (
+    url: string | undefined,
+    clearCurrentActiveTab: boolean
+  ): void => {
+    activeLeetCodeTabId = null;
+    currentTabUrl = url;
+    if (clearCurrentActiveTab) currentActiveTabId = null;
+    ++activeTabEpoch;
+    options.onOwnershipInvalidated();
+    options.onStateChange({ kind: "paused" });
   };
 
   const applyResolvedTab = async (
@@ -246,7 +237,58 @@ export function createActiveTabSource(
     } catch (error) {
       if (!disposed && epoch === activeTabEpoch) {
         options.onError(normalizeError(error));
+        await reconcileAfterFailure(epoch, true);
       }
+    }
+  };
+
+  const reconcileAfterFailure = async (
+    epoch: number,
+    retrySameTab: boolean,
+    fetchContext?: FetchContext
+  ): Promise<void> => {
+    if (
+      disposed ||
+      epoch !== activeTabEpoch ||
+      (fetchContext !== undefined && !isCurrentFetch(fetchContext))
+    ) {
+      return;
+    }
+
+    let active: chrome.tabs.Tab | null;
+    try {
+      active = await queryCurrentActiveTab(chromeApi);
+    } catch {
+      return;
+    }
+
+    if (
+      disposed ||
+      epoch !== activeTabEpoch ||
+      (fetchContext !== undefined && !isCurrentFetch(fetchContext))
+    ) {
+      return;
+    }
+
+    if (active === null || active.id === undefined) {
+      enterPaused(undefined, true);
+      return;
+    }
+
+    if (active.windowId !== currentWindowId) return;
+
+    if (active.id !== currentActiveTabId) {
+      void activate(active.id, active.windowId);
+      return;
+    }
+
+    if (!isLeetCodeUrl(active.url)) {
+      enterPaused(active.url, false);
+      return;
+    }
+
+    if (retrySameTab) {
+      await applyResolvedTab(active, epoch);
     }
   };
 
@@ -353,7 +395,14 @@ export function createActiveTabSource(
 
   const refresh = async (): Promise<ActiveTabSnapshot | null> => {
     if (disposed || activeLeetCodeTabId === null) return null;
-    return fetchCurrent(activeLeetCodeTabId, activeTabEpoch);
+    const context = beginFetch(activeLeetCodeTabId, activeTabEpoch);
+    try {
+      return await fetchCurrent(context);
+    } catch (error) {
+      if (!isCurrentFetch(context)) return null;
+      await reconcileAfterFailure(context.epoch, false, context);
+      throw error;
+    }
   };
 
   const dispose = (): void => {

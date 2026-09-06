@@ -273,8 +273,12 @@ describe("TraceSessionCollector", () => {
   });
 
   it("finishes normally when the worker sends a terminal result", async () => {
+    let worker: FakeWorker | undefined;
     const controller = new ExecutionController({
-      workerFactory: () => new FakeWorker(true)
+      workerFactory: () => {
+        worker = new FakeWorker(true);
+        return worker;
+      }
     });
 
     const session = await controller.execute(request);
@@ -282,5 +286,8 @@ describe("TraceSessionCollector", () => {
     expect(session.events).toHaveLength(100);
     expect(session.status).toBe("completed");
     expect(session.returnValue).toEqual({ type: "int", value: "1" });
+    expect(worker?.terminated).toBe(false);
+    controller.dispose();
+    expect(worker?.terminated).toBe(true);
   });
 });

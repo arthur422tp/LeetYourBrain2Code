@@ -62,17 +62,11 @@ public/manifest.json                         # verify unchanged permissions
 - Modify: `tests/execution/live-execution-scheduler.test.ts`
 
 **Interfaces:**
-- Existing:
 
 ```ts
 schedule(input: LiveExecutionInput, options?: LiveScheduleOptions): number;
-dispose(): void;
-```
-
-- Add:
-
-```ts
 invalidate(): number;
+dispose(): void;
 ```
 
 `invalidate()` increments scheduler revision, clears debounce/pending work, marks the current running result stale, clears duplicate-input suppression so an identical snapshot from a newly-owned tab may execute, and emits no `LiveStatus` by itself.
@@ -122,6 +116,7 @@ it("invalidates a running result without emitting a replacement status", async (
 it("clears debounced and pending work on invalidation", async () => {
   const first = deferred<TraceSession>();
   const requests: ExecutionRequest[] = [];
+  let sessionId = 0;
   const scheduler = new LiveExecutionScheduler({
     runner: {
       execute: (request) => {
@@ -131,7 +126,7 @@ it("clears debounced and pending work on invalidation", async () => {
           : Promise.resolve(makeSession(request));
       }
     },
-    createSessionId: () => `invalidate-${requests.length + 1}`,
+    createSessionId: () => `invalidate-${++sessionId}`,
     debounceMs: 25
   });
 
@@ -227,7 +222,7 @@ git commit -m "feat: invalidate stale live executions"
 
 ---
 
-### Task 2: Create `ActiveTabSource` Core Ownership and Exact-Tab Snapshot Flow
+### Task 2: Create `ActiveTabSource` Core Ownership, Filtering, and Epoch Semantics
 
 **Files:**
 - Create: `src/sidepanel/active-tab-source.ts`
@@ -264,11 +259,11 @@ export function createActiveTabSource(
 ): ActiveTabSource;
 ```
 
-`onOwnershipInvalidated()` is intentionally separate from `onStateChange()`: tab activation/navigation must make old scheduler work stale immediately, before an asynchronous `tabs.get()` or snapshot fetch resolves, without falsely showing `paused` during a LeetCode→LeetCode transition.
+`onOwnershipInvalidated()` is separate from `onStateChange()`: activation must make old scheduler work stale immediately, before asynchronous `tabs.get()`/snapshot work resolves, without briefly mislabeling a LeetCode→LeetCode switch as paused.
 
-`refresh()` preserves the existing `Run now` semantics: it fetches the canonical snapshot from the currently-owned exact tab and returns it only if the `(tabId, epoch)` is still current. It does not emit `onSnapshot()` itself; normal tab/runtime flows use internal refresh-and-emit behavior.
+`refresh()` preserves `Run now`: it fetches the current exact owner and returns a snapshot only if `(tabId, epoch)` is still current. It does not emit `onSnapshot()` itself.
 
-Internal state must include:
+Internal state for Task 2:
 
 ```ts
 let currentWindowId: number | null = null;
@@ -279,11 +274,9 @@ let started = false;
 let disposed = false;
 ```
 
-`currentActiveTabId` is required even while paused so same-tab navigation from a non-LeetCode page back to LeetCode can be detected by `tabs.onUpdated`.
+- [ ] **Step 1: Create reusable fake Chrome events and data helpers**
 
-- [ ] **Step 1: Create reusable fake Chrome events for the tests**
-
-Start `tests/sidepanel/active-tab-source.test.ts` with:
+Create `tests/sidepanel/active-tab-source.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
@@ -322,18 +315,25 @@ function snapshot(slug: string): LeetCodeSnapshot {
   };
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((next, fail) => {
-    resolve = next;
-    reject = fail;
-  });
-  return { promise, resolve, reject };
+function tab(
+  id: number,
+  windowId: number,
+  url: string | undefined
+): chrome.tabs.Tab {
+  return {
+    id,
+    windowId,
+    active: true,
+    index: 0,
+    pinned: false,
+    highlighted: true,
+    incognito: false,
+    url
+  } as chrome.tabs.Tab;
 }
 ```
 
-Create a fake Chrome builder that uses callbacks like the current production code:
+Create a fake Chrome builder:
 
 ```ts
 function fakeChrome(initialTab: chrome.tabs.Tab) {
@@ -381,17 +381,11 @@ function fakeChrome(initialTab: chrome.tabs.Tab) {
 
 ```ts
 it("owns and fetches the initial active LeetCode tab", async () => {
-  const tab = {
-    id: 11,
-    windowId: 7,
-    active: true,
-    index: 0,
-    pinned: false,
-    highlighted: true,
-    incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+  const chromeFake = fakeChrome(tab(
+    11,
+    7,
+    "https://leetcode.com/problems/two-sum/"
+  ));
   chromeFake.responses.set(11, snapshot("twoSum"));
   const states: ActiveTabState[] = [];
   const snapshots: ActiveTabSnapshot[] = [];
@@ -415,21 +409,12 @@ it("owns and fetches the initial active LeetCode tab", async () => {
 });
 ```
 
-- [ ] **Step 3: Write the LeetCode→LeetCode activation test**
+- [ ] **Step 3: Write exact activated-tab and current-window tests**
 
 ```ts
 it("invalidates immediately and fetches the exact newly activated LeetCode tab", async () => {
-  const first = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/binary-search/"
-  } as chrome.tabs.Tab;
-  const second = {
-    ...first,
-    id: 22,
-    index: 1,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
+  const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+  const second = tab(22, 7, "https://leetcode.com/problems/two-sum/");
   const chromeFake = fakeChrome(first);
   chromeFake.tabs.set(22, second);
   chromeFake.responses.set(11, snapshot("search"));
@@ -457,18 +442,43 @@ it("invalidates immediately and fetches the exact newly activated LeetCode tab",
     expect.any(Function)
   );
 });
+
+it("ignores tab activation from another Chrome window", async () => {
+  const first = tab(11, 7, "https://leetcode.com/problems/two-sum/");
+  const otherWindow = tab(44, 9, "https://leetcode.com/problems/binary-search/");
+  const chromeFake = fakeChrome(first);
+  chromeFake.tabs.set(44, otherWindow);
+  chromeFake.responses.set(11, snapshot("twoSum"));
+  const invalidated = vi.fn();
+  const source = createActiveTabSource({
+    onOwnershipInvalidated: invalidated,
+    onStateChange: vi.fn(),
+    onSnapshot: vi.fn(),
+    onError: vi.fn()
+  }, chromeFake.api);
+  await source.start();
+
+  chromeFake.onActivated.emit({ tabId: 44, windowId: 9 });
+  await Promise.resolve();
+
+  expect(invalidated).not.toHaveBeenCalled();
+  expect(chromeFake.api.tabs.sendMessage).not.toHaveBeenCalledWith(
+    44,
+    expect.anything(),
+    expect.any(Function)
+  );
+});
 ```
 
-- [ ] **Step 4: Write background/active runtime sender filtering tests**
+- [ ] **Step 4: Write background/active runtime sender filtering test**
 
 ```ts
 it("accepts runtime snapshots only from the active owned tab", async () => {
-  const tab = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+  const chromeFake = fakeChrome(tab(
+    11,
+    7,
+    "https://leetcode.com/problems/two-sum/"
+  ));
   chromeFake.responses.set(11, snapshot("initial"));
   const snapshots: ActiveTabSnapshot[] = [];
   const source = createActiveTabSource({
@@ -482,12 +492,12 @@ it("accepts runtime snapshots only from the active owned tab", async () => {
 
   chromeFake.onMessage.emit(
     { type: "leetcode_snapshot_updated", snapshot: snapshot("background") },
-    { tab: { id: 99, windowId: 7 } as chrome.tabs.Tab },
+    { tab: tab(99, 7, "https://leetcode.com/problems/binary-search/") },
     vi.fn()
   );
   chromeFake.onMessage.emit(
     { type: "leetcode_snapshot_updated", snapshot: snapshot("active") },
-    { tab: { id: 11, windowId: 7 } as chrome.tabs.Tab },
+    { tab: tab(11, 7, "https://leetcode.com/problems/two-sum/") },
     vi.fn()
   );
 
@@ -495,20 +505,14 @@ it("accepts runtime snapshots only from the active owned tab", async () => {
 });
 ```
 
-- [ ] **Step 5: Write stale async fetch suppression test**
-
-For this test, replace the fake `sendMessage` implementation with deferred callbacks:
+- [ ] **Step 5: Write stale snapshot and stale error suppression tests**
 
 ```ts
-it("ignores a slow snapshot from a previously active tab", async () => {
-  const first = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/binary-search/"
-  } as chrome.tabs.Tab;
-  const second = { ...first, id: 22, index: 1, url: "https://leetcode.com/problems/two-sum/" };
+it("ignores a slow snapshot and error from a previously active tab", async () => {
+  const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+  const second = tab(22, 7, "https://leetcode.com/problems/two-sum/");
   const chromeFake = fakeChrome(first);
-  chromeFake.tabs.set(22, second as chrome.tabs.Tab);
+  chromeFake.tabs.set(22, second);
 
   const callbacks = new Map<number, (response: unknown) => void>();
   (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
@@ -517,11 +521,12 @@ it("ignores a slow snapshot from a previously active tab", async () => {
     });
 
   const emitted: ActiveTabSnapshot[] = [];
+  const onError = vi.fn();
   const source = createActiveTabSource({
     onOwnershipInvalidated: vi.fn(),
     onStateChange: vi.fn(),
     onSnapshot: (value) => emitted.push(value),
-    onError: vi.fn()
+    onError
   }, chromeFake.api);
 
   const starting = source.start();
@@ -532,28 +537,23 @@ it("ignores a slow snapshot from a previously active tab", async () => {
   callbacks.get(22)!({ ok: true, snapshot: snapshot("twoSum") });
   await vi.waitFor(() => expect(emitted).toHaveLength(1));
 
-  callbacks.get(11)!({ ok: true, snapshot: snapshot("search") });
+  callbacks.get(11)!({ ok: false });
   await starting;
   await Promise.resolve();
 
   expect(emitted).toEqual([{ tabId: 22, snapshot: snapshot("twoSum") }]);
+  expect(onError).not.toHaveBeenCalled();
 });
 ```
 
-- [ ] **Step 6: Write paused/current-window tests**
+- [ ] **Step 6: Write paused activation test**
 
 ```ts
-it("pauses for a non-LeetCode active tab and ignores activations in another window", async () => {
-  const leetcode = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const nonLeetCode = { ...leetcode, id: 33, url: undefined };
-  const otherWindow = { ...leetcode, id: 44, windowId: 9 };
+it("pauses when the current-window active tab is not LeetCode", async () => {
+  const leetcode = tab(11, 7, "https://leetcode.com/problems/two-sum/");
+  const nonLeetCode = tab(33, 7, undefined);
   const chromeFake = fakeChrome(leetcode);
-  chromeFake.tabs.set(33, nonLeetCode as chrome.tabs.Tab);
-  chromeFake.tabs.set(44, otherWindow as chrome.tabs.Tab);
+  chromeFake.tabs.set(33, nonLeetCode);
   chromeFake.responses.set(11, snapshot("twoSum"));
   const states: ActiveTabState[] = [];
   const source = createActiveTabSource({
@@ -563,10 +563,6 @@ it("pauses for a non-LeetCode active tab and ignores activations in another wind
     onError: vi.fn()
   }, chromeFake.api);
   await source.start();
-
-  chromeFake.onActivated.emit({ tabId: 44, windowId: 9 });
-  await Promise.resolve();
-  expect(states.at(-1)).toEqual({ kind: "leetcode", tabId: 11 });
 
   chromeFake.onActivated.emit({ tabId: 33, windowId: 7 });
   await vi.waitFor(() => expect(states.at(-1)).toEqual({ kind: "paused" }));
@@ -581,7 +577,7 @@ npm test -- active-tab-source
 
 Expected: FAIL because `src/sidepanel/active-tab-source.ts` does not exist.
 
-- [ ] **Step 8: Implement the core ActiveTabSource helpers**
+- [ ] **Step 8: Implement exact-tab snapshot helpers**
 
 Create `src/sidepanel/active-tab-source.ts` beginning with:
 
@@ -616,12 +612,12 @@ export interface ActiveTabSource {
 
 type ChromeApi = Pick<typeof chrome, "runtime" | "tabs" | "scripting">;
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function isMissingReceiverError(error: unknown): boolean {
-  const message = errorText(error);
+  const message = normalizeError(error).message;
   return message.includes("Receiving end does not exist") ||
     message.includes("Could not establish connection");
 }
@@ -654,13 +650,13 @@ function queryCurrentActiveTab(api: ChromeApi): Promise<chrome.tabs.Tab | null> 
 
 function getTab(api: ChromeApi, tabId: number): Promise<chrome.tabs.Tab> {
   return new Promise((resolve, reject) => {
-    api.tabs.get(tabId, (tab) => {
+    api.tabs.get(tabId, (resolvedTab) => {
       const runtimeError = api.runtime.lastError;
       if (runtimeError) {
         reject(new Error(runtimeError.message));
         return;
       }
-      resolve(tab);
+      resolve(resolvedTab);
     });
   });
 }
@@ -692,11 +688,7 @@ function requestSnapshotOnce(api: ChromeApi, tabId: number): Promise<LeetCodeSna
     );
   });
 }
-```
 
-Add exact-tab reinjection:
-
-```ts
 async function injectLeetCodeContentScripts(api: ChromeApi, tabId: number): Promise<void> {
   const target = { tabId };
   await api.scripting.executeScript({
@@ -710,10 +702,7 @@ async function injectLeetCodeContentScripts(api: ChromeApi, tabId: number): Prom
   });
 }
 
-async function requestSnapshot(
-  api: ChromeApi,
-  tabId: number
-): Promise<LeetCodeSnapshot> {
+async function requestSnapshot(api: ChromeApi, tabId: number): Promise<LeetCodeSnapshot> {
   try {
     return await requestSnapshotOnce(api, tabId);
   } catch (error) {
@@ -724,9 +713,9 @@ async function requestSnapshot(
 }
 ```
 
-- [ ] **Step 9: Implement ownership/epoch transitions**
+- [ ] **Step 9: Implement a complete Task-2 lifecycle**
 
-Use a closure-based factory with the exact state listed above. The core transition must follow this shape:
+Use a closure-based factory. Task 2 must compile and pass independently before navigation support is added in Task 3:
 
 ```ts
 export function createActiveTabSource(
@@ -741,16 +730,16 @@ export function createActiveTabSource(
   let disposed = false;
 
   const isCurrent = (tabId: number, epoch: number): boolean =>
-    !disposed &&
-    activeLeetCodeTabId === tabId &&
-    activeTabEpoch === epoch;
+    !disposed && activeLeetCodeTabId === tabId && activeTabEpoch === epoch;
 
   const fetchCurrent = async (
     tabId: number,
     epoch: number
   ): Promise<ActiveTabSnapshot | null> => {
-    const snapshot = await requestSnapshot(chromeApi, tabId);
-    return isCurrent(tabId, epoch) ? { tabId, snapshot } : null;
+    const currentSnapshot = await requestSnapshot(chromeApi, tabId);
+    return isCurrent(tabId, epoch)
+      ? { tabId, snapshot: currentSnapshot }
+      : null;
   };
 
   const refreshAndEmit = async (tabId: number, epoch: number): Promise<void> => {
@@ -759,56 +748,148 @@ export function createActiveTabSource(
       if (value) options.onSnapshot(value);
     } catch (error) {
       if (isCurrent(tabId, epoch)) {
-        options.onError(error instanceof Error ? error : new Error(String(error)));
+        options.onError(normalizeError(error));
       }
     }
   };
 
   const applyResolvedTab = async (
-    tab: chrome.tabs.Tab,
+    resolvedTab: chrome.tabs.Tab,
     epoch: number
   ): Promise<void> => {
-    if (disposed || epoch !== activeTabEpoch || tab.id !== currentActiveTabId) return;
+    if (
+      disposed ||
+      epoch !== activeTabEpoch ||
+      resolvedTab.id === undefined ||
+      resolvedTab.id !== currentActiveTabId
+    ) {
+      return;
+    }
 
-    if (!isLeetCodeUrl(tab.url)) {
+    if (!isLeetCodeUrl(resolvedTab.url)) {
       activeLeetCodeTabId = null;
       options.onStateChange({ kind: "paused" });
       return;
     }
 
-    activeLeetCodeTabId = tab.id!;
-    options.onStateChange({ kind: "leetcode", tabId: tab.id! });
-    await refreshAndEmit(tab.id!, epoch);
+    activeLeetCodeTabId = resolvedTab.id;
+    options.onStateChange({ kind: "leetcode", tabId: resolvedTab.id });
+    await refreshAndEmit(resolvedTab.id, epoch);
   };
 
   const activate = async (tabId: number, windowId: number): Promise<void> => {
-    if (disposed || (currentWindowId !== null && windowId !== currentWindowId)) return;
+    if (
+      disposed ||
+      currentWindowId === null ||
+      windowId !== currentWindowId
+    ) {
+      return;
+    }
+
     currentActiveTabId = tabId;
     activeLeetCodeTabId = null;
     const epoch = ++activeTabEpoch;
     options.onOwnershipInvalidated();
+
     try {
       await applyResolvedTab(await getTab(chromeApi, tabId), epoch);
     } catch (error) {
       if (!disposed && epoch === activeTabEpoch) {
-        options.onError(error instanceof Error ? error : new Error(String(error)));
+        options.onError(normalizeError(error));
       }
     }
   };
 
-  // listeners and returned lifecycle methods are completed in Task 3
+  const onActivated = (info: chrome.tabs.TabActiveInfo): void => {
+    void activate(info.tabId, info.windowId);
+  };
+
+  const onRuntimeMessage = (
+    message: unknown,
+    sender: chrome.runtime.MessageSender
+  ): void => {
+    if (
+      disposed ||
+      sender.tab?.id !== activeLeetCodeTabId ||
+      typeof message !== "object" ||
+      message === null ||
+      !("type" in message) ||
+      message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.snapshotUpdated ||
+      !("snapshot" in message) ||
+      !validateSnapshot(message.snapshot)
+    ) {
+      return;
+    }
+
+    options.onSnapshot({
+      tabId: activeLeetCodeTabId,
+      snapshot: message.snapshot
+    });
+  };
+
+  const attachCoreListeners = (): void => {
+    chromeApi.runtime.onMessage.addListener(onRuntimeMessage);
+    chromeApi.tabs.onActivated.addListener(onActivated);
+  };
+
+  const start = async (): Promise<void> => {
+    if (started || disposed) return;
+    started = true;
+
+    // First query establishes which Chrome window this Side Panel belongs to.
+    const initialTab = await queryCurrentActiveTab(chromeApi);
+    if (disposed) return;
+    if (!initialTab?.id) {
+      activeTabEpoch += 1;
+      options.onStateChange({ kind: "paused" });
+      return;
+    }
+
+    currentWindowId = initialTab.windowId;
+    attachCoreListeners();
+
+    // Query again after listener attachment to close the activation race window.
+    const epoch = ++activeTabEpoch;
+    const currentTab = await queryCurrentActiveTab(chromeApi);
+    if (disposed || epoch !== activeTabEpoch) return;
+    if (!currentTab?.id || currentTab.windowId !== currentWindowId) {
+      currentActiveTabId = null;
+      activeLeetCodeTabId = null;
+      options.onStateChange({ kind: "paused" });
+      return;
+    }
+
+    currentActiveTabId = currentTab.id;
+    await applyResolvedTab(currentTab, epoch);
+  };
+
+  const refresh = async (): Promise<ActiveTabSnapshot | null> => {
+    if (disposed || activeLeetCodeTabId === null) return null;
+    return fetchCurrent(activeLeetCodeTabId, activeTabEpoch);
+  };
+
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    ++activeTabEpoch;
+    chromeApi.runtime.onMessage.removeListener(onRuntimeMessage);
+    chromeApi.tabs.onActivated.removeListener(onActivated);
+  };
+
+  return { start, refresh, dispose };
+}
 ```
 
-For `start()`, attach listeners first, then capture an initialization epoch before querying. If an activation event increments the epoch while the initial query is outstanding, the initial query result must be ignored.
+The two-query startup handshake is required: it establishes `currentWindowId` before accepting global `onActivated` events, then re-queries after listeners are attached so a tab switch during startup cannot be missed or attributed to another window.
 
-- [ ] **Step 10: Verify Task 2 core tests**
+- [ ] **Step 10: Verify Task 2**
 
 ```bash
 npm test -- active-tab-source
 npm run typecheck
 ```
 
-Expected: the core ownership/filter/race tests pass. Navigation/recovery lifecycle tests added in Task 3 may still be absent at this point.
+Expected: PASS.
 
 - [ ] **Step 11: Commit**
 
@@ -820,28 +901,33 @@ git commit -m "feat: track active leetcode tab ownership"
 
 ---
 
-### Task 3: Complete Navigation, Recovery, Refresh, and Disposal Semantics
+### Task 3: Add Same-Tab Navigation, Reload, Recovery, and Full Disposal
 
 **Files:**
 - Modify: `src/sidepanel/active-tab-source.ts`
 - Modify: `tests/sidepanel/active-tab-source.test.ts`
-- Verify: `public/manifest.json`
+- Verify unchanged: `public/manifest.json`
 
 **Interfaces:**
-- `ActiveTabSource.start()` installs listeners and resolves initial ownership.
-- `ActiveTabSource.refresh()` returns the currently-owned exact-tab snapshot or `null` if paused/stale.
-- `ActiveTabSource.dispose()` removes all listeners and suppresses future callbacks.
+- `start()` installs runtime, activation, and update listeners.
+- `refresh()` remains exact-owner and non-emitting.
+- `dispose()` removes all three listener families.
 
-- [ ] **Step 1: Add same-tab navigation and reload tests**
+Add one internal field:
 
 ```ts
-it("refetches when the current active tab navigates to another LeetCode problem", async () => {
-  const tab = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+let currentTabUrl: string | undefined;
+```
+
+It prevents a LeetCode URL-change event followed by `status: "complete"` from invalidating twice. URL change invalidates once; the later completion performs only a canonical refresh at the same epoch, so the scheduler's existing duplicate-input suppression can prevent a duplicate execution.
+
+- [ ] **Step 1: Add same-tab LeetCode navigation test**
+
+```ts
+it("invalidates once and refetches when the active tab navigates to another LeetCode problem", async () => {
+  const initial = tab(11, 7, "https://leetcode.com/problems/two-sum/");
+  const updated = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+  const chromeFake = fakeChrome(initial);
   chromeFake.responses.set(11, snapshot("twoSum"));
   const invalidated = vi.fn();
   const emitted: ActiveTabSnapshot[] = [];
@@ -852,56 +938,61 @@ it("refetches when the current active tab navigates to another LeetCode problem"
     onError: vi.fn()
   }, chromeFake.api);
   await source.start();
+  invalidated.mockClear();
   emitted.length = 0;
 
-  const updated = {
-    ...tab,
-    url: "https://leetcode.com/problems/binary-search/"
-  } as chrome.tabs.Tab;
   chromeFake.responses.set(11, snapshot("search"));
   chromeFake.onUpdated.emit(11, { url: updated.url }, updated);
-
   await vi.waitFor(() => expect(emitted).toHaveLength(1));
-  expect(invalidated).toHaveBeenCalledTimes(1);
-  expect(emitted[0]?.snapshot.metadata.slug).toBe("search");
-});
+  chromeFake.onUpdated.emit(11, { status: "complete" }, updated);
+  await vi.waitFor(() => expect(chromeFake.api.tabs.sendMessage).toHaveBeenCalledTimes(4));
 
-it("refetches after the active LeetCode tab completes a reload", async () => {
-  const tab = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+  expect(invalidated).toHaveBeenCalledTimes(1);
+  expect(emitted.at(-1)?.snapshot.metadata.slug).toBe("search");
+});
+```
+
+The expected `sendMessage` count is: one initial fetch after Task-2 startup, one URL-change fetch, and one completion refresh. If the test helper's startup path changes the exact count, assert the relative increase instead:
+
+```ts
+const before = (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+// emit URL + complete
+expect(chromeFake.api.tabs.sendMessage).toHaveBeenCalledTimes(before + 2);
+```
+
+Use the relative-count form in the final test to avoid coupling to startup internals.
+
+- [ ] **Step 2: Add reload and paused same-tab resume tests**
+
+```ts
+it("refreshes after the active LeetCode tab completes a reload without a second ownership invalidation", async () => {
+  const initial = tab(11, 7, "https://leetcode.com/problems/two-sum/");
+  const chromeFake = fakeChrome(initial);
   chromeFake.responses.set(11, snapshot("beforeReload"));
+  const invalidated = vi.fn();
   const emitted: ActiveTabSnapshot[] = [];
   const source = createActiveTabSource({
-    onOwnershipInvalidated: vi.fn(),
+    onOwnershipInvalidated: invalidated,
     onStateChange: vi.fn(),
     onSnapshot: (value) => emitted.push(value),
     onError: vi.fn()
   }, chromeFake.api);
   await source.start();
+  invalidated.mockClear();
   emitted.length = 0;
 
   chromeFake.responses.set(11, snapshot("afterReload"));
-  chromeFake.onUpdated.emit(11, { status: "complete" }, tab);
+  chromeFake.onUpdated.emit(11, { status: "complete" }, initial);
 
   await vi.waitFor(() => expect(emitted).toHaveLength(1));
+  expect(invalidated).not.toHaveBeenCalled();
   expect(emitted[0]?.snapshot.metadata.slug).toBe("afterReload");
 });
-```
 
-- [ ] **Step 2: Add paused same-tab resume test**
-
-```ts
 it("resumes when the current non-LeetCode tab navigates to LeetCode", async () => {
-  const tab = {
-    id: 33, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: undefined
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+  const initial = tab(33, 7, undefined);
+  const leetcode = tab(33, 7, "https://leetcode.com/problems/two-sum/");
+  const chromeFake = fakeChrome(initial);
   const states: ActiveTabState[] = [];
   const emitted: ActiveTabSnapshot[] = [];
   const source = createActiveTabSource({
@@ -913,10 +1004,6 @@ it("resumes when the current non-LeetCode tab navigates to LeetCode", async () =
   await source.start();
   expect(states.at(-1)).toEqual({ kind: "paused" });
 
-  const leetcode = {
-    ...tab,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
   chromeFake.responses.set(33, snapshot("twoSum"));
   chromeFake.onUpdated.emit(33, { url: leetcode.url }, leetcode);
 
@@ -929,12 +1016,8 @@ it("resumes when the current non-LeetCode tab navigates to LeetCode", async () =
 
 ```ts
 it("reinjects and retries the same exact tab after a missing receiver error", async () => {
-  const tab = {
-    id: 22, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+  const initial = tab(22, 7, "https://leetcode.com/problems/two-sum/");
+  const chromeFake = fakeChrome(initial);
   let attempt = 0;
   (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
     .mockImplementation((tabId: number, _message: unknown, callback: (response: unknown) => void) => {
@@ -954,14 +1037,12 @@ it("reinjects and retries the same exact tab after a missing receiver error", as
       callback({ ok: true, snapshot: snapshot("twoSum") });
     });
 
-  const emitted: ActiveTabSnapshot[] = [];
   const source = createActiveTabSource({
     onOwnershipInvalidated: vi.fn(),
     onStateChange: vi.fn(),
-    onSnapshot: (value) => emitted.push(value),
+    onSnapshot: vi.fn(),
     onError: vi.fn()
   }, chromeFake.api);
-
   await source.start();
 
   expect(chromeFake.api.scripting.executeScript).toHaveBeenNthCalledWith(1, {
@@ -973,20 +1054,58 @@ it("reinjects and retries the same exact tab after a missing receiver error", as
     target: { tabId: 22 },
     files: ["content/leetcode-adapter.js"]
   });
-  expect(emitted).toEqual([{ tabId: 22, snapshot: snapshot("twoSum") }]);
 });
 ```
 
-- [ ] **Step 4: Add explicit `refresh()` test**
+- [ ] **Step 4: Add current-owner disappearance re-resolution test**
+
+```ts
+it("re-resolves the current active tab after a current-owner request failure", async () => {
+  const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+  const replacement = tab(22, 7, "https://leetcode.com/problems/two-sum/");
+  const chromeFake = fakeChrome(first);
+  chromeFake.tabs.set(22, replacement);
+
+  let queryCount = 0;
+  (chromeFake.api.tabs.query as unknown as ReturnType<typeof vi.fn>)
+    .mockImplementation((_query: unknown, callback: (tabs: chrome.tabs.Tab[]) => void) => {
+      queryCount += 1;
+      callback(queryCount <= 2 ? [first] : [replacement]);
+    });
+
+  (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
+    .mockImplementation((tabId: number, _message: unknown, callback: (response: unknown) => void) => {
+      if (tabId === 11) {
+        callback({ ok: false });
+        return;
+      }
+      callback({ ok: true, snapshot: snapshot("twoSum") });
+    });
+
+  const emitted: ActiveTabSnapshot[] = [];
+  const source = createActiveTabSource({
+    onOwnershipInvalidated: vi.fn(),
+    onStateChange: vi.fn(),
+    onSnapshot: (value) => emitted.push(value),
+    onError: vi.fn()
+  }, chromeFake.api);
+
+  await source.start();
+  await vi.waitFor(() =>
+    expect(emitted.at(-1)).toEqual({ tabId: 22, snapshot: snapshot("twoSum") })
+  );
+});
+```
+
+- [ ] **Step 5: Add explicit `refresh()` and full disposal tests**
 
 ```ts
 it("refresh returns the current exact-tab snapshot without emitting it", async () => {
-  const tab = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+  const chromeFake = fakeChrome(tab(
+    11,
+    7,
+    "https://leetcode.com/problems/two-sum/"
+  ));
   chromeFake.responses.set(11, snapshot("initial"));
   const emitted: ActiveTabSnapshot[] = [];
   const source = createActiveTabSource({
@@ -1004,18 +1123,13 @@ it("refresh returns the current exact-tab snapshot without emitting it", async (
   expect(refreshed).toEqual({ tabId: 11, snapshot: snapshot("runNow") });
   expect(emitted).toEqual([]);
 });
-```
 
-- [ ] **Step 5: Add disposal test**
-
-```ts
-it("removes tab/runtime listeners and suppresses late async callbacks after dispose", async () => {
-  const tab = {
-    id: 11, windowId: 7, active: true, index: 0, pinned: false,
-    highlighted: true, incognito: false,
-    url: "https://leetcode.com/problems/two-sum/"
-  } as chrome.tabs.Tab;
-  const chromeFake = fakeChrome(tab);
+it("removes all tab/runtime listeners and suppresses late callbacks after dispose", async () => {
+  const chromeFake = fakeChrome(tab(
+    11,
+    7,
+    "https://leetcode.com/problems/two-sum/"
+  ));
   const callbacks: Array<(response: unknown) => void> = [];
   (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
     .mockImplementation((_tabId: number, _message: unknown, callback: (response: unknown) => void) => {
@@ -1042,150 +1156,88 @@ it("removes tab/runtime listeners and suppresses late async callbacks after disp
 });
 ```
 
-- [ ] **Step 6: Complete listeners and lifecycle implementation**
+- [ ] **Step 6: Add `currentTabUrl` tracking and `onUpdated` implementation**
 
-Add runtime listener:
+Set `currentTabUrl = resolvedTab.url` inside `applyResolvedTab()` after current-epoch validation.
+
+Add:
 
 ```ts
-const onRuntimeMessage = (
-  message: unknown,
-  sender: chrome.runtime.MessageSender
-): void => {
-  if (
-    disposed ||
-    sender.tab?.id !== activeLeetCodeTabId ||
-    typeof message !== "object" ||
-    message === null ||
-    !("type" in message) ||
-    message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.snapshotUpdated ||
-    !("snapshot" in message) ||
-    !validateSnapshot(message.snapshot)
-  ) {
-    return;
-  }
-
-  options.onSnapshot({
-    tabId: activeLeetCodeTabId,
-    snapshot: message.snapshot
-  });
+const invalidateForUpdatedTab = (
+  updatedTab: chrome.tabs.Tab
+): number => {
+  activeLeetCodeTabId = null;
+  currentTabUrl = updatedTab.url;
+  const epoch = ++activeTabEpoch;
+  options.onOwnershipInvalidated();
+  return epoch;
 };
-```
 
-Add navigation listener. It must invalidate synchronously before evaluating/fetching the new canonical state:
-
-```ts
 const onUpdated = (
   tabId: number,
   changeInfo: chrome.tabs.TabChangeInfo,
-  tab: chrome.tabs.Tab
+  updatedTab: chrome.tabs.Tab
 ): void => {
-  if (
-    disposed ||
-    tabId !== currentActiveTabId ||
-    (changeInfo.url === undefined && changeInfo.status !== "complete")
-  ) {
+  if (disposed || tabId !== currentActiveTabId) return;
+
+  const urlChanged =
+    changeInfo.url !== undefined && changeInfo.url !== currentTabUrl;
+
+  if (urlChanged) {
+    const epoch = invalidateForUpdatedTab(updatedTab);
+    void applyResolvedTab(updatedTab, epoch);
     return;
   }
 
-  activeLeetCodeTabId = null;
-  const epoch = ++activeTabEpoch;
-  options.onOwnershipInvalidated();
-  void applyResolvedTab(tab, epoch);
-};
-```
+  if (changeInfo.status !== "complete") return;
 
-Add activation listener:
+  if (updatedTab.url !== currentTabUrl) {
+    const epoch = invalidateForUpdatedTab(updatedTab);
+    void applyResolvedTab(updatedTab, epoch);
+    return;
+  }
 
-```ts
-const onActivated = (info: chrome.tabs.TabActiveInfo): void => {
-  void activate(info.tabId, info.windowId);
-};
-```
-
-Implement `start()` so listeners are attached before the initial query and a newer event wins over a slow initial query:
-
-```ts
-const start = async (): Promise<void> => {
-  if (started || disposed) return;
-  started = true;
-
-  chromeApi.runtime.onMessage.addListener(onRuntimeMessage);
-  chromeApi.tabs.onActivated.addListener(onActivated);
-  chromeApi.tabs.onUpdated.addListener(onUpdated);
-
-  const epoch = ++activeTabEpoch;
-  try {
-    const tab = await queryCurrentActiveTab(chromeApi);
-    if (disposed || epoch !== activeTabEpoch) return;
-    if (!tab?.id) {
-      currentActiveTabId = null;
-      activeLeetCodeTabId = null;
-      options.onStateChange({ kind: "paused" });
-      return;
-    }
-    currentWindowId = tab.windowId;
-    currentActiveTabId = tab.id;
-    await applyResolvedTab(tab, epoch);
-  } catch (error) {
-    if (!disposed && epoch === activeTabEpoch) {
-      options.onError(error instanceof Error ? error : new Error(String(error)));
-    }
+  if (activeLeetCodeTabId === tabId) {
+    void refreshAndEmit(tabId, activeTabEpoch);
   }
 };
 ```
 
-Implement `refresh()`:
+This produces exactly one invalidation for a URL change, while still performing a completion-time canonical refresh. A pure reload with the same URL refetches on completion without inventing a new ownership transition.
+
+Register/remove the new listener:
 
 ```ts
-const refresh = async (): Promise<ActiveTabSnapshot | null> => {
-  if (disposed || activeLeetCodeTabId === null) return null;
-  const tabId = activeLeetCodeTabId;
-  const epoch = activeTabEpoch;
-  return fetchCurrent(tabId, epoch);
-};
+chromeApi.tabs.onUpdated.addListener(onUpdated);
+// dispose:
+chromeApi.tabs.onUpdated.removeListener(onUpdated);
 ```
 
-Implement `dispose()`:
+- [ ] **Step 7: Add one-shot current-owner re-resolution after a failed fetch**
+
+Extend `refreshAndEmit()` catch handling:
 
 ```ts
-const dispose = (): void => {
-  if (disposed) return;
-  disposed = true;
-  ++activeTabEpoch;
-  chromeApi.runtime.onMessage.removeListener(onRuntimeMessage);
-  chromeApi.tabs.onActivated.removeListener(onActivated);
-  chromeApi.tabs.onUpdated.removeListener(onUpdated);
-};
-```
+if (!isCurrent(tabId, epoch)) return;
+options.onError(normalizeError(error));
 
-Return:
-
-```ts
-return { start, refresh, dispose };
-```
-
-- [ ] **Step 7: Add current-owner failure re-resolution without retry loops**
-
-When an internal `refreshAndEmit()` request fails for the still-current `(tabId, epoch)` after missing-receiver recovery has already been attempted:
-
-```ts
-options.onError(normalizedError);
-const current = await queryCurrentActiveTab(chromeApi).catch(() => null);
+const active = await queryCurrentActiveTab(chromeApi).catch(() => null);
 if (
-  !disposed &&
-  activeTabEpoch === epoch &&
-  current?.id !== undefined &&
-  current.id !== currentActiveTabId
+  disposed ||
+  epoch !== activeTabEpoch ||
+  !active?.id ||
+  active.windowId !== currentWindowId ||
+  active.id === currentActiveTabId
 ) {
-  void activate(current.id, current.windowId);
+  return;
 }
+
+void activate(active.id, active.windowId);
 ```
 
-If the query returns the same current tab, do not immediately retry again; wait for the next runtime update, reload completion, explicit `Run now`, or tab event. This prevents an unavailable content script from causing an infinite recovery loop.
+Do not immediately retry if `queryCurrentActiveTab()` returns the same failed tab. Missing-receiver retry is already performed once inside `requestSnapshot()`; same-tab failures then wait for reload completion, runtime update, `Run now`, or a new tab event. This prevents a failed content script from creating an infinite recovery loop.
 
 - [ ] **Step 8: Verify the manifest permission boundary**
-
-Run:
 
 ```bash
 grep -n '"tabs"' public/manifest.json || true
@@ -1193,7 +1245,7 @@ grep -n '"tabs"' public/manifest.json || true
 
 Expected: no `"tabs"` permission entry.
 
-Also inspect that the existing manifest still contains:
+Verify the existing manifest still contains:
 
 ```json
 "permissions": [
@@ -1222,7 +1274,7 @@ Expected: PASS.
 git add src/sidepanel/active-tab-source.ts \
   tests/sidepanel/active-tab-source.test.ts
 git diff -- public/manifest.json
-git commit -m "feat: handle tab navigation and ownership recovery"
+git commit -m "feat: handle active tab navigation and recovery"
 ```
 
 `public/manifest.json` should remain unstaged and unchanged.
@@ -1238,7 +1290,7 @@ git commit -m "feat: handle tab navigation and ownership recovery"
 
 **Interfaces:**
 
-Replace the old default snapshot provider/subscription dependency boundary with:
+Replace the old snapshot provider/subscription dependency boundary with:
 
 ```ts
 export type ActiveTabSourceFactory = (
@@ -1266,8 +1318,7 @@ export interface SidePanelHandle {
 import type {
   ActiveTabSource,
   ActiveTabSourceOptions,
-  ActiveTabSnapshot,
-  ActiveTabState
+  ActiveTabSnapshot
 } from "../../src/sidepanel/active-tab-source";
 
 function fakeActiveTabSourceFactory() {
@@ -1292,7 +1343,7 @@ function fakeActiveTabSourceFactory() {
 }
 ```
 
-- [ ] **Step 2: Replace the old initial provider test with active-owner initialization**
+- [ ] **Step 2: Replace old provider/subscription tests with canonical source integration**
 
 ```ts
 it("visualizes the canonical snapshot emitted by the active tab source", async () => {
@@ -1315,10 +1366,24 @@ it("visualizes the canonical snapshot emitted by the active tab source", async (
 });
 ```
 
-- [ ] **Step 3: Add LeetCode-tab switch integration test**
+- [ ] **Step 3: Add LeetCode-tab switch stale-execution integration test**
+
+Add a local `deferred<T>()` helper if `bootstrap.test.ts` does not already contain one:
 
 ```ts
-it("invalidates the old execution before applying a newly owned tab snapshot", async () => {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+```
+
+Then add:
+
+```ts
+it("prevents the old tab execution from overwriting a newly owned tab", async () => {
   const root = document.createElement("main");
   const source = fakeActiveTabSourceFactory();
   const first = deferred<TraceSession>();
@@ -1366,7 +1431,7 @@ it("invalidates the old execution before applying a newly owned tab snapshot", a
 - [ ] **Step 4: Add paused preservation/resume test**
 
 ```ts
-it("pauses on a non-LeetCode tab without clearing the last visualization and resumes later", async () => {
+it("pauses without clearing the last visualization and resumes on the next LeetCode owner", async () => {
   const root = document.createElement("main");
   const source = fakeActiveTabSourceFactory();
   const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
@@ -1397,7 +1462,7 @@ it("pauses on a non-LeetCode tab without clearing the last visualization and res
 });
 ```
 
-- [ ] **Step 5: Add `Run now` canonical refresh test**
+- [ ] **Step 5: Add exact-owner `Run now` test**
 
 ```ts
 it("Run now refreshes the exact owned tab snapshot and executes it immediately", async () => {
@@ -1426,7 +1491,7 @@ it("Run now refreshes the exact owned tab snapshot and executes it immediately",
 });
 ```
 
-The pre-existing debounced schedule for testcase `7` must be replaced by the forced immediate `8` run; `applySnapshot()` for `Run now` must therefore update the mirror without normal scheduling, then call `scheduleCurrent({ immediate: true, force: true })`.
+The existing debounced testcase `7` schedule must be replaced by the forced immediate testcase `8` schedule.
 
 - [ ] **Step 6: Add source error/disposal tests**
 
@@ -1452,7 +1517,7 @@ it("shows a current active-source error without clearing the existing visualizat
   handle.dispose();
 });
 
-it("disposes the active tab source scheduler visualizer and controller", () => {
+it("disposes the active tab source and persistent controller", () => {
   const root = document.createElement("main");
   const source = fakeActiveTabSourceFactory();
   const controllerDispose = vi.fn();
@@ -1468,7 +1533,7 @@ it("disposes the active tab source scheduler visualizer and controller", () => {
 });
 ```
 
-- [ ] **Step 7: Run bootstrap tests and verify they fail against the old dependency boundary**
+- [ ] **Step 7: Run bootstrap tests and verify failure**
 
 ```bash
 npm test -- bootstrap
@@ -1526,7 +1591,7 @@ let activeVisualizer: TraceVisualizerHandle | null = null;
 let disposed = false;
 ```
 
-Refactor snapshot application so normal accepted source snapshots schedule, while `Run now` may suppress normal scheduling:
+Refactor snapshot application:
 
 ```ts
 const applySnapshot = (
@@ -1568,8 +1633,8 @@ const activeTabSource = activeTabSourceFactory({
     status.dataset.liveStatus = "updating";
     status.textContent = "Live: updating";
   },
-  onSnapshot: ({ snapshot }) => {
-    applySnapshot(snapshot);
+  onSnapshot: ({ snapshot: acceptedSnapshot }) => {
+    applySnapshot(acceptedSnapshot);
   },
   onError: (error) => {
     status.removeAttribute("data-live-status");
@@ -1586,9 +1651,7 @@ void activeTabSource.start().catch((error: unknown) => {
 
 Do not clear `result` in any ownership callback.
 
-- [ ] **Step 10: Preserve `Run now` by using `ActiveTabSource.refresh()`**
-
-Replace the old provider-based click path with:
+- [ ] **Step 10: Preserve `Run now` with `ActiveTabSource.refresh()`**
 
 ```ts
 runButton.addEventListener("click", () => {
@@ -1610,8 +1673,6 @@ runButton.addEventListener("click", () => {
 ```
 
 - [ ] **Step 11: Update disposal order**
-
-Use:
 
 ```ts
 return {
@@ -1693,12 +1754,7 @@ Side Panel 只會跟隨目前 Chrome window 中的 active LeetCode tab。即使�
 當 active tab 不是 LeetCode 時，Live Visualization 會顯示 `Live: paused · No active LeetCode tab`，但保留上一份 trace visualization。切回 LeetCode 後會自動從新的 active tab 恢復同步。
 ```
 
-Add:
-
-```md
-- [Active Tab Ownership Design Spec](docs/superpowers/specs/2026-09-06-active-tab-ownership-design.md)
-- [Active Tab Ownership Implementation Plan](docs/superpowers/plans/2026-09-06-active-tab-ownership-implementation-plan.md)
-```
+Add the same design/plan links.
 
 - [ ] **Step 3: Run full automated verification**
 
@@ -1725,8 +1781,6 @@ grep -n '"tabs"' public/manifest.json dist/manifest.json || true
 ```
 
 Expected: no `"tabs"` permission entry in either manifest.
-
-Verify both still contain only the existing extension permissions and LeetCode host permission.
 
 - [ ] **Step 5: Perform the exact Chrome multi-tab acceptance checklist**
 
@@ -1767,7 +1821,7 @@ S. Confirm no slower B snapshot or B execution completion overwrites A.
 T. Open another Chrome window and switch tabs there.
 U. Confirm the original window's Side Panel does not change ownership.
 
-V. Click Run now after changing code and before waiting for normal polling.
+V. Change code and immediately click Run now before normal polling catches up.
 W. Confirm Run now refreshes the current exact active tab and executes that latest snapshot.
 ```
 
@@ -1791,7 +1845,7 @@ On Two Sum:
 git diff --name-only HEAD~5..HEAD
 ```
 
-The implementation should be confined to the planned files plus documentation. Confirm there is no new:
+Confirm there is no new:
 
 ```text
 background service worker
@@ -1837,14 +1891,14 @@ Task 1  scheduler invalidate()
   ↓
 Task 2  ActiveTabSource core ownership + sender filtering + epoch
   ↓
-Task 3  navigation + exact-tab recovery + refresh + disposal
+Task 3  same-tab navigation + reload + recovery + full disposal
   ↓
 Task 4  Side Panel integration + paused/resume + Run now
   ↓
 Task 5  docs + regression + Chrome multi-tab acceptance
 ```
 
-Do not integrate ActiveTabSource into `bootstrap.ts` until Task 1 scheduler invalidation and Task 2/3 ActiveTabSource tests pass independently.
+Do not integrate `ActiveTabSource` into `bootstrap.ts` until Task 1 scheduler invalidation and Task 2/3 ActiveTabSource tests pass independently.
 
 ## Completion Definition
 

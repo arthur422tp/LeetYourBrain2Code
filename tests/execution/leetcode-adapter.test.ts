@@ -31,6 +31,16 @@ function installTwoSumPage(): void {
   `;
 }
 
+function installTwoSumEditorWithoutTestcase(): void {
+  document.title = "Two Sum - LeetCode";
+  window.history.replaceState({}, "", "/problems/two-sum/description/");
+  document.body.innerHTML = `
+    <button>Python3</button>
+    <a href="/problems/two-sum/">1. Two Sum</a>
+    <textarea aria-label="Code editor">class Solution:\n    def twoSum(self, nums, target):\n        pass</textarea>
+  `;
+}
+
 describe("LeetCode adapter", () => {
   it("extracts the current code, language, testcase, and metadata from the page", async () => {
     installTwoSumPage();
@@ -95,6 +105,79 @@ describe("LeetCode adapter", () => {
     expect(toRunnableSnapshot({ ...complete, code: "" })).toBeNull();
     expect(toRunnableSnapshot({ ...complete, language: null })).toBeNull();
     expect(toRunnableSnapshot({ ...complete, testcase: null })).toBeNull();
+  });
+
+  it("extracts editor state before testcase controls are available", () => {
+    installTwoSumEditorWithoutTestcase();
+
+    expect(extractPageState(document, window)).toEqual({
+      code: "class Solution:\n    def twoSum(self, nums, target):\n        pass",
+      language: "python",
+      testcase: null,
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    });
+  });
+
+  it("publishes code changes while testcase is still unavailable", async () => {
+    installTwoSumEditorWithoutTestcase();
+    const updates: LeetCodePageState[] = [];
+    const onMessage = (event: MessageEvent): void => {
+      if (
+        event.data?.source === LEETCODE_MESSAGE_SOURCE &&
+        event.data?.type === LEETCODE_MESSAGE_TYPES.pageStateUpdated
+      ) {
+        updates.push(event.data.state as LeetCodePageState);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    const cleanup = installMainWorldBridge(window, document, { watchIntervalMs: 10 });
+
+    try {
+      await vi.waitFor(() => expect(updates.length).toBeGreaterThan(0));
+      const editor = document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Code editor"]'
+      )!;
+      editor.value = "class Solution:\n    def twoSum(self, nums, target):";
+
+      await vi.waitFor(() => expect(updates.at(-1)?.code).toBe(editor.value));
+      expect(updates.at(-1)?.testcase).toBeNull();
+    } finally {
+      cleanup();
+      window.removeEventListener("message", onMessage);
+    }
+  });
+
+  it("publishes testcase readiness even when code did not change", async () => {
+    installTwoSumEditorWithoutTestcase();
+    const updates: LeetCodePageState[] = [];
+    const onMessage = (event: MessageEvent): void => {
+      if (event.data?.type === LEETCODE_MESSAGE_TYPES.pageStateUpdated) {
+        updates.push(event.data.state as LeetCodePageState);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    const cleanup = installMainWorldBridge(window, document, { watchIntervalMs: 10 });
+
+    try {
+      await vi.waitFor(() => expect(updates.at(-1)?.testcase).toBeNull());
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        '<div contenteditable="true" class="w-full cursor-text">[2,7,11,15]</div>' +
+          '<div contenteditable="true" class="w-full cursor-text">9</div>'
+      );
+
+      await vi.waitFor(() => expect(updates.at(-1)?.testcase).toBe("[2,7,11,15]\n9"));
+    } finally {
+      cleanup();
+      window.removeEventListener("message", onMessage);
+    }
+  });
+
+  it("reports an observed empty editor as an empty string", () => {
+    installTwoSumEditorWithoutTestcase();
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Code editor"]')!.value = "";
+
+    expect(extractPageState(document, window)?.code).toBe("");
   });
 
   it("prefers the current Python Monaco model in the main world", () => {

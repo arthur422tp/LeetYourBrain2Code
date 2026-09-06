@@ -7,10 +7,11 @@ export {
   type ProblemMetadata
 } from "./leetcode-page-state";
 
-import { validateSnapshot } from "./leetcode-page-state";
-import type { LeetCodeSnapshot, ProblemMetadata } from "./leetcode-page-state";
+import { toRunnableSnapshot, validatePageState, validateSnapshot } from "./leetcode-page-state";
+import type { LeetCodePageState, LeetCodeSnapshot, ProblemMetadata } from "./leetcode-page-state";
 
 export interface LeetCodeAdapter {
+  getPageState(): Promise<LeetCodePageState>;
   getSnapshot(): Promise<LeetCodeSnapshot>;
 }
 
@@ -18,12 +19,17 @@ export const LEETCODE_MESSAGE_SOURCE = "leetcode-python-visualizer";
 export const LEETCODE_MESSAGE_TYPES = {
   requestSnapshot: "request_snapshot",
   responseSnapshot: "response_snapshot",
-  snapshotUpdated: "snapshot_updated"
+  snapshotUpdated: "snapshot_updated",
+  requestPageState: "request_page_state",
+  responsePageState: "response_page_state",
+  pageStateUpdated: "page_state_updated"
 } as const;
 
 export const LEETCODE_CONTENT_MESSAGE_TYPES = {
   requestSnapshot: "request_leetcode_snapshot",
-  snapshotUpdated: "leetcode_snapshot_updated"
+  snapshotUpdated: "leetcode_snapshot_updated",
+  requestPageState: "request_leetcode_page_state",
+  pageStateUpdated: "leetcode_page_state_updated"
 } as const;
 
 /**
@@ -66,6 +72,7 @@ const LANGUAGE_BUTTON_LABELS = new Set(Object.keys(LANGUAGE_ALIASES));
 export interface AdapterOptions {
   document?: Document;
   window?: Window;
+  requestMainWorldPageState?: () => Promise<unknown>;
   requestMainWorldSnapshot?: () => Promise<unknown>;
   bridgeTimeoutMs?: number;
   preferMainWorldSnapshot?: boolean;
@@ -145,23 +152,28 @@ export function extractMetadata(doc: Document): ProblemMetadata {
 }
 
 export function extractIsolatedSnapshot(doc: Document): LeetCodeSnapshot | null {
-  const codeEditor = doc.querySelector<HTMLTextAreaElement>(LEETCODE_ACCESSORS.codeEditor);
-  const testcase = readTestcaseFromDom(doc);
-  const language = readLanguageFromDom(doc);
+  return toRunnableSnapshot(extractIsolatedPageState(doc));
+}
 
-  if (!codeEditor || codeEditor.value.length === 0 || testcase === null || language === null) {
-    return null;
-  }
-
+export function extractIsolatedPageState(doc: Document): LeetCodePageState {
+  const editor = doc.querySelector<HTMLTextAreaElement>(LEETCODE_ACCESSORS.codeEditor);
   return {
-    code: codeEditor.value,
-    language,
-    testcase,
+    code: editor ? editor.value : null,
+    language: readLanguageFromDom(doc),
+    testcase: readTestcaseFromDom(doc),
     metadata: extractMetadata(doc)
   };
 }
 
 let requestSequence = 0;
+
+function createRequestId(pageWindow: Window, prefix: string): string {
+  const randomUuid = pageWindow.crypto?.randomUUID?.();
+  return (
+    randomUuid ??
+    `${prefix}-${Date.now()}-${requestSequence++}-${Math.random().toString(36).slice(2)}`
+  );
+}
 
 export function requestMainWorldSnapshot(
   pageWindow: Window,
@@ -170,9 +182,7 @@ export function requestMainWorldSnapshot(
   // The window message channel is visible to page scripts by design. Treat
   // every returned value as untrusted data: validate its shape and size, and
   // never use it for privileged extension operations.
-  const randomUuid = pageWindow.crypto?.randomUUID?.();
-  const requestId =
-    randomUuid ?? `snapshot-${Date.now()}-${requestSequence++}-${Math.random().toString(36).slice(2)}`;
+  const requestId = createRequestId(pageWindow, "snapshot");
   const pageOrigin = pageWindow.location.origin;
   const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
 
@@ -228,32 +238,141 @@ export function requestMainWorldSnapshot(
   });
 }
 
+export function requestMainWorldPageState(
+  pageWindow: Window,
+  timeoutMs = 750
+): Promise<LeetCodePageState> {
+  // The window message channel is visible to page scripts by design. Treat
+  // every returned value as untrusted data: validate its shape and size, and
+  // never use it for privileged extension operations.
+  const requestId = createRequestId(pageWindow, "page-state");
+  const pageOrigin = pageWindow.location.origin;
+  const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
+
+  return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = (): void => {
+      pageWindow.removeEventListener("message", onMessage);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    };
+
+    const onMessage = (event: MessageEvent): void => {
+      if (
+        (event.source !== null && event.source !== pageWindow) ||
+        (event.origin !== "" && event.origin !== pageOrigin) ||
+        typeof event.data !== "object" ||
+        event.data === null
+      ) {
+        return;
+      }
+      if (
+        event.data.source !== LEETCODE_MESSAGE_SOURCE ||
+        event.data.type !== LEETCODE_MESSAGE_TYPES.responsePageState ||
+        event.data.requestId !== requestId
+      ) {
+        return;
+      }
+
+      cleanup();
+      if (validatePageState(event.data.state)) {
+        resolve(event.data.state);
+      } else {
+        reject(new Error("LeetCode main-world bridge returned an invalid page state"));
+      }
+    };
+
+    pageWindow.addEventListener("message", onMessage);
+    pageWindow.postMessage(
+      {
+        source: LEETCODE_MESSAGE_SOURCE,
+        type: LEETCODE_MESSAGE_TYPES.requestPageState,
+        requestId
+      },
+      targetOrigin
+    );
+
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for the LeetCode main-world bridge"));
+    }, timeoutMs);
+  });
+}
+
 export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAdapter {
   const pageDocument = options.document ?? document;
   const pageWindow = options.window ?? window;
+  const requestPageState =
+    options.requestMainWorldPageState ??
+    (() => requestMainWorldPageState(pageWindow, options.bridgeTimeoutMs));
   const requestSnapshot =
     options.requestMainWorldSnapshot ??
     (() => requestMainWorldSnapshot(pageWindow, options.bridgeTimeoutMs));
 
-  return {
-    async getSnapshot(): Promise<LeetCodeSnapshot> {
-      const getBridgeSnapshot = async (): Promise<LeetCodeSnapshot> => {
-        const bridgeSnapshot = await requestSnapshot();
-        if (!validateSnapshot(bridgeSnapshot)) {
-          throw new Error("LeetCode adapter received an invalid snapshot");
-        }
-        return bridgeSnapshot;
-      };
+  const getBridgePageState = async (): Promise<LeetCodePageState> => {
+    const bridgeState = await requestPageState();
+    if (!validatePageState(bridgeState)) {
+      throw new Error("LeetCode adapter received an invalid page state");
+    }
+    return bridgeState;
+  };
 
+  const getBridgeSnapshot = async (): Promise<LeetCodeSnapshot> => {
+    const bridgeSnapshot = await requestSnapshot();
+    if (!validateSnapshot(bridgeSnapshot)) {
+      throw new Error("LeetCode adapter received an invalid snapshot");
+    }
+    return bridgeSnapshot;
+  };
+
+  const noValidSnapshotError = new Error("No valid LeetCode snapshot was returned");
+
+  return {
+    async getPageState(): Promise<LeetCodePageState> {
+      try {
+        return await getBridgePageState();
+      } catch (bridgeError) {
+        const isolatedState = extractIsolatedPageState(pageDocument);
+        if (validatePageState(isolatedState)) {
+          return isolatedState;
+        }
+        throw bridgeError;
+      }
+    },
+
+    async getSnapshot(): Promise<LeetCodeSnapshot> {
       if (options.preferMainWorldSnapshot) {
+        if (options.requestMainWorldSnapshot) {
+          try {
+            return await getBridgeSnapshot();
+          } catch (bridgeError) {
+            const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
+            if (isolatedSnapshot) {
+              return isolatedSnapshot;
+            }
+            throw bridgeError;
+          }
+        }
+
         try {
-          return await getBridgeSnapshot();
+          const bridgeState = await getBridgePageState();
+          const snapshot = toRunnableSnapshot(bridgeState);
+          if (snapshot) {
+            return snapshot;
+          }
+          throw noValidSnapshotError;
         } catch (bridgeError) {
           const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
           if (isolatedSnapshot) {
             return isolatedSnapshot;
           }
-          throw bridgeError;
+          try {
+            return await getBridgeSnapshot();
+          } catch {
+            throw bridgeError;
+          }
         }
       }
 
@@ -262,7 +381,17 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
         return isolatedSnapshot;
       }
 
-      return getBridgeSnapshot();
+      try {
+        const bridgeState = await getBridgePageState();
+        const snapshot = toRunnableSnapshot(bridgeState);
+        if (snapshot) {
+          return snapshot;
+        }
+      } catch {
+        return getBridgeSnapshot();
+      }
+
+      throw noValidSnapshotError;
     }
   };
 }

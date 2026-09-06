@@ -4,9 +4,10 @@ import {
   LEETCODE_MESSAGE_TYPES,
   extractMetadata,
   normalizeLanguage,
-  validateSnapshot,
-  type LeetCodeSnapshot
+  toRunnableSnapshot,
+  validatePageState
 } from "../content/leetcode-adapter";
+import type { LeetCodePageState } from "../content/leetcode-adapter";
 
 interface MonacoModelLike {
   getLanguageId(): string;
@@ -72,35 +73,27 @@ function readCodeFromMonaco(
 
   const code = candidate.getValue();
   const language = normalizeLanguage(candidate.getLanguageId()) ?? selectedLanguage;
-  return code.length > 0 && language ? { code, language } : null;
+  return language ? { code, language } : null;
 }
 
 function readCodeFromDom(doc: Document): string | null {
   const editor = doc.querySelector<HTMLTextAreaElement>(LEETCODE_ACCESSORS.codeEditor);
-  return editor && editor.value.length > 0 ? editor.value : null;
+  return editor ? editor.value : null;
 }
 
 export function extractPageState(
   doc: Document,
   pageWindow: LeetCodePageWindow
-): LeetCodeSnapshot | null {
+): LeetCodePageState {
   const selectedLanguage = readLanguageFromDom(doc);
   const monacoCode = readCodeFromMonaco(pageWindow, selectedLanguage);
-  const code = monacoCode?.code ?? readCodeFromDom(doc);
-  const language = monacoCode?.language ?? selectedLanguage;
-  const testcase = readTestcase(doc);
 
-  if (!code || !language || testcase === null) {
-    return null;
-  }
-
-  const snapshot: LeetCodeSnapshot = {
-    code,
-    language,
-    testcase,
+  return {
+    code: monacoCode?.code ?? readCodeFromDom(doc),
+    language: monacoCode?.language ?? selectedLanguage,
+    testcase: readTestcase(doc),
     metadata: extractMetadata(doc)
   };
-  return validateSnapshot(snapshot) ? snapshot : null;
 }
 
 export function installMainWorldBridge(
@@ -110,27 +103,39 @@ export function installMainWorldBridge(
 ): () => void {
   const pageOrigin = pageWindow.location.origin;
   const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
-  let lastSnapshotKey: string | null = null;
+  let lastPageStateKey: string | null = null;
 
-  const publishSnapshotUpdate = (): void => {
-    const snapshot = extractPageState(doc, pageWindow);
-    if (!snapshot) {
+  const publishPageStateUpdate = (): void => {
+    const state = extractPageState(doc, pageWindow);
+    if (!validatePageState(state)) {
       return;
     }
 
-    const snapshotKey = JSON.stringify(snapshot);
-    if (snapshotKey === lastSnapshotKey) {
+    const key = JSON.stringify(state);
+    if (key === lastPageStateKey) {
       return;
     }
-    lastSnapshotKey = snapshotKey;
+    lastPageStateKey = key;
     pageWindow.postMessage(
       {
         source: LEETCODE_MESSAGE_SOURCE,
-        type: LEETCODE_MESSAGE_TYPES.snapshotUpdated,
-        snapshot
+        type: LEETCODE_MESSAGE_TYPES.pageStateUpdated,
+        state
       },
       targetOrigin
     );
+
+    const snapshot = toRunnableSnapshot(state);
+    if (snapshot) {
+      pageWindow.postMessage(
+        {
+          source: LEETCODE_MESSAGE_SOURCE,
+          type: LEETCODE_MESSAGE_TYPES.snapshotUpdated,
+          snapshot
+        },
+        targetOrigin
+      );
+    }
   };
 
   const onMessage = (event: MessageEvent): void => {
@@ -144,29 +149,41 @@ export function installMainWorldBridge(
     }
 
     const message = event.data as Record<string, unknown>;
-    if (
-      message.source !== LEETCODE_MESSAGE_SOURCE ||
-      message.type !== LEETCODE_MESSAGE_TYPES.requestSnapshot ||
-      typeof message.requestId !== "string"
-    ) {
+    if (message.source !== LEETCODE_MESSAGE_SOURCE || typeof message.requestId !== "string") {
       return;
     }
 
-    pageWindow.postMessage(
-      {
-        source: LEETCODE_MESSAGE_SOURCE,
-        type: LEETCODE_MESSAGE_TYPES.responseSnapshot,
-        requestId: message.requestId,
-        snapshot: extractPageState(doc, pageWindow)
-      },
-      targetOrigin
-    );
+    const state = extractPageState(doc, pageWindow);
+    if (message.type === LEETCODE_MESSAGE_TYPES.requestPageState) {
+      pageWindow.postMessage(
+        {
+          source: LEETCODE_MESSAGE_SOURCE,
+          type: LEETCODE_MESSAGE_TYPES.responsePageState,
+          requestId: message.requestId,
+          state
+        },
+        targetOrigin
+      );
+      return;
+    }
+
+    if (message.type === LEETCODE_MESSAGE_TYPES.requestSnapshot) {
+      pageWindow.postMessage(
+        {
+          source: LEETCODE_MESSAGE_SOURCE,
+          type: LEETCODE_MESSAGE_TYPES.responseSnapshot,
+          requestId: message.requestId,
+          snapshot: toRunnableSnapshot(state)
+        },
+        targetOrigin
+      );
+    }
   };
 
   pageWindow.addEventListener("message", onMessage);
-  publishSnapshotUpdate();
+  publishPageStateUpdate();
   const watchInterval = pageWindow.setInterval(
-    publishSnapshotUpdate,
+    publishPageStateUpdate,
     options.watchIntervalMs ?? DEFAULT_WATCH_INTERVAL_MS
   );
 

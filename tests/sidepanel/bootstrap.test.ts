@@ -4,9 +4,44 @@ import { DEFAULT_EXECUTION_LIMITS } from "../../src/shared/execution-types";
 import type { ExecutionRequest } from "../../src/shared/execution-types";
 import type { TraceSession } from "../../src/shared/trace-types";
 import type { LeetCodeSnapshot } from "../../src/content/leetcode-adapter";
-import { renderSidePanel, type SidePanelController } from "../../src/sidepanel/bootstrap";
+import {
+  createResilientSnapshotProvider,
+  renderSidePanel,
+  type SidePanelController
+} from "../../src/sidepanel/bootstrap";
 
 describe("renderSidePanel", () => {
+  it("reconnects the LeetCode content script after a missing receiver error", async () => {
+    const snapshot: LeetCodeSnapshot = {
+      code: "class Solution:\n    def one(self, value):\n        return value\n",
+      language: "python",
+      testcase: "7",
+      metadata: { slug: "one", title: "One" }
+    };
+    const request = vi.fn<() => Promise<LeetCodeSnapshot>>()
+      .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
+      .mockResolvedValueOnce(snapshot);
+    const reconnect = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+    const provider = createResilientSnapshotProvider(request, reconnect);
+
+    await expect(provider()).resolves.toEqual(snapshot);
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reconnect for snapshot errors unrelated to a missing receiver", async () => {
+    const request = vi.fn<() => Promise<LeetCodeSnapshot>>()
+      .mockRejectedValue(new Error("No valid LeetCode snapshot was returned"));
+    const reconnect = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+    const provider = createResilientSnapshotProvider(request, reconnect);
+
+    await expect(provider()).rejects.toThrow("No valid LeetCode snapshot was returned");
+    expect(reconnect).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("renders the initial runtime status", () => {
     const root = document.createElement("main");
 

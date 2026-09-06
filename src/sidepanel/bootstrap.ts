@@ -54,12 +54,99 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isMissingReceiverError(error: unknown): boolean {
+  const message = errorText(error);
+  return message.includes("Receiving end does not exist") ||
+    message.includes("Could not establish connection");
+}
+
+export function createResilientSnapshotProvider(
+  request: () => Promise<LeetCodeSnapshot>,
+  reconnect: () => Promise<void>
+): () => Promise<LeetCodeSnapshot> {
+  return async () => {
+    try {
+      return await request();
+    } catch (error: unknown) {
+      if (!isMissingReceiverError(error)) {
+        throw error;
+      }
+      await reconnect();
+      return request();
+    }
+  };
+}
+
+function isLeetCodeUrl(url: string | undefined): boolean {
+  if (!url) {
+    return false;
+  }
+  try {
+    return new URL(url).origin === "https://leetcode.com";
+  } catch {
+    return false;
+  }
+}
+
+function queryActiveLeetCodeTab(): Promise<chrome.tabs.Tab> {
+  if (typeof chrome === "undefined" || typeof chrome.tabs?.query !== "function") {
+    return Promise.reject(new Error("Chrome tab access is unavailable"));
+  }
+
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+
+      const tab = tabs.find(
+        (candidate) => isLeetCodeUrl(candidate.url) && candidate.id !== undefined
+      );
+      if (!tab) {
+        reject(new Error("No active LeetCode tab was found"));
+        return;
+      }
+      resolve(tab);
+    });
+  });
+}
+
+async function injectLeetCodeContentScripts(): Promise<void> {
+  if (
+    typeof chrome === "undefined" ||
+    typeof chrome.scripting?.executeScript !== "function"
+  ) {
+    throw new Error("Chrome script injection is unavailable");
+  }
+
+  const tab = await queryActiveLeetCodeTab();
+  const target = { tabId: tab.id! };
+  await chrome.scripting.executeScript({
+    target,
+    files: ["page-bridge/leetcode-main-world.js"],
+    world: "MAIN"
+  });
+  await chrome.scripting.executeScript({
+    target,
+    files: ["content/leetcode-adapter.js"]
+  });
+}
+
+function snapshotErrorText(error: unknown): string {
+  if (isMissingReceiverError(error)) {
+    return "Unable to connect to the LeetCode page. Refresh the LeetCode tab and reopen the side panel.";
+  }
+  return errorText(error);
+}
+
 function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | undefined {
   if (typeof chrome === "undefined" || typeof chrome.runtime?.sendMessage !== "function") {
     return undefined;
   }
 
-  return () =>
+  const requestSnapshot = (): Promise<LeetCodeSnapshot> =>
     new Promise<LeetCodeSnapshot>((resolve, reject) => {
       chrome.runtime.sendMessage(
         { type: LEETCODE_CONTENT_MESSAGE_TYPES.requestSnapshot },
@@ -85,6 +172,8 @@ function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | un
         }
       );
     });
+
+  return createResilientSnapshotProvider(requestSnapshot, injectLeetCodeContentScripts);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -206,7 +295,7 @@ export function renderSidePanel(
     void snapshotProvider()
       .then(applySnapshot)
       .catch((error: unknown) => {
-        status.textContent = `Runtime: ${errorText(error)}`;
+        status.textContent = `Runtime: ${snapshotErrorText(error)}`;
       });
   }
 
@@ -234,8 +323,8 @@ export function renderSidePanel(
         try {
           applySnapshot(await snapshotProvider());
         } catch (error: unknown) {
-          status.textContent = `Runtime: ${errorText(error)}`;
-          renderError(errorText(error));
+          status.textContent = `Runtime: ${snapshotErrorText(error)}`;
+          renderError(snapshotErrorText(error));
           return;
         }
       }

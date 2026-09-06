@@ -435,6 +435,39 @@ describe("createActiveTabSource", () => {
     );
   });
 
+  it("pauses when the current owner disappears during a snapshot request", async () => {
+    const first = tab(11, 7, "https://leetcode.com/problems/binary-search/");
+    const chromeFake = fakeChrome(first);
+    let queryCount = 0;
+    (chromeFake.api.tabs.query as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((_query: unknown, callback: (tabs: chrome.tabs.Tab[]) => void) => {
+        queryCount += 1;
+        callback(queryCount <= 2 ? [first] : []);
+      });
+
+    (chromeFake.api.tabs.sendMessage as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation((
+        _tabId: number,
+        _message: unknown,
+        callback: (response: unknown) => void
+      ) => {
+        callback({ ok: false });
+      });
+
+    const states: ActiveTabState[] = [];
+    const source = createActiveTabSource({
+      onOwnershipInvalidated: vi.fn(),
+      onStateChange: (state) => states.push(state),
+      onSnapshot: vi.fn(),
+      onError: vi.fn()
+    }, chromeFake.api);
+
+    await source.start();
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({ kind: "paused" })
+    );
+  });
+
   it("refresh returns the current exact-tab snapshot without emitting it", async () => {
     const chromeFake = fakeChrome(tab(
       11,

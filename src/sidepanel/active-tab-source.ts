@@ -161,14 +161,39 @@ export function createActiveTabSource(
       if (!isCurrent(tabId, epoch)) return;
       options.onError(normalizeError(error));
 
-      const active = await queryCurrentActiveTab(chromeApi).catch(() => null);
+      let active: chrome.tabs.Tab | null;
+      try {
+        active = await queryCurrentActiveTab(chromeApi);
+      } catch {
+        return;
+      }
+
       if (
         disposed ||
         epoch !== activeTabEpoch ||
-        !active?.id ||
-        active.windowId !== currentWindowId ||
-        active.id === currentActiveTabId
+        (active !== null && active.windowId !== currentWindowId)
       ) {
+        return;
+      }
+
+      if (active?.id === undefined) {
+        currentActiveTabId = null;
+        activeLeetCodeTabId = null;
+        currentTabUrl = undefined;
+        ++activeTabEpoch;
+        options.onOwnershipInvalidated();
+        options.onStateChange({ kind: "paused" });
+        return;
+      }
+
+      if (active.id === currentActiveTabId) {
+        if (!isLeetCodeUrl(active.url)) {
+          activeLeetCodeTabId = null;
+          currentTabUrl = active.url;
+          ++activeTabEpoch;
+          options.onOwnershipInvalidated();
+          options.onStateChange({ kind: "paused" });
+        }
         return;
       }
 

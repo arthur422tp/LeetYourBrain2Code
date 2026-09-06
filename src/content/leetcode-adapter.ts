@@ -1,14 +1,14 @@
-export interface ProblemMetadata {
-  slug: string | null;
-  title: string | null;
-}
+export {
+  toRunnableSnapshot,
+  validatePageState,
+  validateSnapshot,
+  type LeetCodePageState,
+  type LeetCodeSnapshot,
+  type ProblemMetadata
+} from "./leetcode-page-state";
 
-export interface LeetCodeSnapshot {
-  code: string;
-  language: string;
-  testcase: string;
-  metadata: ProblemMetadata;
-}
+import { validateSnapshot } from "./leetcode-page-state";
+import type { LeetCodeSnapshot, ProblemMetadata } from "./leetcode-page-state";
 
 export interface LeetCodeAdapter {
   getSnapshot(): Promise<LeetCodeSnapshot>;
@@ -25,10 +25,6 @@ export const LEETCODE_CONTENT_MESSAGE_TYPES = {
   requestSnapshot: "request_leetcode_snapshot",
   snapshotUpdated: "leetcode_snapshot_updated"
 } as const;
-
-const MAX_SNAPSHOT_CODE_LENGTH = 1_000_000;
-const MAX_SNAPSHOT_TESTCASE_LENGTH = 100_000;
-const MAX_SNAPSHOT_LANGUAGE_LENGTH = 64;
 
 /**
  * All page-specific selectors live here so the rest of the extension does not
@@ -82,6 +78,10 @@ function normalizeLanguageKey(value: string): string {
 export function normalizeLanguage(value: string): string | null {
   const key = normalizeLanguageKey(value);
   return LANGUAGE_ALIASES[key] ?? (key.length > 0 ? key : null);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function readLanguageFromDom(doc: Document): string | null {
@@ -163,34 +163,6 @@ export function extractIsolatedSnapshot(doc: Document): LeetCodeSnapshot | null 
     testcase,
     metadata: extractMetadata(doc)
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-export function validateSnapshot(value: unknown): value is LeetCodeSnapshot {
-  if (!isRecord(value)) {
-    return false;
-  }
-  if (
-    typeof value.code !== "string" ||
-    value.code.length === 0 ||
-    value.code.length > MAX_SNAPSHOT_CODE_LENGTH ||
-    typeof value.language !== "string" ||
-    value.language.length === 0 ||
-    value.language.length > MAX_SNAPSHOT_LANGUAGE_LENGTH ||
-    typeof value.testcase !== "string" ||
-    value.testcase.length > MAX_SNAPSHOT_TESTCASE_LENGTH ||
-    !isRecord(value.metadata)
-  ) {
-    return false;
-  }
-
-  return (
-    (value.metadata.slug === null || typeof value.metadata.slug === "string") &&
-    (value.metadata.title === null || typeof value.metadata.title === "string")
-  );
 }
 
 let requestSequence = 0;

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  toRunnableSnapshot,
+  validatePageState,
+  type LeetCodePageState
+} from "../../src/content/leetcode-page-state";
+import {
   createLeetCodeAdapter,
   extractIsolatedSnapshot,
   LEETCODE_MESSAGE_SOURCE,
@@ -44,6 +49,52 @@ describe("LeetCode adapter", () => {
     document.body.innerHTML = "<button>Python3</button>";
 
     expect(extractIsolatedSnapshot(document)).toBeNull();
+  });
+
+  it("accepts code when testcase is not available yet", () => {
+    const state: LeetCodePageState = {
+      code: "class Solution:\n    def twoSum(self, nums, target):\n        pass",
+      language: "python",
+      testcase: null,
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    };
+
+    expect(validatePageState(state)).toBe(true);
+    expect(toRunnableSnapshot(state)).toBeNull();
+  });
+
+  it("distinguishes an observed empty editor from an unavailable editor", () => {
+    expect(
+      validatePageState({
+        code: "",
+        language: "python",
+        testcase: "[2,7,11,15]\n9",
+        metadata: { slug: "two-sum", title: "Two Sum" }
+      })
+    ).toBe(true);
+
+    expect(
+      validatePageState({
+        code: null,
+        language: "python",
+        testcase: "[2,7,11,15]\n9",
+        metadata: { slug: "two-sum", title: "Two Sum" }
+      })
+    ).toBe(true);
+  });
+
+  it("projects only source-complete page state into a runnable snapshot candidate", () => {
+    const complete: LeetCodePageState = {
+      code: "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]",
+      language: "python",
+      testcase: "[2,7,11,15]\n9",
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    };
+
+    expect(toRunnableSnapshot(complete)).toEqual(complete);
+    expect(toRunnableSnapshot({ ...complete, code: "" })).toBeNull();
+    expect(toRunnableSnapshot({ ...complete, language: null })).toBeNull();
+    expect(toRunnableSnapshot({ ...complete, testcase: null })).toBeNull();
   });
 
   it("prefers the current Python Monaco model in the main world", () => {

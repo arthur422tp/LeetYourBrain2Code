@@ -232,4 +232,31 @@ describe("Pyodide runtime", () => {
       ]
     }));
   });
+
+  it("loads Pyodide once while rebuilding a fresh runtime namespace for every request", async () => {
+    let loadCount = 0;
+    const scripts: string[] = [];
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => {
+        loadCount += 1;
+        return {
+          runPythonAsync: async (code: string) => {
+            scripts.push(code);
+            return [1, ""];
+          }
+        };
+      }
+    });
+
+    await runtime.initialize();
+    await runtime.execute({ ...request, sessionId: "first" });
+    await runtime.execute({ ...request, sessionId: "second" });
+
+    expect(loadCount).toBe(1);
+    expect(scripts).toHaveLength(2);
+    expect(scripts[0]).toContain("__lc_runtime_namespace = {}");
+    expect(scripts[1]).toContain("__lc_runtime_namespace = {}");
+    expect(scripts[0]).toContain(JSON.stringify("first"));
+    expect(scripts[1]).toContain(JSON.stringify("second"));
+  });
 });

@@ -131,4 +131,44 @@ describe("Pyodide worker", () => {
       { type: "execution_finished", sessionId: "worker-session", result }
     ]);
   });
+
+  it("forwards multiple sequential requests through one initialized runtime", async () => {
+    const listeners: Array<(event: MessageEvent) => void | Promise<void>> = [];
+    const posted: unknown[] = [];
+    const calls: ExecutionRequest[] = [];
+    let initializeCount = 0;
+    const runtime: PyodideRuntime = {
+      initialize: async () => {
+        initializeCount += 1;
+      },
+      execute: async (received) => {
+        calls.push(received);
+      }
+    };
+    const scope: WorkerScopeLike = {
+      addEventListener: (_type, listener) => {
+        listeners.push(listener);
+      },
+      removeEventListener: () => undefined,
+      postMessage: (message) => {
+        posted.push(message);
+      }
+    };
+
+    installPyodideWorker(scope, runtime);
+    await Promise.resolve();
+
+    const first = { ...request, sessionId: "first" };
+    const second = { ...request, sessionId: "second" };
+    await listeners[0]!(new MessageEvent("message", {
+      data: { type: "execute", request: first }
+    }));
+    await listeners[0]!(new MessageEvent("message", {
+      data: { type: "execute", request: second }
+    }));
+
+    expect(initializeCount).toBe(1);
+    expect(posted[0]).toEqual({ type: "ready" });
+    expect(calls.map((item) => item.sessionId)).toEqual(["first", "second"]);
+  });
 });

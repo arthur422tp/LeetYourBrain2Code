@@ -15,9 +15,11 @@
 ## 運作方式
 
 ```text
-目前的 Python 程式碼 + 目前的 testcase
+目前的 Python 程式碼 + 目前選中的 testcase case
                     ↓
-Web Worker 中的 bundled Pyodide
+Live scheduler（debounce + latest-wins）
+                    ↓
+Warm bundled Pyodide Web Worker
                     ↓
 依序保存的 line-level execution trace
                     ↓
@@ -25,6 +27,8 @@ Runtime state + state diff
                     ↓
 Chrome Side Panel 視覺化
 ```
+
+Live Visualization 會追蹤目前最新可執行的 Python draft。當 LeetCode 的程式碼、testcase 或目前選中的 testcase case 改變時，Side Panel 會在短暫 debounce 後自動重新執行。若使用者正輸入暫時不完整的程式碼，畫面會保留上一份可執行版本的 visualization，直到新版再次可執行；`Run now` 則保留作為立即重試入口。
 
 MVP 的目標是呈現：
 
@@ -62,4 +66,5 @@ Build 完成後，前往 `chrome://extensions`，以「載入未封裝項目」�
 
 - [MVP Design Spec v0.2](docs/superpowers/specs/2026-09-05-leetcode-python-execution-visualizer-design.md)
 - [Implementation Plan 1](docs/superpowers/plans/2026-09-05-leetcode-python-execution-visualizer-implementation-plan-1.md)
-
+- [Live Visualization Design Spec](docs/superpowers/specs/2026-09-06-live-visualization-design.md)
+- [Live Visualization Implementation Plan](docs/superpowers/plans/2026-09-06-live-visualization-implementation-plan.md)

@@ -15,9 +15,11 @@ It is a visual debugger—not a LeetCode solver and not a replacement for the Le
 ## How it works
 
 ```text
-Current Python code + current testcase
+Current Python code + selected testcase case
                 ↓
-Bundled Pyodide in a Web Worker
+Live scheduler (debounce + latest-wins)
+                ↓
+Warm bundled Pyodide Web Worker
                 ↓
 Ordered line-level execution trace
                 ↓
@@ -25,6 +27,8 @@ Runtime state + state diff
                 ↓
 Chrome Side Panel visualization
 ```
+
+Live Visualization follows the latest runnable Python draft. When the LeetCode code, testcase, or selected testcase case changes, the Side Panel automatically re-executes after a short debounce. Temporarily incomplete code keeps the previous visualization visible until the draft becomes runnable again; `Run now` remains available as an immediate retry.
 
 The MVP is designed to expose:
 
@@ -62,4 +66,5 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 
 - [MVP Design Spec v0.2](docs/superpowers/specs/2026-09-05-leetcode-python-execution-visualizer-design.md)
 - [Implementation Plan 1](docs/superpowers/plans/2026-09-05-leetcode-python-execution-visualizer-implementation-plan-1.md)
-
+- [Live Visualization Design Spec](docs/superpowers/specs/2026-09-06-live-visualization-design.md)
+- [Live Visualization Implementation Plan](docs/superpowers/plans/2026-09-06-live-visualization-implementation-plan.md)

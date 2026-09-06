@@ -21,6 +21,12 @@ interface MonacoLike {
 
 export type LeetCodePageWindow = Window & { monaco?: MonacoLike };
 
+export interface MainWorldBridgeOptions {
+  watchIntervalMs?: number;
+}
+
+const DEFAULT_WATCH_INTERVAL_MS = 300;
+
 function readLanguageFromDom(doc: Document): string | null {
   const buttons = Array.from(
     doc.querySelectorAll<HTMLButtonElement>(LEETCODE_ACCESSORS.languageButtons)
@@ -99,10 +105,34 @@ export function extractPageState(
 
 export function installMainWorldBridge(
   pageWindow: LeetCodePageWindow,
-  doc: Document
+  doc: Document,
+  options: MainWorldBridgeOptions = {}
 ): () => void {
   const pageOrigin = pageWindow.location.origin;
   const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
+  let lastSnapshotKey: string | null = null;
+
+  const publishSnapshotUpdate = (): void => {
+    const snapshot = extractPageState(doc, pageWindow);
+    if (!snapshot) {
+      return;
+    }
+
+    const snapshotKey = JSON.stringify(snapshot);
+    if (snapshotKey === lastSnapshotKey) {
+      return;
+    }
+    lastSnapshotKey = snapshotKey;
+    pageWindow.postMessage(
+      {
+        source: LEETCODE_MESSAGE_SOURCE,
+        type: LEETCODE_MESSAGE_TYPES.snapshotUpdated,
+        snapshot
+      },
+      targetOrigin
+    );
+  };
+
   const onMessage = (event: MessageEvent): void => {
     if (
       (event.source !== null && event.source !== pageWindow) ||
@@ -134,5 +164,14 @@ export function installMainWorldBridge(
   };
 
   pageWindow.addEventListener("message", onMessage);
-  return () => pageWindow.removeEventListener("message", onMessage);
+  publishSnapshotUpdate();
+  const watchInterval = pageWindow.setInterval(
+    publishSnapshotUpdate,
+    options.watchIntervalMs ?? DEFAULT_WATCH_INTERVAL_MS
+  );
+
+  return () => {
+    pageWindow.removeEventListener("message", onMessage);
+    pageWindow.clearInterval(watchInterval);
+  };
 }

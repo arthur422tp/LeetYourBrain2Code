@@ -1,37 +1,5 @@
 import type { ListVisualModel } from "../../core/visual-model";
-import type { ValueSnapshot } from "../../shared/trace-types";
-
-function formatValue(snapshot: ValueSnapshot): string {
-  switch (snapshot.type) {
-    case "int":
-      return snapshot.value;
-    case "float":
-      return String(snapshot.value);
-    case "bool":
-      return snapshot.value ? "True" : "False";
-    case "str":
-      return JSON.stringify(snapshot.value);
-    case "none":
-      return "None";
-    case "list":
-      return `[${snapshot.items.map(formatValue).join(", ")}${snapshot.truncated ? ", …" : ""}]`;
-    case "tuple": {
-      const values = snapshot.items.map(formatValue).join(", ");
-      const suffix = snapshot.items.length === 1 ? "," : "";
-      return `(${values}${suffix}${snapshot.truncated ? " …" : ""})`;
-    }
-    case "dict":
-      return `{${snapshot.entries
-        .map((entry) => `${formatValue(entry.key)}: ${formatValue(entry.value)}`)
-        .join(", ")}${snapshot.truncated ? ", …" : ""}}`;
-    case "set":
-      return `{${snapshot.items.map(formatValue).join(", ")}${snapshot.truncated ? ", …" : ""}}`;
-    case "unknown":
-      return snapshot.repr || `<${snapshot.className}>`;
-    case "cycle":
-      return `<cycle ${snapshot.referenceId}>`;
-  }
-}
+import { formatValue } from "./value-format";
 
 function createPointerMarker(
   pointer: ListVisualModel["pointers"][number]
@@ -121,6 +89,7 @@ export function renderListVisualizer(model: ListVisualModel): HTMLElement {
   const section = document.createElement("section");
   section.id = "list-visualizer";
   section.className = "list-visualizer";
+  section.dataset.variableName = model.variableName;
   section.setAttribute("aria-label", `${model.variableName} list visualization`);
 
   const heading = document.createElement("h2");

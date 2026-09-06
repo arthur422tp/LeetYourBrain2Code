@@ -2,10 +2,10 @@ import type { ExceptionInfo } from "../shared/execution-types";
 import type { ValueSnapshot } from "../shared/trace-types";
 import { resolvePointerBindings, type PointerBinding } from "./binding-resolver";
 import type { SubscriptRelation } from "./ast-relations";
-import type { FrameDiff } from "./state-diff";
+import type { ContainerDiff, FrameDiff } from "./state-diff";
 import { selectPrimaryContainers } from "./primary-container-resolver";
 import type { RuntimeState } from "./runtime-state";
-import { cloneLocals, cloneValueSnapshot } from "./value-snapshot";
+import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
 
 export interface ListVisualModel {
   kind: "list";
@@ -19,6 +19,18 @@ export interface ListVisualModel {
   changedIndexes: number[];
 }
 
+export interface DictVisualModel {
+  kind: "dict";
+  variableName: string;
+  entries: Array<{
+    key: ValueSnapshot;
+    value: ValueSnapshot;
+    status: "added" | "changed" | "unchanged";
+  }>;
+}
+
+export type ContainerVisualModel = ListVisualModel | DictVisualModel;
+
 export interface CallStackEntry {
   frameId: number;
   functionName: string;
@@ -30,6 +42,7 @@ export interface VisualState {
   step: number;
   currentLine: number | null;
   primaryVisual: ListVisualModel | null;
+  containerVisuals: ContainerVisualModel[];
   stateChanges: FrameDiff | null;
   locals: Record<string, ValueSnapshot>;
   callStack: CallStackEntry[];
@@ -99,6 +112,61 @@ function buildListVisual(
   };
 }
 
+function buildDictVisual(
+  runtime: RuntimeState,
+  container: string,
+  diff: FrameDiff | null
+): DictVisualModel | null {
+  if (runtime.activeFrameId === null) {
+    return null;
+  }
+  const frame = runtime.frames.get(runtime.activeFrameId);
+  const snapshot = frame?.locals[container];
+  if (snapshot?.type !== "dict") {
+    return null;
+  }
+
+  const containerChange = diff?.containerChanges.find(
+    (change): change is Extract<ContainerDiff, { kind: "dict" }> =>
+      change.container === container && change.kind === "dict"
+  );
+  const statusByKey = new Map<string, DictVisualModel["entries"][number]["status"]>();
+  for (const change of containerChange?.changes ?? []) {
+    if (change.kind !== "removed") {
+      statusByKey.set(valueSnapshotKey(change.key), change.kind);
+    }
+  }
+
+  return {
+    kind: "dict",
+    variableName: container,
+    entries: snapshot.entries.map((entry) => ({
+      key: cloneValueSnapshot(entry.key),
+      value: cloneValueSnapshot(entry.value),
+      status: statusByKey.get(valueSnapshotKey(entry.key)) ?? "unchanged"
+    }))
+  };
+}
+
+function buildContainerVisual(
+  runtime: RuntimeState,
+  bindings: PointerBinding[],
+  container: string,
+  diff: FrameDiff | null
+): ContainerVisualModel | null {
+  const frame = runtime.activeFrameId === null
+    ? undefined
+    : runtime.frames.get(runtime.activeFrameId);
+  const snapshot = frame?.locals[container];
+  if (snapshot?.type === "list" || snapshot?.type === "tuple") {
+    return buildListVisual(runtime, bindings, container, diff);
+  }
+  if (snapshot?.type === "dict") {
+    return buildDictVisual(runtime, container, diff);
+  }
+  return null;
+}
+
 export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
@@ -114,10 +182,18 @@ export function buildVisualState(
     diff ?? emptyDiff(runtime.activeFrameId),
     relations
   );
+  const containerNames = [
+    ...(selection.primary === null ? [] : [selection.primary]),
+    ...selection.secondary
+  ];
+  const containerVisuals = containerNames
+    .map((container) => buildContainerVisual(runtime, bindings, container, diff))
+    .filter((visual): visual is ContainerVisualModel => visual !== null);
   const result: VisualState = {
     step: runtime.step,
     currentLine: runtime.currentLine,
     primaryVisual: buildListVisual(runtime, bindings, selection.primary, diff),
+    containerVisuals,
     stateChanges: diff,
     locals: frame ? cloneLocals(frame.locals) : {},
     callStack: buildCallStack(runtime),

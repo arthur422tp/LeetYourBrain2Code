@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   createLeetCodeAdapter,
   extractIsolatedSnapshot,
+  LEETCODE_MESSAGE_SOURCE,
+  LEETCODE_MESSAGE_TYPES,
   requestMainWorldSnapshot,
   type LeetCodeSnapshot,
   validateSnapshot
@@ -69,6 +71,22 @@ describe("LeetCode adapter", () => {
     }
   });
 
+  it("prefers the main-world snapshot for the live content-script path", async () => {
+    installTwoSumPage();
+    const expected: LeetCodeSnapshot = {
+      code: "class Solution:\n    def twoSum(self, nums, target):\n        return [1, 0]",
+      language: "python",
+      testcase: "[2,7,11,15]\n9",
+      metadata: { slug: "two-sum", title: "Two Sum" }
+    };
+
+    await expect(createLeetCodeAdapter({
+      document,
+      preferMainWorldSnapshot: true,
+      requestMainWorldSnapshot: async () => expected
+    }).getSnapshot()).resolves.toEqual(expected);
+  });
+
   it("falls back to a validated main-world snapshot", async () => {
     document.body.innerHTML = "";
     const expected: LeetCodeSnapshot = {
@@ -104,6 +122,37 @@ describe("LeetCode adapter", () => {
       });
     } finally {
       cleanup();
+    }
+  });
+
+  it("publishes a snapshot update when the LeetCode editor changes", async () => {
+    installTwoSumPage();
+    const updates: LeetCodeSnapshot[] = [];
+    const onMessage = (event: MessageEvent): void => {
+      if (
+        event.data?.source === LEETCODE_MESSAGE_SOURCE &&
+        event.data?.type === LEETCODE_MESSAGE_TYPES.snapshotUpdated &&
+        event.data.snapshot
+      ) {
+        updates.push(event.data.snapshot as LeetCodeSnapshot);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    const cleanup = installMainWorldBridge(window, document, { watchIntervalMs: 10 });
+
+    try {
+      await vi.waitFor(() => expect(updates[0]?.code).toContain("return [0, 1]"));
+
+      const editor = document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Code editor"]'
+      );
+      expect(editor).not.toBeNull();
+      editor!.value = "class Solution:\n    def twoSum(self, nums, target):\n        return [1, 0]";
+
+      await vi.waitFor(() => expect(updates.at(-1)?.code).toContain("return [1, 0]"));
+    } finally {
+      cleanup();
+      window.removeEventListener("message", onMessage);
     }
   });
 

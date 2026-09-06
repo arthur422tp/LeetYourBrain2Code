@@ -17,6 +17,15 @@ function list(values: number[]): ValueSnapshot {
   };
 }
 
+function dict(entries: Array<[number, number]>): ValueSnapshot {
+  return {
+    type: "dict",
+    length: entries.length,
+    entries: entries.map(([key, value]) => ({ key: int(key), value: int(value) })),
+    truncated: false
+  };
+}
+
 function runtime(locals: Record<string, ValueSnapshot>, exception?: RuntimeState["exception"]): RuntimeState {
   return {
     step: 12,
@@ -79,6 +88,16 @@ describe("buildVisualState", () => {
         ],
         changedIndexes: [1]
       },
+      containerVisuals: [{
+        kind: "list",
+        variableName: "nums",
+        items: [int(2), int(9), int(11), int(15)],
+        pointers: [
+          { name: "left", index: 1, outOfBounds: false },
+          { name: "right", index: 3, outOfBounds: false }
+        ],
+        changedIndexes: [1]
+      }],
       stateChanges: listDiff,
       locals: { nums: list([2, 9, 11, 15]), left: int(1), right: int(3), target: int(20) },
       callStack: [{ frameId: 4, functionName: "twoSum", line: 7, depth: 1 }],
@@ -146,5 +165,35 @@ describe("buildVisualState", () => {
     });
     expect(state.exception).toEqual(exception);
     expect(state.callStack).toEqual([{ frameId: 4, functionName: "twoSum", line: 7, depth: 1 }]);
+  });
+
+  it("builds array and hash-map visuals for Two Sum without subscript relations", () => {
+    const state = buildVisualState(
+      runtime({
+        nums: list([2, 7, 11, 15]),
+        seen: dict([[2, 0]]),
+        i: int(1),
+        x: int(7),
+        target: int(9)
+      }),
+      null,
+      []
+    );
+
+    expect(state.primaryVisual).toBeNull();
+    expect(state.containerVisuals).toEqual([
+      {
+        kind: "list",
+        variableName: "nums",
+        items: [int(2), int(7), int(11), int(15)],
+        pointers: [],
+        changedIndexes: []
+      },
+      {
+        kind: "dict",
+        variableName: "seen",
+        entries: [{ key: int(2), value: int(0), status: "unchanged" }]
+      }
+    ]);
   });
 });

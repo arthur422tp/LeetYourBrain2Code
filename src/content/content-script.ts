@@ -1,11 +1,43 @@
 import {
   createLeetCodeAdapter,
+  LEETCODE_MESSAGE_SOURCE,
+  LEETCODE_MESSAGE_TYPES,
   LEETCODE_CONTENT_MESSAGE_TYPES,
   validateSnapshot,
-  type LeetCodeAdapter
+  type LeetCodeAdapter,
+  type LeetCodeSnapshot
 } from "./leetcode-adapter";
 
 export { LEETCODE_CONTENT_MESSAGE_TYPES } from "./leetcode-adapter";
+
+export function createPageSnapshotUpdateHandler(
+  pageWindow: Window,
+  publish: (snapshot: LeetCodeSnapshot) => void
+): (event: MessageEvent) => void {
+  const pageOrigin = pageWindow.location.origin;
+
+  return (event: MessageEvent): void => {
+    if (
+      (event.source !== null && event.source !== pageWindow) ||
+      (event.origin !== "" && event.origin !== pageOrigin) ||
+      typeof event.data !== "object" ||
+      event.data === null
+    ) {
+      return;
+    }
+
+    const message = event.data as Record<string, unknown>;
+    if (
+      message.source !== LEETCODE_MESSAGE_SOURCE ||
+      message.type !== LEETCODE_MESSAGE_TYPES.snapshotUpdated ||
+      !validateSnapshot(message.snapshot)
+    ) {
+      return;
+    }
+
+    publish(message.snapshot);
+  };
+}
 
 interface SnapshotResponse {
   ok: boolean;
@@ -55,6 +87,29 @@ export function createSnapshotMessageHandler(
 
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener(
-    createSnapshotMessageHandler(createLeetCodeAdapter())
+    createSnapshotMessageHandler(createLeetCodeAdapter({ preferMainWorldSnapshot: true }))
+  );
+}
+
+if (typeof window !== "undefined") {
+  const publishSnapshotUpdate = (snapshot: LeetCodeSnapshot): void => {
+    if (typeof chrome === "undefined" || typeof chrome.runtime?.sendMessage !== "function") {
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      {
+        type: LEETCODE_CONTENT_MESSAGE_TYPES.snapshotUpdated,
+        snapshot
+      },
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
+  };
+
+  window.addEventListener(
+    "message",
+    createPageSnapshotUpdateHandler(window, publishSnapshotUpdate)
   );
 }

@@ -7,14 +7,21 @@ import {
 } from "../content/leetcode-adapter";
 import { createExecutionRequest } from "../execution/execution-request";
 import { ExecutionController } from "../execution/execution-controller";
+import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
+import "./styles.css";
 
 export interface SidePanelController {
   execute(request: ExecutionRequest): Promise<TraceSession>;
 }
 
+export type SnapshotSubscription = (
+  listener: (snapshot: LeetCodeSnapshot) => void
+) => () => void;
+
 export interface SidePanelDependencies {
   controller?: SidePanelController;
   snapshotProvider?: () => Promise<LeetCodeSnapshot>;
+  snapshotSubscription?: SnapshotSubscription;
 }
 
 const SAMPLE_SOURCE = `class Solution:
@@ -80,6 +87,35 @@ function createDefaultSnapshotProvider(): (() => Promise<LeetCodeSnapshot>) | un
     });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function createDefaultSnapshotSubscription(): SnapshotSubscription | undefined {
+  if (
+    typeof chrome === "undefined" ||
+    typeof chrome.runtime?.onMessage?.addListener !== "function"
+  ) {
+    return undefined;
+  }
+
+  return (listener) => {
+    const onMessage = (message: unknown): void => {
+      if (
+        !isRecord(message) ||
+        message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.snapshotUpdated ||
+        !validateSnapshot(message.snapshot)
+      ) {
+        return;
+      }
+      listener(message.snapshot);
+    };
+
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
+  };
+}
+
 export function renderSidePanel(
   root: HTMLElement,
   dependencies: SidePanelDependencies = {}
@@ -87,73 +123,92 @@ export function renderSidePanel(
   const controller = dependencies.controller ?? createDefaultController();
   const snapshotProvider =
     dependencies.snapshotProvider ?? createDefaultSnapshotProvider();
+  const snapshotSubscription =
+    dependencies.snapshotSubscription ?? createDefaultSnapshotSubscription();
 
+  const app = document.createElement("main");
+  app.className = "app-shell";
+
+  const header = document.createElement("header");
+  header.className = "app-header";
   const title = document.createElement("h1");
-  title.textContent = "LeetCode Python Visualizer";
+  title.textContent = "Visualizer";
+  const subtitle = document.createElement("p");
+  subtitle.textContent = "Python Execution Trace";
+  header.append(title, subtitle);
 
   const status = document.createElement("p");
   status.id = "runtime-status";
   status.textContent = "Runtime: not started";
 
+  const inputPanel = document.createElement("details");
+  inputPanel.className = "input-panel";
+  inputPanel.open = true;
+  const inputSummary = document.createElement("summary");
+  inputSummary.textContent = "LeetCode input · synced";
+  inputPanel.append(inputSummary);
+
+  const inputBody = document.createElement("div");
+  inputBody.className = "input-panel__body";
+
   const sourceLabel = document.createElement("label");
   sourceLabel.htmlFor = "source-code";
-  sourceLabel.textContent = "Code";
+  sourceLabel.textContent = "Code (read-only mirror)";
 
   const source = document.createElement("textarea");
   source.id = "source-code";
   source.rows = 14;
-  source.value = SAMPLE_SOURCE;
+  source.readOnly = true;
+  source.value = snapshotProvider ? "" : SAMPLE_SOURCE;
 
   const testcaseLabel = document.createElement("label");
   testcaseLabel.htmlFor = "testcase";
-  testcaseLabel.textContent = "Testcase (one Python literal per line)";
+  testcaseLabel.textContent = "Testcase (read-only mirror)";
 
   const testcase = document.createElement("textarea");
   testcase.id = "testcase";
   testcase.rows = 4;
-  testcase.value = SAMPLE_TESTCASE;
-
-  const loadButton = document.createElement("button");
-  loadButton.id = "load-snapshot";
-  loadButton.type = "button";
-  loadButton.textContent = "Load current LeetCode";
+  testcase.readOnly = true;
+  testcase.value = snapshotProvider ? "" : SAMPLE_TESTCASE;
 
   const runButton = document.createElement("button");
   runButton.id = "run";
   runButton.type = "button";
-  runButton.textContent = "Run";
+  runButton.textContent = "Visualize";
 
-  const traceLabel = document.createElement("h2");
-  traceLabel.textContent = "Trace event JSON";
+  const actions = document.createElement("div");
+  actions.className = "input-panel__actions";
+  actions.append(runButton);
+  inputBody.append(sourceLabel, source, testcaseLabel, testcase, actions);
+  inputPanel.append(inputBody);
 
-  const traceOutput = document.createElement("pre");
-  traceOutput.id = "trace-output";
-  traceOutput.textContent = "[]";
+  const result = document.createElement("section");
+  result.id = "visualization-output";
+  result.className = "visualization-output";
+  const placeholder = document.createElement("div");
+  placeholder.className = "trace-placeholder";
+  placeholder.textContent = "Run Visualize to inspect the execution step by step.";
+  result.append(placeholder);
+
+  let activeVisualizer: TraceVisualizerHandle | null = null;
 
   let running = false;
-  loadButton.addEventListener("click", () => {
-    if (!snapshotProvider || running) {
-      status.textContent = "Runtime: page adapter unavailable";
-      return;
-    }
 
-    running = true;
-    loadButton.disabled = true;
-    status.textContent = "Runtime: loading";
+  const applySnapshot = (snapshot: LeetCodeSnapshot): void => {
+    source.value = snapshot.code;
+    testcase.value = snapshot.testcase;
+    status.textContent = "Runtime: ready";
+  };
+
+  snapshotSubscription?.(applySnapshot);
+  if (snapshotProvider) {
+    status.textContent = "Runtime: syncing";
     void snapshotProvider()
-      .then((snapshot) => {
-        source.value = snapshot.code;
-        testcase.value = snapshot.testcase;
-        status.textContent = "Runtime: ready";
-      })
+      .then(applySnapshot)
       .catch((error: unknown) => {
         status.textContent = `Runtime: ${errorText(error)}`;
-      })
-      .finally(() => {
-        running = false;
-        loadButton.disabled = false;
       });
-  });
+  }
 
   runButton.addEventListener("click", () => {
     if (running) {
@@ -162,50 +217,63 @@ export function renderSidePanel(
     running = true;
     runButton.disabled = true;
     status.textContent = "Runtime: running";
-    traceOutput.textContent = "[]";
+    activeVisualizer?.dispose();
+    activeVisualizer = null;
+    result.replaceChildren();
 
-    const requestResult = createExecutionRequest({
-      sessionId: createSessionId(),
-      sourceCode: source.value,
-      rawTestcase: testcase.value
-    });
+    const renderError = (message: string): void => {
+      const errorPanel = document.createElement("div");
+      errorPanel.className = "trace-error";
+      errorPanel.textContent = message;
+      result.replaceChildren(errorPanel);
+    };
 
-    if (!requestResult.ok) {
-      status.textContent = `Runtime: ${requestResult.reason}`;
-      traceOutput.textContent = JSON.stringify({ error: requestResult.reason }, null, 2);
-      running = false;
-      runButton.disabled = false;
-      return;
-    }
+    const executeCurrentSnapshot = async (): Promise<void> => {
+      if (snapshotProvider) {
+        status.textContent = "Runtime: syncing";
+        try {
+          applySnapshot(await snapshotProvider());
+        } catch (error: unknown) {
+          status.textContent = `Runtime: ${errorText(error)}`;
+          renderError(errorText(error));
+          return;
+        }
+      }
 
-    void controller
-      .execute(requestResult.request)
-      .then((session) => {
+      status.textContent = "Runtime: running";
+      const requestResult = createExecutionRequest({
+        sessionId: createSessionId(),
+        sourceCode: source.value,
+        rawTestcase: testcase.value
+      });
+
+      if (!requestResult.ok) {
+        status.textContent = `Runtime: ${requestResult.reason}`;
+        renderError(requestResult.reason);
+        return;
+      }
+
+      try {
+        const session = await controller.execute(requestResult.request);
         status.textContent = `Runtime: ${session.status}`;
-        traceOutput.textContent = JSON.stringify(session.events, null, 2);
-      })
-      .catch((error: unknown) => {
+        activeVisualizer?.dispose();
+        activeVisualizer = createTraceVisualizer(session);
+        result.replaceChildren(activeVisualizer.element);
+      } catch (error: unknown) {
         status.textContent = "Runtime: internal_error";
-        traceOutput.textContent = JSON.stringify({ error: errorText(error) }, null, 2);
-      })
+        renderError(errorText(error));
+      }
+    };
+
+    void executeCurrentSnapshot()
       .finally(() => {
         running = false;
         runButton.disabled = false;
       });
   });
 
-  root.replaceChildren(
-    title,
-    status,
-    sourceLabel,
-    source,
-    testcaseLabel,
-    testcase,
-    loadButton,
-    runButton,
-    traceLabel,
-    traceOutput
-  );
+  app.append(header, status, inputPanel, result);
+  root.replaceChildren(app);
 }
 
 if (typeof document !== "undefined") {

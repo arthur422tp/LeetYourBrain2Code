@@ -17,11 +17,13 @@ export interface LeetCodeAdapter {
 export const LEETCODE_MESSAGE_SOURCE = "leetcode-python-visualizer";
 export const LEETCODE_MESSAGE_TYPES = {
   requestSnapshot: "request_snapshot",
-  responseSnapshot: "response_snapshot"
+  responseSnapshot: "response_snapshot",
+  snapshotUpdated: "snapshot_updated"
 } as const;
 
 export const LEETCODE_CONTENT_MESSAGE_TYPES = {
-  requestSnapshot: "request_leetcode_snapshot"
+  requestSnapshot: "request_leetcode_snapshot",
+  snapshotUpdated: "leetcode_snapshot_updated"
 } as const;
 
 const MAX_SNAPSHOT_CODE_LENGTH = 1_000_000;
@@ -70,6 +72,7 @@ export interface AdapterOptions {
   window?: Window;
   requestMainWorldSnapshot?: () => Promise<unknown>;
   bridgeTimeoutMs?: number;
+  preferMainWorldSnapshot?: boolean;
 }
 
 function normalizeLanguageKey(value: string): string {
@@ -265,16 +268,32 @@ export function createLeetCodeAdapter(options: AdapterOptions = {}): LeetCodeAda
 
   return {
     async getSnapshot(): Promise<LeetCodeSnapshot> {
+      const getBridgeSnapshot = async (): Promise<LeetCodeSnapshot> => {
+        const bridgeSnapshot = await requestSnapshot();
+        if (!validateSnapshot(bridgeSnapshot)) {
+          throw new Error("LeetCode adapter received an invalid snapshot");
+        }
+        return bridgeSnapshot;
+      };
+
+      if (options.preferMainWorldSnapshot) {
+        try {
+          return await getBridgeSnapshot();
+        } catch (bridgeError) {
+          const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
+          if (isolatedSnapshot) {
+            return isolatedSnapshot;
+          }
+          throw bridgeError;
+        }
+      }
+
       const isolatedSnapshot = extractIsolatedSnapshot(pageDocument);
       if (isolatedSnapshot) {
         return isolatedSnapshot;
       }
 
-      const bridgeSnapshot = await requestSnapshot();
-      if (!validateSnapshot(bridgeSnapshot)) {
-        throw new Error("LeetCode adapter received an invalid snapshot");
-      }
-      return bridgeSnapshot;
+      return getBridgeSnapshot();
     }
   };
 }

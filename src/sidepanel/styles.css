@@ -86,6 +86,20 @@ button.is-primary:hover:not(:disabled) {
   font-size: 12px;
 }
 
+#runtime-status[data-live-status="synced"] {
+  color: #166534;
+}
+
+#runtime-status[data-live-status="editing"],
+#runtime-status[data-live-status="updating"] {
+  color: #64748b;
+}
+
+#runtime-status[data-live-status="runtime_error"],
+#runtime-status[data-live-status="timeout"] {
+  color: #b45309;
+}
+
 .input-panel,
 .trace-viewer__panel,
 .trace-placeholder,

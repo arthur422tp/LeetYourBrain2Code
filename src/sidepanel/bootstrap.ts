@@ -5,17 +5,18 @@ import {
   validateSnapshot,
   type LeetCodeSnapshot
 } from "../content/leetcode-adapter";
-import { createExecutionRequest } from "../execution/execution-request";
 import {
-  getSelectedTestcase,
-  getTestcaseCases
-} from "../execution/testcase-selection";
+  LiveExecutionScheduler,
+  type LiveStatus
+} from "../execution/live-execution-scheduler";
+import { getTestcaseCases } from "../execution/testcase-selection";
 import { ExecutionController } from "../execution/execution-controller";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
 import "./styles.css";
 
 export interface SidePanelController {
   execute(request: ExecutionRequest): Promise<TraceSession>;
+  dispose?(): void;
 }
 
 export type SnapshotSubscription = (
@@ -26,6 +27,11 @@ export interface SidePanelDependencies {
   controller?: SidePanelController;
   snapshotProvider?: () => Promise<LeetCodeSnapshot>;
   snapshotSubscription?: SnapshotSubscription;
+  liveDebounceMs?: number;
+}
+
+export interface SidePanelHandle {
+  dispose(): void;
 }
 
 const SAMPLE_SOURCE = `class Solution:
@@ -223,7 +229,7 @@ function createDefaultSnapshotSubscription(): SnapshotSubscription | undefined {
 export function renderSidePanel(
   root: HTMLElement,
   dependencies: SidePanelDependencies = {}
-): void {
+): SidePanelHandle {
   const controller = dependencies.controller ?? createDefaultController();
   const snapshotProvider =
     dependencies.snapshotProvider ?? createDefaultSnapshotProvider();
@@ -243,7 +249,7 @@ export function renderSidePanel(
 
   const status = document.createElement("p");
   status.id = "runtime-status";
-  status.textContent = "Runtime: not started";
+  status.textContent = "Live: not started";
 
   const inputPanel = document.createElement("details");
   inputPanel.className = "input-panel";
@@ -286,7 +292,7 @@ export function renderSidePanel(
   const runButton = document.createElement("button");
   runButton.id = "run";
   runButton.type = "button";
-  runButton.textContent = "Visualize";
+  runButton.textContent = "Run now";
 
   const actions = document.createElement("div");
   actions.className = "input-panel__actions";
@@ -307,13 +313,20 @@ export function renderSidePanel(
   result.className = "visualization-output";
   const placeholder = document.createElement("div");
   placeholder.className = "trace-placeholder";
-  placeholder.textContent = "Run Visualize to inspect the execution step by step.";
+  placeholder.textContent = "Waiting for a runnable Python draft…";
   result.append(placeholder);
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
-
-  let running = false;
+  let currentSnapshot: LeetCodeSnapshot | null = snapshotProvider
+    ? null
+    : {
+        code: SAMPLE_SOURCE,
+        language: "python",
+        testcase: SAMPLE_TESTCASE,
+        metadata: { slug: "sample", title: "Sample" }
+      };
   let selectedCaseIndex = 0;
+  let disposed = false;
 
   const refreshCaseSelector = (sourceCode: string, rawTestcase: string): void => {
     const previousIndex = Number.parseInt(caseSelector.value, 10);
@@ -338,94 +351,99 @@ export function renderSidePanel(
   caseSelector.addEventListener("change", () => {
     const nextIndex = Number.parseInt(caseSelector.value, 10);
     selectedCaseIndex = Number.isInteger(nextIndex) && nextIndex >= 0 ? nextIndex : 0;
+    scheduleCurrent();
   });
 
-  const applySnapshot = (snapshot: LeetCodeSnapshot): void => {
+  const scheduler = new LiveExecutionScheduler({
+    runner: controller,
+    createSessionId,
+    debounceMs: dependencies.liveDebounceMs,
+    onStatusChange: (liveStatus: LiveStatus) => {
+      status.dataset.liveStatus = liveStatus;
+      status.textContent = `Live: ${liveStatus}`;
+    },
+    onSession: (session) => {
+      activeVisualizer?.dispose();
+      activeVisualizer = createTraceVisualizer(session);
+      result.replaceChildren(activeVisualizer.element);
+    }
+  });
+
+  const scheduleCurrent = (
+    options: { immediate?: boolean; force?: boolean } = {}
+  ): void => {
+    if (!currentSnapshot || disposed) return;
+    scheduler.schedule({
+      language: currentSnapshot.language,
+      sourceCode: currentSnapshot.code,
+      rawTestcase: currentSnapshot.testcase,
+      selectedCaseIndex
+    }, options);
+  };
+
+  const applySnapshot = (
+    snapshot: LeetCodeSnapshot,
+    options: { schedule?: boolean } = {}
+  ): void => {
+    if (disposed) return;
+    currentSnapshot = snapshot;
     source.value = snapshot.code;
     testcase.value = snapshot.testcase;
     refreshCaseSelector(snapshot.code, snapshot.testcase);
-    status.textContent = "Runtime: ready";
+    if (options.schedule !== false) {
+      scheduleCurrent();
+    }
   };
 
   refreshCaseSelector(source.value, testcase.value);
 
-  snapshotSubscription?.(applySnapshot);
+  const unsubscribeSnapshot = snapshotSubscription?.(applySnapshot);
   if (snapshotProvider) {
-    status.textContent = "Runtime: syncing";
+    status.textContent = "Live: syncing";
     void snapshotProvider()
       .then(applySnapshot)
       .catch((error: unknown) => {
-        status.textContent = `Runtime: ${snapshotErrorText(error)}`;
+        if (!disposed) {
+          status.textContent = `Live: ${snapshotErrorText(error)}`;
+        }
       });
   }
 
   runButton.addEventListener("click", () => {
-    if (running) {
-      return;
-    }
-    running = true;
-    runButton.disabled = true;
-    status.textContent = "Runtime: running";
-    activeVisualizer?.dispose();
-    activeVisualizer = null;
-    result.replaceChildren();
-
-    const renderError = (message: string): void => {
-      const errorPanel = document.createElement("div");
-      errorPanel.className = "trace-error";
-      errorPanel.textContent = message;
-      result.replaceChildren(errorPanel);
-    };
-
-    const executeCurrentSnapshot = async (): Promise<void> => {
+    const runLatest = async (): Promise<void> => {
+      if (disposed) return;
       if (snapshotProvider) {
-        status.textContent = "Runtime: syncing";
         try {
-          applySnapshot(await snapshotProvider());
+          applySnapshot(await snapshotProvider(), { schedule: false });
         } catch (error: unknown) {
-          status.textContent = `Runtime: ${snapshotErrorText(error)}`;
-          renderError(snapshotErrorText(error));
+          status.textContent = `Live: ${snapshotErrorText(error)}`;
           return;
         }
       }
-
-      status.textContent = "Runtime: running";
-      const requestResult = createExecutionRequest({
-        sessionId: createSessionId(),
-        sourceCode: source.value,
-        rawTestcase:
-          getSelectedTestcase(source.value, testcase.value, selectedCaseIndex) ?? testcase.value
-      });
-
-      if (!requestResult.ok) {
-        status.textContent = `Runtime: ${requestResult.reason}`;
-        renderError(requestResult.reason);
-        return;
-      }
-
-      try {
-        const session = await controller.execute(requestResult.request);
-        status.textContent = `Runtime: ${session.status}`;
-        activeVisualizer?.dispose();
-        activeVisualizer = createTraceVisualizer(session);
-        result.replaceChildren(activeVisualizer.element);
-      } catch (error: unknown) {
-        status.textContent = "Runtime: internal_error";
-        renderError(errorText(error));
-      }
+      scheduleCurrent({ immediate: true, force: true });
     };
-
-    void executeCurrentSnapshot()
-      .finally(() => {
-        running = false;
-        runButton.disabled = false;
-      });
+    void runLatest();
   });
 
   app.append(header, status, inputPanel, result);
   root.replaceChildren(app);
+
+  return {
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      unsubscribeSnapshot?.();
+      scheduler.dispose();
+      activeVisualizer?.dispose();
+      activeVisualizer = null;
+      controller.dispose?.();
+    }
+  };
 }
 
 if (typeof document !== "undefined") {
-  renderSidePanel(document.body);
+  const handle = renderSidePanel(document.body);
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", () => handle.dispose(), { once: true });
+  }
 }

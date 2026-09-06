@@ -30,6 +30,10 @@ Chrome Side Panel visualization
 
 Live Visualization follows the latest runnable Python draft. When the LeetCode code, testcase, or selected testcase case changes, the Side Panel automatically re-executes after a short debounce. Temporarily incomplete code keeps the previous visualization visible until the draft becomes runnable again; `Run now` remains available as an immediate retry.
 
+The Side Panel follows the active LeetCode tab in its current Chrome window. Switching between already-open LeetCode problems triggers an exact-tab snapshot refresh even when the editor content did not change. Snapshot updates from background LeetCode tabs are ignored.
+
+When the active tab is not LeetCode, Live Visualization pauses without clearing the last trace. Returning to LeetCode resumes from the newly active tab automatically.
+
 The MVP is designed to expose:
 
 - the active source line;
@@ -68,3 +72,5 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 - [Implementation Plan 1](docs/superpowers/plans/2026-09-05-leetcode-python-execution-visualizer-implementation-plan-1.md)
 - [Live Visualization Design Spec](docs/superpowers/specs/2026-09-06-live-visualization-design.md)
 - [Live Visualization Implementation Plan](docs/superpowers/plans/2026-09-06-live-visualization-implementation-plan.md)
+- [Active Tab Ownership Design Spec](docs/superpowers/specs/2026-09-06-active-tab-ownership-design.md)
+- [Active Tab Ownership Implementation Plan](docs/superpowers/plans/2026-09-06-active-tab-ownership-implementation-plan.md)

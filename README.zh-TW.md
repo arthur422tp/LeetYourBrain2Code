@@ -30,6 +30,10 @@ Chrome Side Panel 視覺化
 
 Live Visualization 會追蹤目前最新可執行的 Python draft。當 LeetCode 的程式碼、testcase 或目前選中的 testcase case 改變時，Side Panel 會在短暫 debounce 後自動重新執行。若使用者正輸入暫時不完整的程式碼，畫面會保留上一份可執行版本的 visualization，直到新版再次可執行；`Run now` 則保留作為立即重試入口。
 
+Side Panel 只會跟隨目前 Chrome window 中的 active LeetCode tab。即使另一個 LeetCode tab 已經開著且 editor 內容沒有再次變動，只要切換過去，Side Panel 就會向該 exact tab 重新取得 canonical snapshot；background LeetCode tab 的 snapshot update 會被忽略。
+
+當 active tab 不是 LeetCode 時，Live Visualization 會顯示 `Live: paused · No active LeetCode tab`，但保留上一份 trace visualization。切回 LeetCode 後會自動從新的 active tab 恢復同步。
+
 MVP 的目標是呈現：
 
 - 目前執行到的 source line；
@@ -68,3 +72,5 @@ Build 完成後，前往 `chrome://extensions`，以「載入未封裝項目」�
 - [Implementation Plan 1](docs/superpowers/plans/2026-09-05-leetcode-python-execution-visualizer-implementation-plan-1.md)
 - [Live Visualization Design Spec](docs/superpowers/specs/2026-09-06-live-visualization-design.md)
 - [Live Visualization Implementation Plan](docs/superpowers/plans/2026-09-06-live-visualization-implementation-plan.md)
+- [Active Tab Ownership Design Spec](docs/superpowers/specs/2026-09-06-active-tab-ownership-design.md)
+- [Active Tab Ownership Implementation Plan](docs/superpowers/plans/2026-09-06-active-tab-ownership-implementation-plan.md)

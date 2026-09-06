@@ -174,6 +174,203 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("mirrors active-tab code before testcase is available without executing", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code: "class Solution:\n    def twoSum(self, nums, target):",
+        language: "python",
+        testcase: null,
+        metadata: { slug: "two-sum", title: "Two Sum" }
+      }
+    });
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value)
+      .toContain("def twoSum");
+    expect(root.querySelector<HTMLTextAreaElement>("#testcase")?.value).toBe("");
+    expect(root.querySelector<HTMLSelectElement>("#testcase-case")?.disabled).toBe(true);
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: code synced · waiting for testcase");
+    expect(execute).not.toHaveBeenCalled();
+
+    handle.dispose();
+  });
+
+  it("keeps mirroring newer code-only revisions while execution remains blocked", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+    const firstCode = "class Solution:\n    def one(self, value):\n        return value\n";
+    const secondCode = "class Solution:\n    def one(self, value):\n        return value + 1\n";
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code: firstCode,
+        language: "python",
+        testcase: null,
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code: secondCode,
+        language: "python",
+        testcase: null,
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(secondCode);
+    expect(root.querySelector<HTMLTextAreaElement>("#testcase")?.value).toBe("");
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: code synced · waiting for testcase");
+    expect(execute).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it("clears the source mirror for an observed empty editor", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+    const initial = pageState({
+      code: "class Solution:\n    def one(self, value):\n        return value\n"
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: initial });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code: "",
+        language: "python",
+        testcase: "7",
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe("");
+    expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: editing");
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    expect(execute).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
+  it("executes the latest mirrored code when testcase appears without another code change", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    const code = "class Solution:\n    def one(self, value):\n        return value + 1\n";
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code,
+        language: "python",
+        testcase: null,
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+    expect(execute).not.toHaveBeenCalled();
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code,
+        language: "python",
+        testcase: "8",
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute.mock.calls[0]?.[0].sourceCode).toBe(code);
+    expect(execute.mock.calls[0]?.[0].rawTestcase).toBe("8");
+
+    handle.dispose();
+  });
+
+  it("does not render an older in-flight session after the latest page state loses execution readiness", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const first = deferred<TraceSession>();
+    const runnableCode = "class Solution:\n    def one(self, value):\n        return value\n";
+    const waitingCode = "class Solution:\n    def one(self, value):\n        return value + 1\n";
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      requests.push(request);
+      return first.promise;
+    });
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code: runnableCode,
+        language: "python",
+        testcase: "7",
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: {
+        code: waitingCode,
+        language: "python",
+        testcase: null,
+        metadata: { slug: "one", title: "One" }
+      }
+    });
+    first.resolve(completedSession(requests[0]!));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(waitingCode);
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: code synced · waiting for testcase");
+    expect(root.querySelector("#trace-viewer")).toBeNull();
+    expect(root.querySelector(".trace-placeholder")).not.toBeNull();
+    handle.dispose();
+  });
+
   it("automatically executes the selected testcase case", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
@@ -491,7 +688,7 @@ describe("renderSidePanel", () => {
     await vi.waitFor(() => expect(source.refresh).toHaveBeenCalledTimes(1));
     await Promise.resolve();
 
-    expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: updating");
+    expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: syncing");
     expect(root.querySelector("#trace-viewer")).not.toBeNull();
     handle.dispose();
   });

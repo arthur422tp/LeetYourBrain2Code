@@ -303,6 +303,43 @@ describe("LiveExecutionScheduler", () => {
     expect(rendered).toEqual([]);
   });
 
+  it("keeps an older in-flight result stale after the latest source revision becomes non-runnable", async () => {
+    const running = deferred<TraceSession>();
+    let captured!: ExecutionRequest;
+    const rendered: TraceSession[] = [];
+    const statuses: LiveStatus[] = [];
+    const scheduler = new LiveExecutionScheduler({
+      runner: {
+        execute: (request) => {
+          captured = request;
+          return running.promise;
+        }
+      },
+      createSessionId: () => "running-before-waiting-testcase",
+      debounceMs: 0,
+      onStatusChange: (status) => statuses.push(status),
+      onSession: (session) => rendered.push(session)
+    });
+
+    scheduler.schedule(input({
+      sourceCode: "class Solution:\n    def one(self, value):\n        return value\n",
+      rawTestcase: "7"
+    }));
+    await vi.runAllTimersAsync();
+    expect(captured.sourceCode).toContain("return value");
+
+    const statusCountBeforeInvalidate = statuses.length;
+    scheduler.invalidate();
+    expect(statuses).toHaveLength(statusCountBeforeInvalidate);
+
+    running.resolve(makeSession(captured));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(rendered).toEqual([]);
+    expect(statuses).toHaveLength(statusCountBeforeInvalidate);
+  });
+
   it("clears debounced and pending work on invalidation", async () => {
     const first = deferred<TraceSession>();
     const requests: ExecutionRequest[] = [];

@@ -14,6 +14,7 @@ import { ExecutionController } from "../execution/execution-controller";
 import {
   createActiveTabSource,
   type ActiveTabSource,
+  type ActiveTabState,
   type ActiveTabSourceOptions
 } from "./active-tab-source";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
@@ -37,6 +38,12 @@ export interface SidePanelDependencies {
 export interface SidePanelHandle {
   dispose(): void;
 }
+
+type SourceReadiness =
+  | "waiting_for_editor"
+  | "waiting_for_language"
+  | "waiting_for_testcase"
+  | "candidate";
 
 const SAMPLE_SOURCE = `class Solution:
     def twoSum(self, numbers, target):
@@ -84,6 +91,13 @@ function hasChromeTabSource(): boolean {
     typeof chrome.tabs?.onUpdated?.addListener === "function" &&
     typeof chrome.runtime?.onMessage?.addListener === "function" &&
     typeof chrome.scripting?.executeScript === "function";
+}
+
+function sourceReadiness(state: LeetCodePageState): SourceReadiness {
+  if (state.code === null || state.code.length === 0) return "waiting_for_editor";
+  if (state.language === null) return "waiting_for_language";
+  if (state.testcase === null) return "waiting_for_testcase";
+  return "candidate";
 }
 
 export function renderSidePanel(
@@ -177,7 +191,7 @@ export function renderSidePanel(
   result.append(placeholder);
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
-  let currentPageState: LeetCodeSnapshot | null = hasActiveTabSource
+  let currentPageState: LeetCodePageState | null = hasActiveTabSource
     ? null
     : {
         code: SAMPLE_SOURCE,
@@ -185,9 +199,42 @@ export function renderSidePanel(
         testcase: SAMPLE_TESTCASE,
         metadata: { slug: "sample", title: "Sample" }
       };
+  let ownershipState: ActiveTabState | null = null;
+  let schedulerStatus: LiveStatus | null = null;
   let selectedCaseIndex = 0;
   let ownershipGeneration = 0;
   let disposed = false;
+
+  const renderLiveStatus = (): void => {
+    if (ownershipState?.kind === "paused") {
+      status.dataset.liveStatus = "paused";
+      status.textContent = "Live: paused · No active LeetCode tab";
+      return;
+    }
+
+    if (!currentPageState || currentPageState.code === null) {
+      status.dataset.liveStatus = "syncing";
+      status.textContent = "Live: syncing";
+      return;
+    }
+
+    const readiness = sourceReadiness(currentPageState);
+    if (readiness === "waiting_for_editor" || readiness === "waiting_for_language") {
+      status.dataset.liveStatus = "editing";
+      status.textContent = "Live: editing";
+      return;
+    }
+
+    if (readiness === "waiting_for_testcase") {
+      status.dataset.liveStatus = "waiting_for_testcase";
+      status.textContent = "Live: code synced · waiting for testcase";
+      return;
+    }
+
+    const next = schedulerStatus ?? "updating";
+    status.dataset.liveStatus = next;
+    status.textContent = `Live: ${next}`;
+  };
 
   const refreshCaseSelector = (sourceCode: string, rawTestcase: string): void => {
     const previousIndex = Number.parseInt(caseSelector.value, 10);
@@ -220,8 +267,8 @@ export function renderSidePanel(
     createSessionId,
     debounceMs: dependencies.liveDebounceMs,
     onStatusChange: (liveStatus: LiveStatus) => {
-      status.dataset.liveStatus = liveStatus;
-      status.textContent = `Live: ${liveStatus}`;
+      schedulerStatus = liveStatus;
+      renderLiveStatus();
     },
     onSession: (session) => {
       activeVisualizer?.dispose();
@@ -230,30 +277,29 @@ export function renderSidePanel(
     }
   });
 
-  const scheduleCurrent = (
+  const scheduleSnapshot = (
+    snapshot: LeetCodeSnapshot,
     options: { immediate?: boolean; force?: boolean } = {}
   ): void => {
-    if (!currentPageState || disposed) return;
     scheduler.schedule({
-      language: currentPageState.language,
-      sourceCode: currentPageState.code,
-      rawTestcase: currentPageState.testcase,
+      language: snapshot.language,
+      sourceCode: snapshot.code,
+      rawTestcase: snapshot.testcase,
       selectedCaseIndex
     }, options);
   };
 
-  const applySnapshot = (
-    snapshot: LeetCodeSnapshot,
-    options: { schedule?: boolean } = {}
+  const scheduleCurrent = (
+    options: { immediate?: boolean; force?: boolean } = {}
   ): void => {
-    if (disposed) return;
-    currentPageState = snapshot;
-    source.value = snapshot.code;
-    testcase.value = snapshot.testcase;
-    refreshCaseSelector(snapshot.code, snapshot.testcase);
-    if (options.schedule !== false) {
-      scheduleCurrent();
+    if (!currentPageState || disposed) return;
+    const snapshot = toRunnableSnapshot(currentPageState);
+    if (snapshot === null) {
+      scheduler.invalidate();
+      renderLiveStatus();
+      return;
     }
+    scheduleSnapshot(snapshot, options);
   };
 
   const applyPageState = (
@@ -261,13 +307,39 @@ export function renderSidePanel(
     options: { schedule?: boolean } = {}
   ): void => {
     if (disposed) return;
-    const runnable = toRunnableSnapshot(state);
-    if (runnable) {
-      applySnapshot(runnable, options);
+
+    currentPageState = state;
+
+    if (state.code !== null) {
+      source.value = state.code;
+    }
+
+    if (state.testcase === null) {
+      testcase.value = "";
+      testcase.placeholder = "Waiting for testcase…";
+      caseSelector.replaceChildren();
+      caseSelector.disabled = true;
+      selectedCaseIndex = 0;
+      scheduler.invalidate();
+      renderLiveStatus();
       return;
     }
-    currentPageState = null;
-    scheduler.invalidate();
+
+    testcase.placeholder = "";
+    testcase.value = state.testcase;
+    refreshCaseSelector(state.code ?? "", state.testcase);
+
+    const snapshot = toRunnableSnapshot(state);
+    if (snapshot === null) {
+      scheduler.invalidate();
+      renderLiveStatus();
+      return;
+    }
+
+    if (options.schedule !== false) {
+      scheduleSnapshot(snapshot);
+    }
+    renderLiveStatus();
   };
 
   refreshCaseSelector(source.value, testcase.value);
@@ -277,21 +349,22 @@ export function renderSidePanel(
       if (disposed) return;
       ownershipGeneration += 1;
       currentPageState = null;
+      ownershipState = null;
       scheduler.invalidate();
-      status.dataset.liveStatus = "updating";
-      status.textContent = "Live: updating";
+      schedulerStatus = "updating";
+      renderLiveStatus();
     },
     onStateChange: (state) => {
       if (disposed) return;
       ownershipGeneration += 1;
+      ownershipState = state;
       if (state.kind === "paused") {
         currentPageState = null;
-        status.dataset.liveStatus = "paused";
-        status.textContent = "Live: paused · No active LeetCode tab";
+        renderLiveStatus();
         return;
       }
-      status.dataset.liveStatus = "updating";
-      status.textContent = "Live: updating";
+      schedulerStatus = "updating";
+      renderLiveStatus();
     },
     onPageState: ({ state: acceptedState }) => {
       applyPageState(acceptedState);
@@ -307,7 +380,7 @@ export function renderSidePanel(
   root.replaceChildren(app);
 
   if (activeTabSource) {
-    status.textContent = "Live: syncing";
+    renderLiveStatus();
     void activeTabSource.start().catch((error: unknown) => {
       if (!disposed) {
         status.textContent = `Live: ${errorText(error)}`;

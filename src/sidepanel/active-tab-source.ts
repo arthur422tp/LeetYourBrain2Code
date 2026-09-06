@@ -68,6 +68,10 @@ function getTab(api: ChromeApi, tabId: number): Promise<chrome.tabs.Tab> {
         reject(new Error(runtimeError.message));
         return;
       }
+      if (!resolvedTab) {
+        reject(new Error("Unable to resolve the active Chrome tab"));
+        return;
+      }
       resolve(resolvedTab);
     });
   });
@@ -132,6 +136,7 @@ export function createActiveTabSource(
   let currentActiveTabId: number | null = null;
   let activeLeetCodeTabId: number | null = null;
   let activeTabEpoch = 0;
+  let currentTabUrl: string | undefined;
   let started = false;
   let disposed = false;
 
@@ -153,9 +158,21 @@ export function createActiveTabSource(
       const value = await fetchCurrent(tabId, epoch);
       if (value) options.onSnapshot(value);
     } catch (error) {
-      if (isCurrent(tabId, epoch)) {
-        options.onError(normalizeError(error));
+      if (!isCurrent(tabId, epoch)) return;
+      options.onError(normalizeError(error));
+
+      const active = await queryCurrentActiveTab(chromeApi).catch(() => null);
+      if (
+        disposed ||
+        epoch !== activeTabEpoch ||
+        !active?.id ||
+        active.windowId !== currentWindowId ||
+        active.id === currentActiveTabId
+      ) {
+        return;
       }
+
+      void activate(active.id, active.windowId);
     }
   };
 
@@ -171,6 +188,8 @@ export function createActiveTabSource(
     ) {
       return;
     }
+
+    currentTabUrl = resolvedTab.url;
 
     if (!isLeetCodeUrl(resolvedTab.url)) {
       activeLeetCodeTabId = null;
@@ -236,6 +255,7 @@ export function createActiveTabSource(
   const attachCoreListeners = (): void => {
     chromeApi.runtime.onMessage.addListener(onRuntimeMessage);
     chromeApi.tabs.onActivated.addListener(onActivated);
+    chromeApi.tabs.onUpdated.addListener(onUpdated);
   };
 
   const start = async (): Promise<void> => {
@@ -267,6 +287,45 @@ export function createActiveTabSource(
     await applyResolvedTab(currentTab, epoch);
   };
 
+  const invalidateForUpdatedTab = (
+    updatedTab: chrome.tabs.Tab
+  ): number => {
+    activeLeetCodeTabId = null;
+    currentTabUrl = updatedTab.url;
+    const epoch = ++activeTabEpoch;
+    options.onOwnershipInvalidated();
+    return epoch;
+  };
+
+  const onUpdated = (
+    tabId: number,
+    changeInfo: chrome.tabs.TabChangeInfo,
+    updatedTab: chrome.tabs.Tab
+  ): void => {
+    if (disposed || tabId !== currentActiveTabId) return;
+
+    const urlChanged =
+      changeInfo.url !== undefined && changeInfo.url !== currentTabUrl;
+
+    if (urlChanged) {
+      const epoch = invalidateForUpdatedTab(updatedTab);
+      void applyResolvedTab(updatedTab, epoch);
+      return;
+    }
+
+    if (changeInfo.status !== "complete") return;
+
+    if (updatedTab.url !== currentTabUrl) {
+      const epoch = invalidateForUpdatedTab(updatedTab);
+      void applyResolvedTab(updatedTab, epoch);
+      return;
+    }
+
+    if (activeLeetCodeTabId === tabId) {
+      void refreshAndEmit(tabId, activeTabEpoch);
+    }
+  };
+
   const refresh = async (): Promise<ActiveTabSnapshot | null> => {
     if (disposed || activeLeetCodeTabId === null) return null;
     return fetchCurrent(activeLeetCodeTabId, activeTabEpoch);
@@ -278,6 +337,7 @@ export function createActiveTabSource(
     ++activeTabEpoch;
     chromeApi.runtime.onMessage.removeListener(onRuntimeMessage);
     chromeApi.tabs.onActivated.removeListener(onActivated);
+    chromeApi.tabs.onUpdated.removeListener(onUpdated);
   };
 
   return { start, refresh, dispose };

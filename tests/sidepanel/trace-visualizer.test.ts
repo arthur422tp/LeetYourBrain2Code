@@ -109,6 +109,63 @@ function twoSumSession(): TraceSession {
   };
 }
 
+function linkedListSession(): TraceSession {
+  const reference = (objectId: string) => ({
+    type: "reference" as const,
+    objectId,
+    className: "ListNode"
+  });
+  const node = (objectId: string, value: number, next: ReturnType<typeof reference> | null) => ({
+    objectId,
+    className: "ListNode",
+    attributes: {
+      val: int(value),
+      next: next ?? { type: "none" as const, value: null }
+    }
+  });
+
+  return {
+    ...session(),
+    sourceCode: "class Solution:\n    def reverseList(self, head):\n        return head\n",
+    rawTestcase: "[1, 2]",
+    entrypoint: {
+      className: "Solution",
+      methodName: "reverseList",
+      parameterCount: 1,
+      parameterKinds: ["linked_list"]
+    },
+    subscriptRelations: [],
+    events: [
+      {
+        step: 1,
+        event: "line",
+        frameId: 1,
+        parentFrameId: null,
+        function: "reverseList",
+        line: 2,
+        callDepth: 1,
+        locals: { head: reference("obj-1"), nums: list([1, 2]) },
+        objects: [node("obj-1", 1, reference("obj-2")), node("obj-2", 2, null)],
+        objectsTruncated: false,
+        stdoutDelta: ""
+      },
+      {
+        step: 2,
+        event: "line",
+        frameId: 1,
+        parentFrameId: null,
+        function: "reverseList",
+        line: 3,
+        callDepth: 1,
+        locals: { head: reference("obj-1"), nums: list([1, 2]) },
+        objects: [node("obj-1", 1, reference("obj-2")), node("obj-2", 2, null)],
+        objectsTruncated: false,
+        stdoutDelta: ""
+      }
+    ]
+  };
+}
+
 describe("createTraceVisualizer", () => {
   it("renders readable trace state and keeps raw JSON in a collapsed debug section", () => {
     const view = createTraceVisualizer(session());
@@ -248,5 +305,20 @@ describe("createTraceVisualizer", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("renders distinct visual ids through the registry and reuses stable handles", () => {
+    const view = createTraceVisualizer(linkedListSession());
+    const visuals = view.element.querySelectorAll("[data-visual-id]");
+    const listElement = view.element.querySelector('[data-visual-id="list:nums"]');
+
+    expect(visuals).toHaveLength(2);
+    expect(view.element.querySelector('[data-visual-id="linked_list:obj-1"]')).not.toBeNull();
+    expect(listElement).not.toBeNull();
+
+    view.setStep(1);
+
+    expect(view.element.querySelector('[data-visual-id="list:nums"]')).toBe(listElement);
+    view.dispose();
   });
 });

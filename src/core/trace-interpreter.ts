@@ -48,7 +48,7 @@ export function interpretTrace(
     )
   );
   const visualStates = runtimeStates.map((runtime, index) =>
-    buildVisualState(runtime, frameDiffs[index] ?? null, relations)
+    buildVisualState(runtime, frameDiffs[index] ?? null, relations, objectDiffs[index] ?? null)
   );
 
   return { runtimeStates, frameDiffs, objectDiffs, visualStates };

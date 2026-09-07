@@ -191,5 +191,6 @@ describe("interpretTrace", () => {
     expect(result.objectDiffs[1]?.attributeChanges).toEqual([
       expect.objectContaining({ objectId: "obj-1", attribute: "next", kind: "changed" })
     ]);
+    expect(result.visualStates[1]?.objectChanges).toEqual(result.objectDiffs[1]);
   });
 });

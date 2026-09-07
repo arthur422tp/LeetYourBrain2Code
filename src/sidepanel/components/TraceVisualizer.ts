@@ -2,15 +2,12 @@ import type { FrameDiff, VariableDiff } from "../../core/state-diff";
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
-import {
-  createDictVisualizer,
-  type DictVisualizerHandle
-} from "./DictVisualizer";
-import {
-  createListVisualizer,
-  type ListVisualizerHandle
-} from "./ListVisualizer";
 import { formatValue } from "./value-format";
+import {
+  createVisualizer,
+  updateVisualizer,
+  type VisualizerHandle
+} from "./visualizer-registry";
 
 const PLAY_INTERVAL_MS = 700;
 
@@ -84,10 +81,6 @@ function renderEmptyState(message: string): HTMLDivElement {
   return createElement("div", "trace-viewer__empty", message);
 }
 
-type VisualHandle =
-  | { kind: "list"; handle: ListVisualizerHandle }
-  | { kind: "dict"; handle: DictVisualizerHandle };
-
 function createVisualStateRenderer(): {
   body: HTMLDivElement;
   setState(state: VisualState | undefined): void;
@@ -98,10 +91,10 @@ function createVisualStateRenderer(): {
   const visualsHost = createElement("div", "trace-viewer__visuals");
   body.append(stateMeta, visualsHost);
 
-  const handles = new Map<string, VisualHandle>();
+  const handles = new Map<string, VisualizerHandle>();
 
   const disposeHandles = (): void => {
-    for (const { handle } of handles.values()) {
+    for (const handle of handles.values()) {
       handle.dispose();
     }
     handles.clear();
@@ -119,11 +112,7 @@ function createVisualStateRenderer(): {
       ? "No source line"
       : `Line ${state.currentLine}`;
 
-    const visuals = state.containerVisuals.length > 0
-      ? state.containerVisuals
-      : state.primaryVisual
-        ? [state.primaryVisual]
-        : [];
+    const visuals = state.visuals;
     if (visuals.length === 0) {
       disposeHandles();
       visualsHost.replaceChildren(
@@ -135,33 +124,23 @@ function createVisualStateRenderer(): {
     const nextKeys = new Set<string>();
     const elements: HTMLElement[] = [];
     for (const visual of visuals) {
-      const key = `${visual.kind}:${visual.variableName}`;
+      const key = visual.visualId;
       nextKeys.add(key);
       const existing = handles.get(key);
-      if (visual.kind === "list") {
-        if (existing?.kind === "list") {
-          existing.handle.update(visual);
-          elements.push(existing.handle.element);
-        } else {
-          existing?.handle.dispose();
-          const handle = createListVisualizer(visual);
-          handles.set(key, { kind: "list", handle });
-          elements.push(handle.element);
-        }
-      } else if (existing?.kind === "dict") {
-        existing.handle.update(visual);
-        elements.push(existing.handle.element);
+      if (existing?.kind === visual.kind) {
+        updateVisualizer(existing, visual);
+        elements.push(existing.element);
       } else {
-        existing?.handle.dispose();
-        const handle = createDictVisualizer(visual);
-        handles.set(key, { kind: "dict", handle });
+        existing?.dispose();
+        const handle = createVisualizer(visual);
+        handles.set(key, handle);
         elements.push(handle.element);
       }
     }
 
     for (const [key, entry] of handles) {
       if (!nextKeys.has(key)) {
-        entry.handle.dispose();
+        entry.dispose();
         handles.delete(key);
       }
     }

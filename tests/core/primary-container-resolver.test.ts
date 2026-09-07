@@ -34,7 +34,8 @@ function state(locals: Record<string, ValueSnapshot>): RuntimeState {
     ]]),
     callStack: [2],
     currentLine: 8,
-    stdout: ""
+    stdout: "",
+    objectTopology: { objects: new Map(), truncated: false }
   };
 }
 

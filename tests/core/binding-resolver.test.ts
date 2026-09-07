@@ -33,7 +33,8 @@ function state(locals: Record<string, ValueSnapshot>): RuntimeState {
     ]),
     callStack: [4],
     currentLine: 7,
-    stdout: ""
+    stdout: "",
+    objectTopology: { objects: new Map(), truncated: false }
   };
 }
 

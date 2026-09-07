@@ -1,7 +1,7 @@
 import type { ExceptionInfo } from "../shared/execution-types";
 import type { TraceEvent, ValueSnapshot } from "../shared/trace-types";
 import { cloneLocals, cloneValueSnapshot } from "./value-snapshot";
-import type { FrameState, RuntimeState } from "./runtime-state";
+import type { FrameState, ObjectTopologyState, RuntimeState } from "./runtime-state";
 
 export type { FrameState, RuntimeState } from "./runtime-state";
 
@@ -32,6 +32,21 @@ function cloneFrame(frame: FrameState): FrameState {
 
 function cloneFrames(frames: Map<number, FrameState>): Map<number, FrameState> {
   return new Map([...frames.entries()].map(([frameId, frame]) => [frameId, cloneFrame(frame)]));
+}
+
+function objectTopologyFromEvent(event: TraceEvent): ObjectTopologyState {
+  return {
+    objects: new Map(
+      (event.objects ?? []).map((object) => [
+        object.objectId,
+        {
+          ...object,
+          attributes: cloneLocals(object.attributes)
+        }
+      ])
+    ),
+    truncated: event.objectsTruncated ?? false
+  };
 }
 
 function removeFrameFromStack(callStack: number[], frameId: number): number[] {
@@ -119,6 +134,7 @@ export function reconstructStates(events: TraceEvent[]): RuntimeState[] {
       callStack: [...callStack],
       currentLine,
       stdout,
+      objectTopology: objectTopologyFromEvent(event),
       ...(exception ? { exception: cloneException(exception) } : {})
     });
 

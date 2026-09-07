@@ -16,6 +16,10 @@ function event(overrides: Partial<TraceEvent> & Pick<TraceEvent, "event" | "fram
     line: overrides.line ?? 1,
     callDepth: overrides.callDepth ?? 1,
     locals: overrides.locals ?? {},
+    ...(overrides.objects ? { objects: overrides.objects } : {}),
+    ...(overrides.objectsTruncated !== undefined
+      ? { objectsTruncated: overrides.objectsTruncated }
+      : {}),
     stdoutDelta: overrides.stdoutDelta ?? "",
     ...(overrides.eventPayload ? { eventPayload: overrides.eventPayload } : {})
   };
@@ -126,5 +130,38 @@ describe("reconstructStates", () => {
 
     expect(states[0]?.frames.get(1)?.locals).toEqual({ value: int(0) });
     expect(states[1]?.frames.get(1)?.locals).toEqual({ value: int(1) });
+  });
+
+  it("reconstructs a cloned object topology snapshot for each trace state", () => {
+    const states = reconstructStates([
+      event({
+        step: 1,
+        event: "line",
+        frameId: 1,
+        function: "reverseList",
+        locals: {
+          head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+        },
+        objects: [{
+          objectId: "obj-1",
+          className: "ListNode",
+          attributes: {
+            val: int(1),
+            next: { type: "reference", objectId: "obj-2", className: "ListNode" }
+          }
+        }],
+        objectsTruncated: false
+      })
+    ]);
+
+    expect(states[0]?.objectTopology.objects.get("obj-1")).toEqual({
+      objectId: "obj-1",
+      className: "ListNode",
+      attributes: {
+        val: int(1),
+        next: { type: "reference", objectId: "obj-2", className: "ListNode" }
+      }
+    });
+    expect(states[0]?.objectTopology.truncated).toBe(false);
   });
 });

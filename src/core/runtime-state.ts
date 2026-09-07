@@ -1,5 +1,5 @@
 import type { ExceptionInfo } from "../shared/execution-types";
-import type { ValueSnapshot } from "../shared/trace-types";
+import type { ObjectId, ObjectSnapshot, ValueSnapshot } from "../shared/trace-types";
 
 export interface FrameState {
   frameId: number;
@@ -11,6 +11,11 @@ export interface FrameState {
   exception?: ExceptionInfo;
 }
 
+export interface ObjectTopologyState {
+  objects: Map<ObjectId, ObjectSnapshot>;
+  truncated: boolean;
+}
+
 export interface RuntimeState {
   step: number;
   activeFrameId: number | null;
@@ -18,5 +23,6 @@ export interface RuntimeState {
   callStack: number[];
   currentLine: number | null;
   stdout: string;
+  objectTopology: ObjectTopologyState;
   exception?: ExceptionInfo;
 }

@@ -43,6 +43,7 @@ function runtime(locals: Record<string, ValueSnapshot>, exception?: RuntimeState
     callStack: [4],
     currentLine: 7,
     stdout: "trace\n",
+    objectTopology: { objects: new Map(), truncated: false },
     ...(exception ? { exception } : {})
   };
 }

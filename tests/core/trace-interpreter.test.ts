@@ -35,6 +35,22 @@ function event(
   };
 }
 
+function objectNode(
+  objectId: string,
+  nextObjectId: string | null
+): NonNullable<TraceEvent["objects"]>[number] {
+  return {
+    objectId,
+    className: "ListNode",
+    attributes: {
+      val: int(Number(objectId.slice(-1))),
+      next: nextObjectId === null
+        ? { type: "none", value: null }
+        : { type: "reference", objectId: nextObjectId, className: "ListNode" }
+    }
+  };
+}
+
 function relation(container: string, index: string, scope = "Solution.solve"): SubscriptRelation {
   return { scope, line: 7, container, index };
 }
@@ -154,5 +170,24 @@ describe("interpretTrace", () => {
       { frameId: 2, functionName: "dfs", line: 1, depth: 2 }
     ]);
     expect(result.visualStates[2]?.locals).toEqual({ node: int(2), child: int(1) });
+  });
+
+  it("exposes topology diffs aligned with reconstructed runtime states", () => {
+    const result = interpretTrace([
+      event(1, "reverseList", {
+        head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+      }, {
+        objects: [objectNode("obj-1", "obj-2"), objectNode("obj-2", null)]
+      }),
+      event(2, "reverseList", {
+        head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+      }, {
+        objects: [objectNode("obj-1", null), objectNode("obj-2", null)]
+      })
+    ]);
+
+    expect(result.objectDiffs[1]?.attributeChanges).toEqual([
+      expect.objectContaining({ objectId: "obj-1", attribute: "next", kind: "changed" })
+    ]);
   });
 });

@@ -4,6 +4,7 @@ import type { FrameDiff } from "../../src/core/state-diff";
 import type { RuntimeState } from "../../src/core/runtime-state";
 import type { SubscriptRelation } from "../../src/core/ast-relations";
 import type { ValueSnapshot } from "../../src/shared/trace-types";
+import type { RuntimeMutation } from "../../src/core/runtime-mutation";
 import { buildVisualState } from "../../src/core/visual-model";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
@@ -68,12 +69,90 @@ const listDiff: FrameDiff = {
   }]
 };
 
+const listMutations: RuntimeMutation[] = [{
+  kind: "sequence_element",
+  origin: "transition",
+  frameId: 4,
+  containerName: "nums",
+  containerKind: "list",
+  index: 1,
+  action: "changed",
+  before: int(7),
+  after: int(9)
+}];
+
 describe("buildVisualState", () => {
+  it("highlights list indexes from sequence mutations without a frame diff", () => {
+    const mutations: RuntimeMutation[] = [{
+      kind: "sequence_element",
+      origin: "transition",
+      frameId: 4,
+      containerName: "nums",
+      containerKind: "list",
+      index: 1,
+      action: "changed",
+      before: int(7),
+      after: int(9)
+    }];
+
+    const state = buildVisualState(
+      runtime({ nums: list([2, 9, 11]), left: int(1) }),
+      null,
+      [relation("left")],
+      null,
+      mutations
+    );
+    const visual = state.visuals.find((item) => item.visualId === "list:nums");
+
+    expect(visual).toMatchObject({ changedIndexes: [1] });
+  });
+
+  it("marks dictionary entries from mapping mutations without a frame diff", () => {
+    const mutations: RuntimeMutation[] = [
+      {
+        kind: "mapping_entry",
+        origin: "transition",
+        frameId: 4,
+        containerName: "seen",
+        key: int(1),
+        action: "added",
+        after: int(10)
+      },
+      {
+        kind: "mapping_entry",
+        origin: "transition",
+        frameId: 4,
+        containerName: "seen",
+        key: int(2),
+        action: "changed",
+        before: int(3),
+        after: int(4)
+      }
+    ];
+
+    const state = buildVisualState(
+      runtime({ seen: dict([[1, 10], [2, 4]]) }),
+      null,
+      [],
+      null,
+      mutations
+    );
+
+    expect(state.visuals.find((item) => item.visualId === "dict:seen")).toMatchObject({
+      entries: [
+        { key: int(1), value: int(10), status: "added" },
+        { key: int(2), value: int(4), status: "changed" }
+      ]
+    });
+  });
+
   it("builds a list visual with structural pointers and changed indexes", () => {
     const state = buildVisualState(
       runtime({ nums: list([2, 9, 11, 15]), left: int(1), right: int(3), target: int(20) }),
       listDiff,
-      [relation("left"), relation("right")]
+      [relation("left"), relation("right")],
+      null,
+      listMutations
     );
 
     expect(state).toEqual({
@@ -93,7 +172,7 @@ describe("buildVisualState", () => {
       primaryVisualId: "list:nums",
       objectChanges: null,
       stateChanges: listDiff,
-      mutations: [],
+      mutations: listMutations,
       locals: { nums: list([2, 9, 11, 15]), left: int(1), right: int(3), target: int(20) },
       callStack: [{ frameId: 4, functionName: "twoSum", line: 7, depth: 1 }],
       stdout: "trace\n"

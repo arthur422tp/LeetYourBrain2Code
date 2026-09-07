@@ -4,9 +4,14 @@ import { resolvePointerBindings, type PointerBinding } from "./binding-resolver"
 import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations";
 import type { ObjectDiff } from "./object-diff";
 import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
-import type { ContainerDiff, FrameDiff } from "./state-diff";
+import type { FrameDiff } from "./state-diff";
 import type { RuntimeState } from "./runtime-state";
-import { cloneRuntimeMutation, type RuntimeMutation } from "./runtime-mutation";
+import type {
+  MappingEntryMutation,
+  RuntimeMutation,
+  SequenceElementMutation
+} from "./runtime-mutation";
+import { cloneRuntimeMutation } from "./runtime-mutation";
 import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
 import { resolveVisualCandidates, type VisualCandidate } from "./visual-candidate-resolver";
 
@@ -81,18 +86,20 @@ function buildCallStack(runtime: RuntimeState): CallStackEntry[] {
   });
 }
 
-function changedIndexes(diff: FrameDiff | null, container: string): number[] {
-  const containerChange = diff?.containerChanges.find(
-    (change) => change.container === container &&
-      (change.kind === "list" || change.kind === "tuple")
-  );
-  if (
-    !containerChange ||
-    (containerChange.kind !== "list" && containerChange.kind !== "tuple")
-  ) {
-    return [];
-  }
-  return containerChange.changes.map((change) => change.index);
+function changedIndexes(
+  mutations: RuntimeMutation[],
+  frameId: number,
+  container: string
+): number[] {
+  return mutations
+    .filter((mutation): mutation is SequenceElementMutation =>
+      mutation.kind === "sequence_element" &&
+      mutation.frameId === frameId &&
+      mutation.containerName === container
+    )
+    .map((mutation) => mutation.index)
+    .filter((index, position, all) => all.indexOf(index) === position)
+    .sort((left, right) => left - right);
 }
 
 function isContainerSnapshot(snapshot: ValueSnapshot | undefined): boolean {
@@ -105,7 +112,7 @@ function buildListVisual(
   runtime: RuntimeState,
   bindings: PointerBinding[],
   container: string,
-  diff: FrameDiff | null
+  mutations: RuntimeMutation[]
 ): ListVisualModel | null {
   if (runtime.activeFrameId === null) {
     return null;
@@ -134,14 +141,14 @@ function buildListVisual(
             }
           : {})
       })),
-    changedIndexes: changedIndexes(diff, container)
+    changedIndexes: changedIndexes(mutations, frame!.frameId, container)
   };
 }
 
 function buildDictVisual(
   runtime: RuntimeState,
   container: string,
-  diff: FrameDiff | null,
+  mutations: RuntimeMutation[],
   relations: StaticRelation[]
 ): DictVisualModel | null {
   if (runtime.activeFrameId === null) {
@@ -153,14 +160,17 @@ function buildDictVisual(
     return null;
   }
 
-  const containerChange = diff?.containerChanges.find(
-    (change): change is Extract<ContainerDiff, { kind: "dict" }> =>
-      change.container === container && change.kind === "dict"
-  );
   const statusByKey = new Map<string, DictVisualModel["entries"][number]["status"]>();
-  for (const change of containerChange?.changes ?? []) {
-    if (change.kind !== "removed") {
-      statusByKey.set(valueSnapshotKey(change.key), change.kind);
+  for (const mutation of mutations) {
+    if (
+      mutation.kind === "mapping_entry" &&
+      mutation.frameId === frame.frameId &&
+      mutation.containerName === container &&
+      mutation.action !== "removed"
+    ) {
+      const mappingMutation = mutation as MappingEntryMutation;
+      const status = mappingMutation.action === "added" ? "added" : "changed";
+      statusByKey.set(valueSnapshotKey(mappingMutation.key), status);
     }
   }
 
@@ -208,18 +218,18 @@ function buildContainerVisual(
   runtime: RuntimeState,
   bindings: PointerBinding[],
   container: string,
-  diff: FrameDiff | null,
-  relations: StaticRelation[]
+  relations: StaticRelation[],
+  mutations: RuntimeMutation[]
 ): ContainerVisualModel | null {
   const frame = runtime.activeFrameId === null
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const snapshot = frame?.locals[container];
   if (snapshot?.type === "list" || snapshot?.type === "tuple") {
-    return buildListVisual(runtime, bindings, container, diff);
+    return buildListVisual(runtime, bindings, container, mutations);
   }
   if (snapshot?.type === "dict") {
-    return buildDictVisual(runtime, container, diff, relations);
+    return buildDictVisual(runtime, container, mutations, relations);
   }
   return null;
 }
@@ -253,7 +263,7 @@ export function buildVisualState(
       .map(([name]) => name)
     : [];
   const containerVisuals = containerNames
-    .map((container) => buildContainerVisual(runtime, bindings, container, diff, relations))
+    .map((container) => buildContainerVisual(runtime, bindings, container, relations, mutations))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
   const linkedListVisuals = buildLinkedListVisuals(runtime, diff, objectDiff);
   const allVisuals: StructureVisualModel[] = [...containerVisuals, ...linkedListVisuals];

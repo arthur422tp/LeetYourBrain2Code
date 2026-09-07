@@ -4,6 +4,7 @@ import type {
   ExecutionRequest,
   ExecutionTerminalResult
 } from "../../src/shared/execution-types";
+import type { TraceEvent } from "../../src/shared/trace-types";
 import {
   ExecutionController,
   type WorkerLike
@@ -225,12 +226,41 @@ describe("ExecutionController", () => {
     const first = controller.execute(request("exception"));
     worker.emit({ type: "ready" });
     await Promise.resolve();
+    const topologyEvent: TraceEvent = {
+      step: 1,
+      event: "line",
+      frameId: 1,
+      parentFrameId: null,
+      function: "one",
+      line: 1,
+      callDepth: 1,
+      locals: {
+        head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+      },
+      objects: [{
+        objectId: "obj-1",
+        className: "ListNode",
+        attributes: {
+          val: { type: "int", value: "1" },
+          next: { type: "none", value: null }
+        }
+      }],
+      objectsTruncated: false,
+      stdoutDelta: ""
+    };
+    worker.emit({
+      type: "trace_batch",
+      sessionId: "exception",
+      events: [topologyEvent]
+    });
     worker.emit({
       type: "execution_finished",
       sessionId: "exception",
       result: runtimeException
     });
-    await expect(first).resolves.toEqual(expect.objectContaining({ status: "exception" }));
+    const exceptionSession = await first;
+    expect(exceptionSession).toEqual(expect.objectContaining({ status: "exception" }));
+    expect(exceptionSession.events[0]?.objects).toEqual(topologyEvent.objects);
 
     const second = controller.execute(request("after-exception"));
     await Promise.resolve();

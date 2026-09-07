@@ -166,6 +166,51 @@ function linkedListSession(): TraceSession {
   };
 }
 
+function cyclicLinkedListSession(): TraceSession {
+  const base = linkedListSession();
+  const finalEvent = base.events.at(-1)!;
+  return {
+    ...base,
+    events: [
+      ...base.events,
+      {
+        ...finalEvent,
+        step: finalEvent.step + 1,
+        line: 4,
+        objects: finalEvent.objects?.map((object) => object.objectId === "obj-2"
+          ? {
+              ...object,
+              attributes: {
+                ...object.attributes,
+                next: { type: "reference" as const, objectId: "obj-1", className: "ListNode" }
+              }
+            }
+          : object),
+        event: "exception" as const,
+        eventPayload: {
+          type: "exception" as const,
+          exception: {
+            type: "RuntimeError",
+            message: "cycle detected while traversing",
+            line: 4,
+            stack: [],
+            frameId: 1
+          }
+        }
+      }
+    ],
+    status: "exception",
+    terminationReason: "runtime_exception",
+    exception: {
+      type: "RuntimeError",
+      message: "cycle detected while traversing",
+      line: 4,
+      stack: [],
+      frameId: 1
+    }
+  };
+}
+
 describe("createTraceVisualizer", () => {
   it("renders readable trace state and keeps raw JSON in a collapsed debug section", () => {
     const view = createTraceVisualizer(session());
@@ -319,6 +364,33 @@ describe("createTraceVisualizer", () => {
     view.setStep(1);
 
     expect(view.element.querySelector('[data-visual-id="list:nums"]')).toBe(listElement);
+    view.dispose();
+  });
+
+  it("renders a cycle marker and preserves the linked-list visual on an exception step", () => {
+    const view = createTraceVisualizer(cyclicLinkedListSession());
+
+    view.setStep(2);
+
+    expect(view.element.querySelector('[data-cycle-indicator="true"]')?.textContent)
+      .toContain("back-edge");
+    expect(view.element.querySelector('[data-next-status="changed"]')).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__exception")?.textContent)
+      .toContain("cycle detected while traversing");
+    expect(view.element.querySelector('[data-visual-id="linked_list:obj-1"]')).not.toBeNull();
+    view.dispose();
+  });
+
+  it("keeps a captured linked-list visual readable when execution times out", () => {
+    const view = createTraceVisualizer({
+      ...linkedListSession(),
+      status: "timeout",
+      terminationReason: "hard_timeout"
+    });
+
+    expect(view.element.querySelector('[data-visual-id="linked_list:obj-1"]')).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__summary-detail")?.textContent)
+      .toContain("hard timeout");
     view.dispose();
   });
 });

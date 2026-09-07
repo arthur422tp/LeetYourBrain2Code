@@ -240,6 +240,36 @@ describe("TraceSessionCollector", () => {
     expect(session.subscriptRelations).not.toBe(relations);
   });
 
+  it("preserves bounded object topology captured before a timeout", () => {
+    const topologyEvent: TraceEvent = {
+      ...event(1),
+      locals: {
+        head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+      },
+      objects: [{
+        objectId: "obj-1",
+        className: "ListNode",
+        attributes: {
+          val: { type: "int", value: "1" },
+          next: { type: "none", value: null }
+        }
+      }],
+      objectsTruncated: true
+    };
+    const collector = new TraceSessionCollector(createCollectorOptions());
+
+    collector.append([topologyEvent]);
+    const session = collector.finish(terminalResult({
+      status: "timeout",
+      terminationReason: "hard_timeout"
+    }));
+
+    expect(session.events[0]?.objects).toEqual(topologyEvent.objects);
+    expect(session.events[0]?.objectsTruncated).toBe(true);
+    expect(session.status).toBe("timeout");
+    expect(session.terminationReason).toBe("hard_timeout");
+  });
+
   it("keeps all received batches when the controller hard-times out", async () => {
     let worker: FakeWorker | undefined;
     const controller = new ExecutionController({

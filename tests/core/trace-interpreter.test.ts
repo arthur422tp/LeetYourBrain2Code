@@ -193,4 +193,51 @@ describe("interpretTrace", () => {
     ]);
     expect(result.visualStates[1]?.objectChanges).toEqual(result.objectDiffs[1]);
   });
+
+  it("keeps a partially reversed chain finite while exposing the changed edges", () => {
+    const reference = (objectId: string): ValueSnapshot => ({
+      type: "reference",
+      objectId,
+      className: "ListNode"
+    });
+    const result = interpretTrace([
+      event(1, "reverseList", {
+        head: reference("obj-1"),
+        prev: { type: "none", value: null },
+        curr: reference("obj-1")
+      }, {
+        objects: [objectNode("obj-1", "obj-2"), objectNode("obj-2", "obj-3"), objectNode("obj-3", null)]
+      }),
+      event(2, "reverseList", {
+        head: reference("obj-2"),
+        prev: reference("obj-1"),
+        curr: reference("obj-3")
+      }, {
+        objects: [objectNode("obj-1", null), objectNode("obj-2", "obj-1"), objectNode("obj-3", "obj-2")]
+      })
+    ]);
+
+    const visual = result.visualStates[1]?.visuals.find((item) => item.kind === "linked_list");
+    expect(visual).toMatchObject({
+      kind: "linked_list",
+      visualId: "linked_list:obj-1",
+      cyclic: false,
+      truncated: false,
+      components: [{
+        componentId: "component:obj-1",
+        nodeIds: ["obj-1", "obj-2", "obj-3"],
+        entryNodeIds: ["obj-3"]
+      }]
+    });
+    expect(visual?.nodes.map((node) => [node.objectId, node.nextObjectId])).toEqual([
+      ["obj-1", null],
+      ["obj-2", "obj-1"],
+      ["obj-3", "obj-2"]
+    ]);
+    expect(visual?.pointers).toEqual([
+      { variableName: "curr", objectId: "obj-3", status: "moved" },
+      { variableName: "head", objectId: "obj-2", status: "moved" },
+      { variableName: "prev", objectId: "obj-1", status: "added" }
+    ]);
+  });
 });

@@ -7,7 +7,7 @@ import {
 } from "../../src/content/leetcode-page-state";
 import {
   createLeetCodeAdapter,
-  extractIsolatedSnapshot,
+  extractIsolatedPageState,
   LEETCODE_MESSAGE_SOURCE,
   LEETCODE_MESSAGE_TYPES,
   requestMainWorldPageState,
@@ -52,12 +52,6 @@ describe("LeetCode adapter", () => {
       testcase: "[2,7,11,15]\n9",
       metadata: { slug: "two-sum", title: "Two Sum" }
     });
-  });
-
-  it("returns null for isolated extraction when a current editor value is unavailable", () => {
-    document.body.innerHTML = "<button>Python3</button>";
-
-    expect(extractIsolatedSnapshot(document)).toBeNull();
   });
 
   it("accepts code when testcase is not available yet", () => {
@@ -114,6 +108,23 @@ describe("LeetCode adapter", () => {
       language: "python",
       testcase: null,
       metadata: { slug: "two-sum", title: "Two Sum" }
+    });
+  });
+
+  it("preserves an observed empty CodeMirror testcase as an empty string", () => {
+    document.body.innerHTML = `
+      <button>Python3</button>
+      <a href="/problems/two-sum/">1. Two Sum</a>
+      <textarea aria-label="Code editor">class Solution:\n    pass</textarea>
+      <div class="cm-content" contenteditable="true"></div>
+    `;
+
+    expect({
+      pageBridge: extractPageState(document, window).testcase,
+      isolatedAdapter: extractIsolatedPageState(document).testcase
+    }).toEqual({
+      pageBridge: "",
+      isolatedAdapter: ""
     });
   });
 

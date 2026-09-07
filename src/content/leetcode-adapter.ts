@@ -7,8 +7,8 @@ export {
   type ProblemMetadata
 } from "./leetcode-page-state";
 
-import { toRunnableSnapshot, validatePageState } from "./leetcode-page-state";
-import type { LeetCodePageState, LeetCodeSnapshot, ProblemMetadata } from "./leetcode-page-state";
+import { validatePageState } from "./leetcode-page-state";
+import type { LeetCodePageState, ProblemMetadata } from "./leetcode-page-state";
 
 export interface LeetCodeAdapter {
   getPageState(): Promise<LeetCodePageState>;
@@ -106,7 +106,7 @@ function readTestcaseFromDom(doc: Document): string | null {
   const codeMirror = doc.querySelector<HTMLElement>(LEETCODE_ACCESSORS.testcaseCodeMirror);
   if (codeMirror) {
     const value = codeMirror.innerText ?? codeMirror.textContent ?? "";
-    return value.length > 0 ? value : null;
+    return value;
   }
 
   return null;
@@ -141,10 +141,6 @@ function extractTitle(doc: Document, slug: string | null): string | null {
 export function extractMetadata(doc: Document): ProblemMetadata {
   const slug = extractSlug(doc.location?.pathname ?? "");
   return { slug, title: extractTitle(doc, slug) };
-}
-
-export function extractIsolatedSnapshot(doc: Document): LeetCodeSnapshot | null {
-  return toRunnableSnapshot(extractIsolatedPageState(doc));
 }
 
 export function extractIsolatedPageState(doc: Document): LeetCodePageState {

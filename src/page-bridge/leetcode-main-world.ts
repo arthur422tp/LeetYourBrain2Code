@@ -51,7 +51,7 @@ function readTestcase(doc: Document): string | null {
   const codeMirror = doc.querySelector<HTMLElement>(LEETCODE_ACCESSORS.testcaseCodeMirror);
   if (codeMirror) {
     const value = codeMirror.innerText ?? codeMirror.textContent ?? "";
-    return value.length > 0 ? value : null;
+    return value;
   }
   return null;
 }

@@ -204,6 +204,10 @@ export function renderSidePanel(
   let selectedCaseIndex = 0;
   let ownershipGeneration = 0;
   let disposed = false;
+  let renderedPageIdentity: {
+    slug: string | null;
+    sourceCode: string;
+  } | null = null;
 
   const renderLiveStatus = (): void => {
     if (ownershipState?.kind === "paused") {
@@ -256,6 +260,23 @@ export function renderSidePanel(
     caseSelector.disabled = cases.length <= 1;
   };
 
+  const clearVisualization = (): void => {
+    activeVisualizer?.dispose();
+    activeVisualizer = null;
+    renderedPageIdentity = null;
+    result.replaceChildren(placeholder);
+  };
+
+  const isDifferentProblem = (state: LeetCodePageState): boolean => {
+    if (!activeVisualizer || !renderedPageIdentity) return false;
+
+    if (renderedPageIdentity.slug !== null && state.metadata.slug !== null) {
+      return renderedPageIdentity.slug !== state.metadata.slug;
+    }
+
+    return state.code !== null && state.code !== renderedPageIdentity.sourceCode;
+  };
+
   caseSelector.addEventListener("change", () => {
     const nextIndex = Number.parseInt(caseSelector.value, 10);
     selectedCaseIndex = Number.isInteger(nextIndex) && nextIndex >= 0 ? nextIndex : 0;
@@ -273,6 +294,12 @@ export function renderSidePanel(
     onSession: (session) => {
       activeVisualizer?.dispose();
       activeVisualizer = createTraceVisualizer(session);
+      renderedPageIdentity = {
+        slug: currentPageState?.code === session.sourceCode
+          ? currentPageState.metadata.slug
+          : null,
+        sourceCode: session.sourceCode
+      };
       result.replaceChildren(activeVisualizer.element);
     }
   });
@@ -307,6 +334,10 @@ export function renderSidePanel(
     options: { schedule?: boolean } = {}
   ): void => {
     if (disposed) return;
+
+    if (isDifferentProblem(state)) {
+      clearVisualization();
+    }
 
     currentPageState = state;
 

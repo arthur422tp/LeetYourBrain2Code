@@ -246,6 +246,42 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("clears the previous visualization when a different problem arrives before testcase is available", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+    const previous = pageState({
+      code: "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]\n",
+      metadata: { slug: "two-sum", title: "Two Sum" },
+      testcase: "[2, 7]\n9"
+    });
+    const next = pageState({
+      code: "class Solution:\n    def addTwoNumbers(self, l1, l2):\n        return l1\n",
+      metadata: { slug: "add-two-numbers", title: "Add Two Numbers" },
+      testcase: null
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: previous });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+    expect(root.querySelector(".trace-viewer__code")?.textContent).toContain("twoSum");
+
+    source.callbacks().onPageState({ tabId: 11, state: next });
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(next.code);
+    expect(root.querySelector("#runtime-status")?.textContent)
+      .toBe("Live: code synced · waiting for testcase");
+    expect(root.querySelector("#trace-viewer")).toBeNull();
+    expect(root.querySelector(".trace-placeholder")).not.toBeNull();
+    expect(execute).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
   it("clears the source mirror for an observed empty editor", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

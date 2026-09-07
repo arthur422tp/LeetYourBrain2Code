@@ -246,6 +246,49 @@ function isSpecializedListCandidate(visual: StructureVisualModel): boolean {
   );
 }
 
+function containerWasMutated(
+  visual: ListVisualModel | DictVisualModel,
+  frameId: number,
+  mutations: RuntimeMutation[]
+): boolean {
+  return mutations.some((mutation) => {
+    if (mutation.kind === "sequence_element") {
+      return visual.kind === "list" &&
+        mutation.frameId === frameId &&
+        mutation.containerName === visual.variableName;
+    }
+    if (mutation.kind === "mapping_entry") {
+      return visual.kind === "dict" &&
+        mutation.frameId === frameId &&
+        mutation.containerName === visual.variableName;
+    }
+    return false;
+  });
+}
+
+function linkedListWasMutated(
+  visual: LinkedListVisualModel,
+  frameId: number,
+  mutations: RuntimeMutation[]
+): boolean {
+  const objectIds = new Set(visual.nodes.map((node) => node.objectId));
+  const pointerNames = new Set(visual.pointers.map((pointer) => pointer.variableName));
+
+  return mutations.some((mutation) => {
+    if (mutation.kind === "reference") {
+      if (mutation.owner.scope === "local") {
+        return mutation.owner.frameId === frameId &&
+          pointerNames.has(mutation.owner.variableName);
+      }
+      return objectIds.has(mutation.owner.objectId);
+    }
+    if (mutation.kind === "object_attribute" || mutation.kind === "object_visibility") {
+      return objectIds.has(mutation.objectId);
+    }
+    return false;
+  });
+}
+
 export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
@@ -268,10 +311,7 @@ export function buildVisualState(
   const linkedListVisuals = buildLinkedListVisuals(runtime, mutations);
   const allVisuals: StructureVisualModel[] = [...containerVisuals, ...linkedListVisuals];
   const candidateVisuals = allVisuals.filter(isSpecializedListCandidate);
-  const changedContainers = new Set(
-    (diff?.frameId === runtime.activeFrameId ? diff.containerChanges : [])
-      .map((change) => change.container)
-  );
+  const activeFrameId = frame?.frameId ?? -1;
   const activeLineContainers = new Set(
     relations
       .filter((relation) =>
@@ -285,11 +325,7 @@ export function buildVisualState(
   const visualCandidates: VisualCandidate[] = candidateVisuals.map((visual) => {
     if (visual.kind === "linked_list") {
       const pointerRelevant = visual.pointers.length > 0;
-      const mutated = objectDiff !== null && (
-        objectDiff.addedObjectIds.length > 0 ||
-        objectDiff.removedObjectIds.length > 0 ||
-        objectDiff.attributeChanges.length > 0
-      );
+      const mutated = linkedListWasMutated(visual, activeFrameId, mutations);
       return {
         visualId: visual.visualId,
         kind: visual.kind,
@@ -299,8 +335,7 @@ export function buildVisualState(
     const pointerRelevant = visual.kind === "list"
       ? visual.pointers.length > 0
       : (visual.probes?.length ?? 0) > 0;
-    const mutated = changedContainers.has(visual.variableName) ||
-      (visual.kind === "list" && visual.changedIndexes.length > 0);
+    const mutated = containerWasMutated(visual, activeFrameId, mutations);
     return {
       visualId: visual.visualId,
       kind: visual.kind,

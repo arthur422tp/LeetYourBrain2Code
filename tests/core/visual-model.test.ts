@@ -8,6 +8,11 @@ import type { RuntimeMutation } from "../../src/core/runtime-mutation";
 import { buildVisualState } from "../../src/core/visual-model";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
+const ref = (objectId: string): ValueSnapshot => ({
+  type: "reference",
+  objectId,
+  className: "ListNode"
+});
 
 function list(values: number[]): ValueSnapshot {
   return {
@@ -144,6 +149,63 @@ describe("buildVisualState", () => {
         { key: int(2), value: int(4), status: "changed" }
       ]
     });
+  });
+
+  it("prioritizes a dictionary receiving a mapping mutation over a pointer-relevant list", () => {
+    const state = buildVisualState(
+      runtime({ nums: list([1, 2, 3]), seen: dict([[1, 10]]), i: int(1) }),
+      null,
+      [{ ...relation("i"), line: 99 }],
+      null,
+      [{
+        kind: "mapping_entry",
+        origin: "transition",
+        frameId: 4,
+        containerName: "seen",
+        key: int(2),
+        action: "added",
+        after: int(11)
+      }]
+    );
+
+    expect(state.primaryVisualId).toBe("dict:seen");
+  });
+
+  it("prioritizes a linked list receiving a pointer mutation over a pointer-richer list", () => {
+    const head = ref("obj-1");
+    const linkedRuntime: RuntimeState = {
+      ...runtime({ nums: list([1, 2, 3]), i: int(0), j: int(2), head }),
+      objectTopology: {
+        objects: new Map([
+          ["obj-1", {
+            objectId: "obj-1",
+            className: "ListNode",
+            attributes: {
+              val: int(1),
+              next: { type: "none", value: null }
+            }
+          }]
+        ]),
+        truncated: false
+      }
+    };
+
+    const state = buildVisualState(
+      linkedRuntime,
+      null,
+      [{ ...relation("i"), line: 99 }, { ...relation("j"), line: 99 }],
+      null,
+      [{
+        kind: "reference",
+        origin: "transition",
+        owner: { scope: "local", frameId: 4, variableName: "head" },
+        action: "redirected",
+        beforeObjectId: "obj-0",
+        afterObjectId: "obj-1"
+      }]
+    );
+
+    expect(state.primaryVisualId).toBe("linked_list:obj-1");
   });
 
   it("builds a list visual with structural pointers and changed indexes", () => {

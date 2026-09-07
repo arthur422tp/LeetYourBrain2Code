@@ -62,7 +62,10 @@ describe("interpretTrace", () => {
       event(2, "solve", { left: int(1) })
     ]);
 
+    expect(result.runtimeStates.length).toBe(result.frameDiffs.length);
+    expect(result.runtimeStates.length).toBe(result.objectDiffs.length);
     expect(result.mutationBatches).toHaveLength(result.runtimeStates.length);
+    expect(result.runtimeStates.length).toBe(result.visualStates.length);
     expect(result.mutationBatches.map((batch) => batch.step)).toEqual([1, 2]);
     expect(result.mutationBatches[0]?.mutations[0]).toMatchObject({
       kind: "variable",

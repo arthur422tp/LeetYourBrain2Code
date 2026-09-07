@@ -93,6 +93,7 @@ describe("buildVisualState", () => {
       primaryVisualId: "list:nums",
       objectChanges: null,
       stateChanges: listDiff,
+      mutations: [],
       locals: { nums: list([2, 9, 11, 15]), left: int(1), right: int(3), target: int(20) },
       callStack: [{ frameId: 4, functionName: "twoSum", line: 7, depth: 1 }],
       stdout: "trace\n"

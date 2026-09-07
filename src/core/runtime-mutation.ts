@@ -1,4 +1,5 @@
 import type { ObjectId, ValueSnapshot } from "../shared/trace-types";
+import { cloneValueSnapshot } from "./value-snapshot";
 
 export type MutationOrigin = "initial_snapshot" | "transition";
 
@@ -88,4 +89,46 @@ export interface RuntimeMutationBatch {
   frameId: number | null;
   currentLine: number | null;
   mutations: RuntimeMutation[];
+}
+
+export function cloneRuntimeMutation(mutation: RuntimeMutation): RuntimeMutation {
+  switch (mutation.kind) {
+    case "variable":
+      return {
+        ...mutation,
+        ...(mutation.before !== undefined ? { before: cloneValueSnapshot(mutation.before) } : {}),
+        ...(mutation.after !== undefined ? { after: cloneValueSnapshot(mutation.after) } : {})
+      };
+    case "reference":
+      return {
+        ...mutation,
+        owner: { ...mutation.owner }
+      };
+    case "sequence_element":
+      return {
+        ...mutation,
+        ...(mutation.before !== undefined ? { before: cloneValueSnapshot(mutation.before) } : {}),
+        ...(mutation.after !== undefined ? { after: cloneValueSnapshot(mutation.after) } : {})
+      };
+    case "mapping_entry":
+      return {
+        ...mutation,
+        key: cloneValueSnapshot(mutation.key),
+        ...(mutation.before !== undefined ? { before: cloneValueSnapshot(mutation.before) } : {}),
+        ...(mutation.after !== undefined ? { after: cloneValueSnapshot(mutation.after) } : {})
+      };
+    case "set_membership":
+      return {
+        ...mutation,
+        member: cloneValueSnapshot(mutation.member)
+      };
+    case "object_attribute":
+      return {
+        ...mutation,
+        ...(mutation.before !== undefined ? { before: cloneValueSnapshot(mutation.before) } : {}),
+        ...(mutation.after !== undefined ? { after: cloneValueSnapshot(mutation.after) } : {})
+      };
+    case "object_visibility":
+      return { ...mutation };
+  }
 }

@@ -56,6 +56,111 @@ function relation(container: string, index: string, scope = "Solution.solve"): S
 }
 
 describe("interpretTrace", () => {
+  it("aligns one mutation batch with every reconstructed runtime state", () => {
+    const result = interpretTrace([
+      event(1, "solve", { left: int(0) }),
+      event(2, "solve", { left: int(1) })
+    ]);
+
+    expect(result.mutationBatches).toHaveLength(result.runtimeStates.length);
+    expect(result.mutationBatches.map((batch) => batch.step)).toEqual([1, 2]);
+    expect(result.mutationBatches[0]?.mutations[0]).toMatchObject({
+      kind: "variable",
+      origin: "initial_snapshot",
+      variableName: "left"
+    });
+    expect(result.mutationBatches[1]?.mutations).toEqual([
+      expect.objectContaining({
+        kind: "variable",
+        origin: "transition",
+        variableName: "left",
+        action: "changed"
+      })
+    ]);
+    expect(result.visualStates[1]?.mutations).toEqual(result.mutationBatches[1]?.mutations);
+  });
+
+  it("does not share mutation snapshots between batches and visual state", () => {
+    const result = interpretTrace([
+      event(1, "solve", { left: int(0) }),
+      event(2, "solve", { left: int(1) })
+    ]);
+    const batchMutation = result.mutationBatches[1]!.mutations[0]!;
+    const visualMutation = result.visualStates[1]!.mutations[0]!;
+
+    expect(visualMutation).toEqual(batchMutation);
+    expect(visualMutation).not.toBe(batchMutation);
+    if (batchMutation.kind === "variable" && batchMutation.after?.type === "int") {
+      batchMutation.after.value = "mutated";
+    }
+    expect(visualMutation).toMatchObject({
+      kind: "variable",
+      after: { type: "int", value: "1" }
+    });
+  });
+
+  it("tracks initial snapshot origin independently for each frame", () => {
+    const result = interpretTrace([
+      event(1, "dfs", { node: int(3) }, { frameId: 1, event: "call", line: 1 }),
+      event(2, "dfs", { node: int(2) }, {
+        frameId: 2,
+        parentFrameId: 1,
+        callDepth: 2,
+        event: "call",
+        line: 1
+      }),
+      event(3, "dfs", { node: int(2), child: int(1) }, {
+        frameId: 2,
+        parentFrameId: 1,
+        callDepth: 2
+      })
+    ]);
+
+    expect(result.mutationBatches[0]?.mutations.every((mutation) =>
+      mutation.origin === "initial_snapshot"
+    )).toBe(true);
+    expect(result.mutationBatches[1]?.mutations.every((mutation) =>
+      mutation.origin === "initial_snapshot"
+    )).toBe(true);
+    expect(result.mutationBatches[2]?.mutations).toContainEqual(
+      expect.objectContaining({
+        origin: "transition",
+        kind: "variable",
+        variableName: "child"
+      })
+    );
+  });
+
+  it("marks object visibility from the first capture as initial and later captures as transition", () => {
+    const result = interpretTrace([
+      event(1, "reverseList", { head: { type: "none", value: null } }, {
+        objects: [objectNode("obj-1", "obj-2"), objectNode("obj-2", null)]
+      }),
+      event(2, "reverseList", { head: { type: "none", value: null } }, {
+        objects: [objectNode("obj-2", null), objectNode("obj-3", null)]
+      })
+    ]);
+
+    expect(result.mutationBatches[0]?.mutations).toContainEqual({
+      kind: "object_visibility",
+      origin: "initial_snapshot",
+      objectId: "obj-1",
+      action: "appeared"
+    });
+    expect(result.mutationBatches[1]?.mutations).toContainEqual({
+      kind: "object_visibility",
+      origin: "transition",
+      objectId: "obj-1",
+      action: "disappeared"
+    });
+    expect(result.mutationBatches[1]?.mutations).toContainEqual({
+      kind: "object_visibility",
+      origin: "transition",
+      objectId: "obj-3",
+      action: "appeared"
+    });
+  });
+
   it("turns a two-pointer trace into a list visual and frame-scoped mutation diff", () => {
     const result = interpretTrace(
       [

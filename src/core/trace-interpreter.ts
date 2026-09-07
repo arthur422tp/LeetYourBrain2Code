@@ -6,11 +6,14 @@ import type { FrameState } from "./runtime-state";
 import type { TraceEvent } from "../shared/trace-types";
 import { diffObjectTopology, type ObjectDiff } from "./object-diff";
 import type { ObjectTopologyState } from "./runtime-state";
+import { normalizeRuntimeMutations } from "./runtime-mutation-normalizer";
+import type { MutationOrigin, RuntimeMutationBatch } from "./runtime-mutation";
 
 export interface TraceInterpretation {
   runtimeStates: RuntimeState[];
   frameDiffs: Array<FrameDiff | null>;
   objectDiffs: ObjectDiff[];
+  mutationBatches: RuntimeMutationBatch[];
   visualStates: VisualState[];
 }
 
@@ -31,27 +34,46 @@ export function interpretTrace(
 ): TraceInterpretation {
   const runtimeStates = reconstructStates(events);
   const previousFrameStates = new Map<number, FrameState>();
-  const frameDiffs = runtimeStates.map((runtime) => {
+  const frameResults = runtimeStates.map((runtime) => {
     const currentFrame = activeFrame(runtime);
     if (!currentFrame) {
-      return null;
+      return { diff: null, origin: "transition" as MutationOrigin };
     }
     const previousFrame = previousFrameStates.get(currentFrame.frameId);
+    const origin: MutationOrigin = previousFrame ? "transition" : "initial_snapshot";
     const diff = diffFrameState(previousFrame, currentFrame);
     previousFrameStates.set(currentFrame.frameId, currentFrame);
-    return diff;
+    return { diff, origin };
   });
+  const frameDiffs = frameResults.map((result) => result.diff);
   const objectDiffs = runtimeStates.map((runtime, index) =>
     diffObjectTopology(
       index === 0 ? EMPTY_OBJECT_TOPOLOGY : runtimeStates[index - 1]!.objectTopology,
       runtime.objectTopology
     )
   );
+  const mutationBatches = runtimeStates.map((runtime, index) => ({
+    step: runtime.step,
+    frameId: runtime.activeFrameId,
+    currentLine: runtime.currentLine,
+    mutations: normalizeRuntimeMutations({
+      frameDiff: frameDiffs[index] ?? null,
+      objectDiff: objectDiffs[index]!,
+      frameOrigin: frameResults[index]!.origin,
+      objectOrigin: index === 0 ? "initial_snapshot" : "transition"
+    })
+  }));
   const visualStates = runtimeStates.map((runtime, index) =>
-    buildVisualState(runtime, frameDiffs[index] ?? null, relations, objectDiffs[index] ?? null)
+    buildVisualState(
+      runtime,
+      frameDiffs[index] ?? null,
+      relations,
+      objectDiffs[index] ?? null,
+      mutationBatches[index]!.mutations
+    )
   );
 
-  return { runtimeStates, frameDiffs, objectDiffs, visualStates };
+  return { runtimeStates, frameDiffs, objectDiffs, mutationBatches, visualStates };
 }
 
 export const interpretTraceEvents = interpretTrace;

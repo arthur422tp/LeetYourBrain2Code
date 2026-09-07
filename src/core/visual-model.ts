@@ -6,6 +6,7 @@ import type { ObjectDiff } from "./object-diff";
 import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
 import type { ContainerDiff, FrameDiff } from "./state-diff";
 import type { RuntimeState } from "./runtime-state";
+import { cloneRuntimeMutation, type RuntimeMutation } from "./runtime-mutation";
 import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
 import { resolveVisualCandidates, type VisualCandidate } from "./visual-candidate-resolver";
 
@@ -59,6 +60,7 @@ export interface VisualState {
   primaryVisualId: string | null;
   objectChanges: ObjectDiff | null;
   stateChanges: FrameDiff | null;
+  mutations: RuntimeMutation[];
   locals: Record<string, ValueSnapshot>;
   callStack: CallStackEntry[];
   stdout: string;
@@ -238,7 +240,8 @@ export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
   relations: StaticRelation[],
-  objectDiff: ObjectDiff | null = null
+  objectDiff: ObjectDiff | null = null,
+  mutations: RuntimeMutation[] = []
 ): VisualState {
   const frame = runtime.activeFrameId === null
     ? undefined
@@ -311,6 +314,7 @@ export function buildVisualState(
     primaryVisualId: selectionResult.primary?.visualId ?? null,
     objectChanges: objectDiff,
     stateChanges: diff,
+    mutations: mutations.map(cloneRuntimeMutation),
     locals: frame ? cloneLocals(frame.locals) : {},
     callStack: buildCallStack(runtime),
     stdout: runtime.stdout,

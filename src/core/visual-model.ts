@@ -265,7 +265,7 @@ export function buildVisualState(
   const containerVisuals = containerNames
     .map((container) => buildContainerVisual(runtime, bindings, container, relations, mutations))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
-  const linkedListVisuals = buildLinkedListVisuals(runtime, diff, objectDiff);
+  const linkedListVisuals = buildLinkedListVisuals(runtime, mutations);
   const allVisuals: StructureVisualModel[] = [...containerVisuals, ...linkedListVisuals];
   const candidateVisuals = allVisuals.filter(isSpecializedListCandidate);
   const changedContainers = new Set(

@@ -1,8 +1,11 @@
-import type { FrameDiff } from "./state-diff";
-import type { ObjectAttributeDiff, ObjectDiff } from "./object-diff";
 import type { RuntimeState } from "./runtime-state";
 import type { ObjectId, ObjectSnapshot, ValueSnapshot } from "../shared/trace-types";
-import { cloneValueSnapshot, valueSnapshotsEqual } from "./value-snapshot";
+import type {
+  ObjectAttributeMutation,
+  ReferenceMutation,
+  RuntimeMutation
+} from "./runtime-mutation";
+import { cloneValueSnapshot } from "./value-snapshot";
 
 export interface LinkedListNodeVisual {
   objectId: ObjectId;
@@ -34,12 +37,6 @@ export interface LinkedListVisualModel {
   cyclic: boolean;
   truncated: boolean;
 }
-
-const EMPTY_OBJECT_DIFF: ObjectDiff = {
-  addedObjectIds: [],
-  removedObjectIds: [],
-  attributeChanges: []
-};
 
 function activeFrame(runtime: RuntimeState) {
   return runtime.activeFrameId === null
@@ -160,20 +157,10 @@ function containsCycle(
   return [...candidates.keys()].some((objectId) => visit(objectId));
 }
 
-function attributeChangesByObject(objectDiff: ObjectDiff): Map<ObjectId, ObjectAttributeDiff[]> {
-  const changes = new Map<ObjectId, ObjectAttributeDiff[]>();
-  for (const change of objectDiff.attributeChanges) {
-    const list = changes.get(change.objectId) ?? [];
-    list.push(change);
-    changes.set(change.objectId, list);
-  }
-  return changes;
-}
-
 function detachedObjectIds(
   candidates: Map<ObjectId, ObjectSnapshot>,
   nextTargets: Map<ObjectId, ObjectId | null>,
-  objectDiff: ObjectDiff
+  mutations: RuntimeMutation[]
 ): Set<ObjectId> {
   const incoming = new Map<ObjectId, number>();
   for (const target of nextTargets.values()) {
@@ -183,52 +170,60 @@ function detachedObjectIds(
   }
 
   const detached = new Set<ObjectId>();
-  for (const change of objectDiff.attributeChanges) {
-    if (change.attribute !== "next" || !isReference(change.before)) {
-      continue;
-    }
-    if (
-      !isReference(change.after) ||
-      !valueSnapshotsEqual(change.before, change.after)
-    ) {
-      if (candidates.has(change.before.objectId) && (incoming.get(change.before.objectId) ?? 0) === 0) {
-        detached.add(change.before.objectId);
-      }
+  const previousTargets = mutations
+    .filter((mutation): mutation is ReferenceMutation =>
+      mutation.kind === "reference" &&
+      mutation.owner.scope === "object_attribute" &&
+      mutation.owner.attribute === "next" &&
+      mutation.beforeObjectId !== null &&
+      mutation.beforeObjectId !== mutation.afterObjectId
+    )
+    .map((mutation) => mutation.beforeObjectId!);
+
+  for (const objectId of previousTargets) {
+    if (candidates.has(objectId) && (incoming.get(objectId) ?? 0) === 0) {
+      detached.add(objectId);
     }
   }
   return detached;
 }
 
+function localReferenceMutation(
+  mutations: RuntimeMutation[],
+  frameId: number,
+  variableName: string
+): ReferenceMutation | undefined {
+  return mutations.find((mutation): mutation is ReferenceMutation =>
+    mutation.kind === "reference" &&
+    mutation.owner.scope === "local" &&
+    mutation.owner.frameId === frameId &&
+    mutation.owner.variableName === variableName
+  );
+}
+
 function pointerStatus(
   variableName: string,
-  current: ValueSnapshot,
-  frameDiff: FrameDiff | null
+  frameId: number,
+  mutations: RuntimeMutation[]
 ): LinkedListPointerVisual["status"] {
-  const change = frameDiff?.variables.find((item) => item.name === variableName);
-  if (!change) {
+  const mutation = localReferenceMutation(mutations, frameId, variableName);
+  if (!mutation) {
     return "unchanged";
   }
-  if (change.kind === "added") {
-    return "added";
+  switch (mutation.action) {
+    case "bound":
+      return "added";
+    case "unbound":
+      return "removed";
+    case "redirected":
+      return "moved";
   }
-  if (change.kind === "removed") {
-    return "removed";
-  }
-  if (change.kind === "changed") {
-    return isReference(change.before) && isReference(change.after) &&
-        !valueSnapshotsEqual(change.before, change.after)
-      ? "moved"
-      : isReference(current)
-        ? "added"
-        : "removed";
-  }
-  return "unchanged";
 }
 
 function buildPointers(
   runtime: RuntimeState,
   candidates: Map<ObjectId, ObjectSnapshot>,
-  frameDiff: FrameDiff | null
+  mutations: RuntimeMutation[]
 ): LinkedListPointerVisual[] {
   const frame = activeFrame(runtime);
   if (!frame) {
@@ -243,18 +238,31 @@ function buildPointers(
     pointers.push({
       variableName,
       objectId: snapshot.objectId,
-      status: pointerStatus(variableName, snapshot, frameDiff)
+      status: pointerStatus(variableName, frame.frameId, mutations)
     });
   }
 
-  for (const change of frameDiff?.variables ?? []) {
-    if (change.kind !== "removed" || !isReference(change.before) || !candidates.has(change.before.objectId)) {
+  for (const mutation of mutations) {
+    if (mutation.kind !== "reference" || mutation.owner.scope !== "local") {
       continue;
     }
-    if (pointers.some((pointer) => pointer.variableName === change.name)) {
+    if (
+      mutation.owner.frameId !== frame.frameId ||
+      mutation.action !== "unbound" ||
+      mutation.beforeObjectId === null ||
+      !candidates.has(mutation.beforeObjectId)
+    ) {
       continue;
     }
-    pointers.push({ variableName: change.name, objectId: null, status: "removed" });
+    const variableName = mutation.owner.variableName;
+    if (pointers.some((pointer) => pointer.variableName === variableName)) {
+      continue;
+    }
+    pointers.push({
+      variableName,
+      objectId: null,
+      status: "removed"
+    });
   }
 
   return pointers.sort((left, right) =>
@@ -263,10 +271,72 @@ function buildPointers(
   );
 }
 
+function objectAttributeMutation(
+  mutations: RuntimeMutation[],
+  objectId: ObjectId,
+  attribute: string
+): ReferenceMutation | ObjectAttributeMutation | undefined {
+  return mutations.find((mutation): mutation is ReferenceMutation | ObjectAttributeMutation => {
+    if (mutation.kind === "reference") {
+      return mutation.owner.scope === "object_attribute" &&
+        mutation.owner.objectId === objectId &&
+        mutation.owner.attribute === attribute;
+    }
+    return mutation.kind === "object_attribute" &&
+      mutation.objectId === objectId &&
+      mutation.attribute === attribute;
+  });
+}
+
+function nextStatus(
+  mutation: RuntimeMutation | undefined
+): LinkedListNodeVisual["nextStatus"] {
+  if (!mutation) {
+    return "unchanged";
+  }
+  if (mutation.kind === "reference") {
+    switch (mutation.action) {
+      case "bound":
+        return "added";
+      case "unbound":
+        return "removed";
+      case "redirected":
+        return "changed";
+    }
+  }
+  if (mutation.kind === "object_attribute") {
+    return mutation.action;
+  }
+  return "unchanged";
+}
+
+function objectWasAdded(
+  mutations: RuntimeMutation[],
+  objectId: ObjectId
+): boolean {
+  return mutations.some((mutation) =>
+    mutation.kind === "object_visibility" &&
+    mutation.objectId === objectId &&
+    mutation.action === "appeared"
+  );
+}
+
+function objectWasChanged(
+  mutations: RuntimeMutation[],
+  objectId: ObjectId
+): boolean {
+  return mutations.some((mutation) => {
+    if (mutation.kind === "reference") {
+      return mutation.owner.scope === "object_attribute" &&
+        mutation.owner.objectId === objectId;
+    }
+    return mutation.kind === "object_attribute" && mutation.objectId === objectId;
+  });
+}
+
 export function buildLinkedListVisuals(
   runtime: RuntimeState,
-  frameDiff: FrameDiff | null,
-  objectDiff: ObjectDiff | null
+  mutations: RuntimeMutation[]
 ): LinkedListVisualModel[] {
   const topology = runtime.objectTopology;
   const candidates = new Map(
@@ -283,22 +353,19 @@ export function buildLinkedListVisuals(
     nextTargets.set(objectId, isReference(next) ? next.objectId : null);
   }
 
-  const changes = attributeChangesByObject(objectDiff ?? EMPTY_OBJECT_DIFF);
-  const detached = detachedObjectIds(candidates, nextTargets, objectDiff ?? EMPTY_OBJECT_DIFF);
+  const detached = detachedObjectIds(candidates, nextTargets, mutations);
   const nodes = sortedObjectIds(candidates).map((objectId): LinkedListNodeVisual => {
     const object = candidates.get(objectId)!;
-    const objectChanges = changes.get(objectId) ?? [];
-    const nextChange = objectChanges.find((change) => change.attribute === "next");
-    const status = (objectDiff?.addedObjectIds.includes(objectId) ? "added" :
+    const status = (objectWasAdded(mutations, objectId) ? "added" :
       detached.has(objectId) ? "detached" :
-      objectChanges.length > 0 ? "changed" : "unchanged") as LinkedListNodeVisual["status"];
+      objectWasChanged(mutations, objectId) ? "changed" : "unchanged") as LinkedListNodeVisual["status"];
     return {
       objectId,
       className: object.className,
       label: nodeLabel(object),
       nextObjectId: nextTargets.get(objectId) ?? null,
       status,
-      nextStatus: nextChange?.kind ?? "unchanged"
+      nextStatus: nextStatus(objectAttributeMutation(mutations, objectId, "next"))
     };
   });
   const { components } = componentData(candidates, nextTargets);
@@ -308,7 +375,7 @@ export function buildLinkedListVisuals(
     visualId,
     nodes,
     components,
-    pointers: buildPointers(runtime, candidates, frameDiff),
+    pointers: buildPointers(runtime, candidates, mutations),
     cyclic: containsCycle(candidates, nextTargets),
     truncated: topology.truncated || [...nextTargets.values()].some(
       (target) => target !== null && !candidates.has(target)

@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { FrameDiff } from "../../src/core/state-diff";
-import type { ObjectDiff } from "../../src/core/object-diff";
 import type { RuntimeState } from "../../src/core/runtime-state";
 import {
   buildLinkedListVisuals,
   type LinkedListVisualModel
 } from "../../src/core/linked-list-interpreter";
+import type { RuntimeMutation } from "../../src/core/runtime-mutation";
 import type { ObjectSnapshot, ValueSnapshot } from "../../src/shared/trace-types";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
@@ -56,18 +55,6 @@ function runtimeWithLinkedList(input: {
   };
 }
 
-function emptyObjectDiff(): ObjectDiff {
-  return { addedObjectIds: [], removedObjectIds: [], attributeChanges: [] };
-}
-
-function changedPointerDiff(): FrameDiff {
-  return {
-    frameId: 4,
-    variables: [{ name: "curr", kind: "changed", before: ref("obj-1"), after: ref("obj-2") }],
-    containerChanges: []
-  };
-}
-
 describe("buildLinkedListVisuals", () => {
   it("builds one structure with pointer aliases instead of duplicate visuals", () => {
     const runtime = runtimeWithLinkedList({
@@ -83,7 +70,7 @@ describe("buildLinkedListVisuals", () => {
       ]
     });
 
-    const visuals = buildLinkedListVisuals(runtime, null, emptyObjectDiff());
+    const visuals = buildLinkedListVisuals(runtime, []);
 
     expect(visuals).toHaveLength(1);
     expect(visuals[0]!.pointers).toEqual(expect.arrayContaining([
@@ -108,8 +95,7 @@ describe("buildLinkedListVisuals", () => {
           node("obj-3", 3, null)
         ]
       }),
-      null,
-      emptyObjectDiff()
+      []
     );
 
     expect(visuals[0]?.components).toEqual([
@@ -124,8 +110,7 @@ describe("buildLinkedListVisuals", () => {
         locals: { head: ref("obj-1") },
         objects: [node("obj-1", 1, "obj-2"), node("obj-2", 2, "obj-1")]
       }),
-      null,
-      emptyObjectDiff()
+      []
     )[0] as LinkedListVisualModel;
 
     expect(visual.cyclic).toBe(true);
@@ -134,23 +119,30 @@ describe("buildLinkedListVisuals", () => {
   });
 
   it("marks pointer movement and next-edge mutations independently", () => {
+    const mutations: RuntimeMutation[] = [
+      {
+        kind: "reference",
+        origin: "transition",
+        owner: { scope: "local", frameId: 4, variableName: "curr" },
+        action: "redirected",
+        beforeObjectId: "obj-1",
+        afterObjectId: "obj-2"
+      },
+      {
+        kind: "reference",
+        origin: "transition",
+        owner: { scope: "object_attribute", objectId: "obj-1", attribute: "next" },
+        action: "unbound",
+        beforeObjectId: "obj-2",
+        afterObjectId: null
+      }
+    ];
     const visual = buildLinkedListVisuals(
       runtimeWithLinkedList({
         locals: { curr: ref("obj-2") },
         objects: [node("obj-1", 1, null), node("obj-2", 2, null)]
       }),
-      changedPointerDiff(),
-      {
-        addedObjectIds: [],
-        removedObjectIds: [],
-        attributeChanges: [{
-          objectId: "obj-1",
-          attribute: "next",
-          kind: "changed",
-          before: ref("obj-2"),
-          after: { type: "none", value: null }
-        }]
-      }
+      mutations
     )[0]!;
 
     expect(visual.pointers).toContainEqual({
@@ -158,8 +150,60 @@ describe("buildLinkedListVisuals", () => {
       objectId: "obj-2",
       status: "moved"
     });
-    expect(visual.nodes.find((item) => item.objectId === "obj-1")?.nextStatus).toBe("changed");
+    expect(visual.nodes.find((item) => item.objectId === "obj-1")?.nextStatus).toBe("removed");
     expect(visual.nodes.find((item) => item.objectId === "obj-2")?.status).toBe("detached");
+  });
+
+  it("maps a redirected next reference to a changed edge", () => {
+    const visual = buildLinkedListVisuals(
+      runtimeWithLinkedList({
+        locals: { head: ref("obj-1") },
+        objects: [node("obj-1", 1, "obj-2"), node("obj-2", 2, null)]
+      }),
+      [{
+        kind: "reference",
+        origin: "transition",
+        owner: { scope: "object_attribute", objectId: "obj-1", attribute: "next" },
+        action: "redirected",
+        beforeObjectId: "obj-3",
+        afterObjectId: "obj-2"
+      }]
+    )[0]!;
+
+    expect(visual.nodes.find((item) => item.objectId === "obj-1")?.nextStatus).toBe("changed");
+  });
+
+  it("uses visibility and attribute mutations for node status", () => {
+    const visible = buildLinkedListVisuals(
+      runtimeWithLinkedList({
+        locals: { head: ref("obj-1") },
+        objects: [node("obj-1", 1, null)]
+      }),
+      [{
+        kind: "object_visibility",
+        origin: "transition",
+        objectId: "obj-1",
+        action: "appeared"
+      }]
+    )[0]!;
+    expect(visible.nodes[0]?.status).toBe("added");
+
+    const changed = buildLinkedListVisuals(
+      runtimeWithLinkedList({
+        locals: { head: ref("obj-1") },
+        objects: [node("obj-1", 1, null)]
+      }),
+      [{
+        kind: "object_attribute",
+        origin: "transition",
+        objectId: "obj-1",
+        attribute: "val",
+        action: "changed",
+        before: int(1),
+        after: int(2)
+      }]
+    )[0]!;
+    expect(changed.nodes[0]?.status).toBe("changed");
   });
 
   it("recognizes arbitrary node class names and reports dangling topology as truncated", () => {
@@ -177,8 +221,7 @@ describe("buildLinkedListVisuals", () => {
         locals: { head: ref("obj-9") },
         objects: [customObject]
       }),
-      null,
-      emptyObjectDiff()
+      []
     )[0]!;
 
     expect(visual.nodes[0]).toEqual(expect.objectContaining({

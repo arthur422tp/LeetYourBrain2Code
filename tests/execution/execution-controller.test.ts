@@ -14,7 +14,12 @@ function request(sessionId: string, hardTimeoutMs = 1_000): ExecutionRequest {
     sessionId,
     sourceCode: "class Solution:\n    def one(self, value):\n        return value",
     rawTestcase: "1",
-    entrypoint: { className: "Solution", methodName: "one", parameterCount: 1 },
+    entrypoint: {
+      className: "Solution",
+      methodName: "one",
+      parameterCount: 1,
+      parameterKinds: ["value"]
+    },
     limits: {
       maxTraceSteps: 100,
       maxContainerItems: 100,

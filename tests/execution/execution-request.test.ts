@@ -23,7 +23,8 @@ describe("createExecutionRequest", () => {
       expect(result.request.entrypoint).toEqual({
         className: "Solution",
         methodName: "twoSum",
-        parameterCount: 2
+        parameterCount: 2,
+        parameterKinds: ["value", "value"]
       });
       expect(result.request.limits.maxTraceSteps).toBeGreaterThan(0);
     }
@@ -63,5 +64,18 @@ describe("createExecutionRequest", () => {
       expect(result.request.limits.hardTimeoutMs).toBe(100);
       expect(result.request.limits.maxSessionBytes).toBeGreaterThan(0);
     }
+  });
+
+  it("preserves linked-list parameter kinds on the execution request", () => {
+    const result = createExecutionRequest({
+      sessionId: "session-5",
+      sourceCode: `class Solution:
+    def reverseList(self, head: ListNode | None):
+        return head
+`,
+      rawTestcase: "[1,2,3]"
+    });
+
+    expect(result.ok && result.request.entrypoint.parameterKinds).toEqual(["linked_list"]);
   });
 });

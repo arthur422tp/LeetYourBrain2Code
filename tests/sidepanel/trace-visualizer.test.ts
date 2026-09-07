@@ -27,11 +27,16 @@ const relations: SubscriptRelation[] = [
 
 function session(): TraceSession {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionId: "session-1",
     sourceCode: "class Solution:\n    def twoSum(self, nums, target):\n        left = 0\n        right = len(nums) - 1\n        total = nums[left] + nums[right]\n        left += 1\n",
     rawTestcase: "[2, 7]\n9",
-    entrypoint: { className: "Solution", methodName: "twoSum", parameterCount: 2 },
+    entrypoint: {
+      className: "Solution",
+      methodName: "twoSum",
+      parameterCount: 2,
+      parameterKinds: ["value", "value"]
+    },
     executionEnvironment: { runtime: "pyodide", pythonVersion: "3.13" },
     status: "completed",
     terminationReason: "normal_return",

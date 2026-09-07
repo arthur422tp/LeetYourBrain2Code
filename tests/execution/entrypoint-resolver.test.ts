@@ -18,7 +18,8 @@ describe("resolveEntrypoint", () => {
       entrypoint: {
         className: "Solution",
         methodName: "twoSum",
-        parameterCount: 2
+        parameterCount: 2,
+        parameterKinds: ["value", "value"]
       }
     });
   });
@@ -34,7 +35,8 @@ describe("resolveEntrypoint", () => {
       entrypoint: {
         className: "Solution",
         methodName: "binarySearch",
-        parameterCount: 2
+        parameterCount: 2,
+        parameterKinds: ["value", "value"]
       }
     });
   });
@@ -51,9 +53,10 @@ describe("resolveEntrypoint", () => {
     ).toEqual({
       ok: true,
       entrypoint: {
-        className: "Solution",
-        methodName: "twoSum",
-        parameterCount: 2
+      className: "Solution",
+      methodName: "twoSum",
+      parameterCount: 2,
+      parameterKinds: ["value", "value"]
       }
     });
 
@@ -85,5 +88,31 @@ describe("resolveEntrypoint", () => {
       ok: false,
       reason: "entrypoint_resolution_failed"
     });
+  });
+
+  it("classifies ListNode annotations without using the problem title", () => {
+    const result = resolveEntrypoint(`class Solution:
+    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:
+        return head
+`);
+
+    expect(result).toEqual({
+      ok: true,
+      entrypoint: {
+        className: "Solution",
+        methodName: "reverseList",
+        parameterCount: 1,
+        parameterKinds: ["linked_list"]
+      }
+    });
+  });
+
+  it("keeps ordinary list annotations as value parameters", () => {
+    const result = resolveEntrypoint(`class Solution:
+    def twoSum(self, nums: list[int], target: int):
+        return []
+`);
+
+    expect(result.ok && result.entrypoint.parameterKinds).toEqual(["value", "value"]);
   });
 });

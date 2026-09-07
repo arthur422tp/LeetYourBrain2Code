@@ -34,7 +34,7 @@ function makeSession(
   status: Exclude<TraceSessionStatus, "running"> = "completed"
 ): TraceSession {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionId: request.sessionId,
     sourceCode: request.sourceCode,
     rawTestcase: request.rawTestcase,

@@ -26,7 +26,7 @@ function pageState(overrides: Partial<LeetCodePageState> = {}): LeetCodePageStat
 
 function completedSession(request: ExecutionRequest): TraceSession {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sessionId: request.sessionId,
     sourceCode: request.sourceCode,
     rawTestcase: request.rawTestcase,
@@ -117,7 +117,12 @@ describe("renderSidePanel", () => {
       expect.objectContaining({
         sourceCode: expect.stringContaining("class Solution"),
         rawTestcase: expect.stringContaining("[2, 7]"),
-        entrypoint: { className: "Solution", methodName: "twoSum", parameterCount: 2 },
+        entrypoint: {
+          className: "Solution",
+          methodName: "twoSum",
+          parameterCount: 2,
+          parameterKinds: ["value", "value"]
+        },
         limits: DEFAULT_EXECUTION_LIMITS
       })
     );

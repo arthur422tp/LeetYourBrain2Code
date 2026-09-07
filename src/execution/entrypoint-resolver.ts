@@ -1,4 +1,4 @@
-import type { EntryPoint } from "../shared/execution-types";
+import type { EntryPoint, ParameterKind } from "../shared/execution-types";
 
 export type EntrypointResolution =
   | { ok: true; entrypoint: EntryPoint }
@@ -155,18 +155,38 @@ function findTopLevelEquals(source: string): number {
   return -1;
 }
 
-function countParameters(parameterSource: string): number {
-  const parameters = splitTopLevel(parameterSource, ",")
+interface ParameterDescriptor {
+  name: string;
+  annotation: string | null;
+}
+
+function parseParameters(parameterSource: string): ParameterDescriptor[] {
+  return splitTopLevel(parameterSource, ",")
     .map((parameter) => parameter.trim())
     .filter((parameter) => parameter.length > 0)
-    .filter((parameter) => parameter !== "/" && parameter !== "*");
-
-  return parameters.filter((parameter) => {
+    .filter((parameter) => parameter !== "/" && parameter !== "*")
+    .map((parameter) => {
     const equalsIndex = findTopLevelEquals(parameter);
     const withoutDefault = equalsIndex < 0 ? parameter : parameter.slice(0, equalsIndex);
-    const name = withoutDefault.replace(/^\*+/, "").split(":", 1)[0].trim();
-    return name !== "self" && name !== "cls" && name.length > 0;
-  }).length;
+    const colonIndex = withoutDefault.indexOf(":");
+    const name = withoutDefault
+      .slice(0, colonIndex < 0 ? withoutDefault.length : colonIndex)
+      .replace(/^\*+/, "")
+      .trim();
+    const annotation = colonIndex < 0 ? null : withoutDefault.slice(colonIndex + 1).trim();
+    return { name, annotation };
+  })
+    .filter(({ name }) => name !== "self" && name !== "cls" && name.length > 0);
+}
+
+function parameterKind(annotation: string | null): ParameterKind {
+  if (annotation === null) {
+    return "value";
+  }
+  const normalized = annotation.replace(/\s+/g, "");
+  return /^(?:ListNode|Optional\[ListNode\]|ListNode\|None|None\|ListNode)$/.test(normalized)
+    ? "linked_list"
+    : "value";
 }
 
 function findSolutionClass(lines: string[]): { indent: number; start: number } | null {
@@ -259,12 +279,14 @@ export function resolveEntrypoint(sourceCode: string): EntrypointResolution {
   }
 
   const [candidate] = candidates;
+  const parameters = parseParameters(candidate.parameterSource);
   return {
     ok: true,
     entrypoint: {
       className: "Solution",
       methodName: candidate.name,
-      parameterCount: countParameters(candidate.parameterSource)
+      parameterCount: parameters.length,
+      parameterKinds: parameters.map(({ annotation }) => parameterKind(annotation))
     }
   };
 }

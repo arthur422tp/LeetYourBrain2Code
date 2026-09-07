@@ -16,7 +16,12 @@ const request: ExecutionRequest = {
         return a + b
 `,
   rawTestcase: "2\n3",
-  entrypoint: { className: "Solution", methodName: "add", parameterCount: 2 },
+  entrypoint: {
+    className: "Solution",
+    methodName: "add",
+    parameterCount: 2,
+    parameterKinds: ["value", "value"]
+  },
   limits: {
     maxTraceSteps: 100,
     maxContainerItems: 100,

@@ -32,7 +32,8 @@ const limits: ExecutionLimits = {
 const entrypoint: EntryPoint = {
   className: "Solution",
   methodName: "one",
-  parameterCount: 1
+  parameterCount: 1,
+  parameterKinds: ["value"]
 };
 
 const request: ExecutionRequest = {

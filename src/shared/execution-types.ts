@@ -30,10 +30,13 @@ export const TERMINATION_REASONS = [
 
 export type TerminationReason = (typeof TERMINATION_REASONS)[number];
 
+export type ParameterKind = "value" | "linked_list";
+
 export interface EntryPoint {
   className: string;
   methodName: string;
   parameterCount: number;
+  parameterKinds: ParameterKind[];
 }
 
 export interface ExecutionLimits {

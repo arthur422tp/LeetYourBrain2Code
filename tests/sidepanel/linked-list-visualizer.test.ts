@@ -42,6 +42,110 @@ function model(overrides: Partial<LinkedListVisualModel> = {}): LinkedListVisual
 }
 
 describe("createLinkedListVisualizer", () => {
+  it("orders nodes by next edges and renders visible connectors to the terminal", () => {
+    const handle = createLinkedListVisualizer(model({
+      nodes: [
+        nodeVisual("obj-2", 2, "obj-3"),
+        nodeVisual("obj-1", 1, "obj-2"),
+        nodeVisual("obj-3", 3, null)
+      ],
+      components: [{
+        componentId: "component:obj-1",
+        nodeIds: ["obj-2", "obj-1", "obj-3"],
+        entryNodeIds: ["obj-1"]
+      }]
+    }));
+
+    expect([...handle.element.querySelectorAll<HTMLElement>("[data-node-id]")]
+      .map((item) => item.dataset.nodeId)).toEqual(["obj-1", "obj-2", "obj-3"]);
+
+    expect([...handle.element.querySelectorAll<HTMLElement>("[data-edge-from]")]
+      .map((item) => [item.dataset.edgeFrom, item.dataset.edgeTo])).toEqual([
+      ["obj-1", "obj-2"],
+      ["obj-2", "obj-3"],
+      ["obj-3", "None"]
+    ]);
+    expect(handle.element.querySelector('[data-edge-from="obj-1"]')?.textContent)
+      .toContain("next");
+    expect(handle.element.querySelector('[data-terminal="None"]')).not.toBeNull();
+  });
+
+  it("renders non-linear next targets as explicit cycle or dangling edges", () => {
+    const cycleHandle = createLinkedListVisualizer(model({
+      nodes: [nodeVisual("obj-1", 1, "obj-2"), nodeVisual("obj-2", 2, "obj-1")],
+      components: [{
+        componentId: "component:obj-1",
+        nodeIds: ["obj-1", "obj-2"],
+        entryNodeIds: []
+      }],
+      cyclic: true
+    }));
+
+    expect(cycleHandle.element.querySelector(
+      '[data-edge-from="obj-2"][data-edge-to="obj-1"][data-edge-kind="cycle"]'
+    )).not.toBeNull();
+
+    const danglingHandle = createLinkedListVisualizer(model({
+      nodes: [nodeVisual("obj-1", 1, "obj-missing")],
+      components: [{
+        componentId: "component:obj-1",
+        nodeIds: ["obj-1"],
+        entryNodeIds: ["obj-1"]
+      }],
+      truncated: true
+    }));
+
+    expect(danglingHandle.element.querySelector(
+      '[data-edge-from="obj-1"][data-edge-to="obj-missing"][data-edge-kind="dangling"]'
+    )).not.toBeNull();
+  });
+
+  it("does not label a shared tail as a cycle", () => {
+    const handle = createLinkedListVisualizer(model({
+      nodes: [
+        nodeVisual("obj-1", 1, "obj-3"),
+        nodeVisual("obj-2", 2, "obj-3"),
+        nodeVisual("obj-3", 3, null)
+      ],
+      components: [{
+        componentId: "component:obj-1",
+        nodeIds: ["obj-1", "obj-2", "obj-3"],
+        entryNodeIds: ["obj-1", "obj-2"]
+      }]
+    }));
+
+    expect(handle.element.querySelector(
+      '[data-edge-from="obj-2"][data-edge-to="obj-3"][data-edge-kind="branch"]'
+    )).not.toBeNull();
+    expect(handle.element.querySelector(
+      '[data-edge-from="obj-2"][data-edge-kind="cycle"]'
+    )).toBeNull();
+  });
+
+  it("only labels edges that belong to a cycle when a component has an incoming branch", () => {
+    const handle = createLinkedListVisualizer(model({
+      nodes: [
+        nodeVisual("obj-1", 1, "obj-2"),
+        nodeVisual("obj-2", 2, "obj-3"),
+        nodeVisual("obj-3", 3, "obj-2"),
+        nodeVisual("obj-4", 4, "obj-3")
+      ],
+      components: [{
+        componentId: "component:obj-1",
+        nodeIds: ["obj-1", "obj-2", "obj-3", "obj-4"],
+        entryNodeIds: ["obj-1", "obj-4"]
+      }],
+      cyclic: true
+    }));
+
+    expect(handle.element.querySelector(
+      '[data-edge-from="obj-3"][data-edge-to="obj-2"][data-edge-kind="cycle"]'
+    )).not.toBeNull();
+    expect(handle.element.querySelector(
+      '[data-edge-from="obj-4"][data-edge-to="obj-3"][data-edge-kind="branch"]'
+    )).not.toBeNull();
+  });
+
   it("renders nodes, pointer aliases, next links, and mutation markers", () => {
     const handle = createLinkedListVisualizer(model({
       nodes: [

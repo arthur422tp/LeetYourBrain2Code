@@ -7,6 +7,207 @@ export interface LinkedListVisualizerHandle {
   dispose(): void;
 }
 
+function orderedNodeIds(
+  component: LinkedListVisualModel["components"][number],
+  nodeById: Map<string, LinkedListVisualModel["nodes"][number]>
+): string[] {
+  const componentNodeIds = new Set(component.nodeIds);
+  const ordered: string[] = [];
+  const visited = new Set<string>();
+
+  const visit = (startObjectId: string): void => {
+    let currentObjectId: string | null = startObjectId;
+    while (
+      currentObjectId !== null &&
+      componentNodeIds.has(currentObjectId) &&
+      nodeById.has(currentObjectId) &&
+      !visited.has(currentObjectId)
+    ) {
+      visited.add(currentObjectId);
+      ordered.push(currentObjectId);
+      const nextObjectId: string | null = nodeById.get(currentObjectId)!.nextObjectId;
+      currentObjectId = nextObjectId !== null &&
+          componentNodeIds.has(nextObjectId) &&
+          !visited.has(nextObjectId)
+        ? nextObjectId
+        : null;
+    }
+  };
+
+  for (const entryNodeId of component.entryNodeIds) {
+    visit(entryNodeId);
+  }
+  for (const nodeId of [...component.nodeIds].sort((left, right) => left.localeCompare(right))) {
+    visit(nodeId);
+  }
+  return ordered;
+}
+
+function cycleEdgeSources(
+  component: LinkedListVisualModel["components"][number],
+  nodeById: Map<string, LinkedListVisualModel["nodes"][number]>
+): Set<string> {
+  const componentNodeIds = new Set(component.nodeIds);
+  const visited = new Set<string>();
+  const cycleSources = new Set<string>();
+
+  for (const startObjectId of component.nodeIds) {
+    let currentObjectId: string | null = startObjectId;
+    const path = new Set<string>();
+    while (
+      currentObjectId !== null &&
+      componentNodeIds.has(currentObjectId) &&
+      nodeById.has(currentObjectId)
+    ) {
+      if (path.has(currentObjectId)) {
+        const cycleStartIndex = [...path.keys()].indexOf(currentObjectId);
+        for (const cycleObjectId of [...path.keys()].slice(cycleStartIndex)) {
+          cycleSources.add(cycleObjectId);
+        }
+        break;
+      }
+      if (visited.has(currentObjectId)) {
+        break;
+      }
+      path.add(currentObjectId);
+      visited.add(currentObjectId);
+      currentObjectId = nodeById.get(currentObjectId)!.nextObjectId;
+    }
+  }
+  return cycleSources;
+}
+
+function appendEdge(
+  track: HTMLElement,
+  node: LinkedListVisualModel["nodes"][number],
+  nextNode: LinkedListVisualModel["nodes"][number] | undefined,
+  nextNodeIndex: number | undefined,
+  componentNodeIds: Set<string>,
+  nodeIndexById: Map<string, number>,
+  cycleSources: Set<string>,
+  nodeById: Map<string, LinkedListVisualModel["nodes"][number]>
+): void {
+  const edge = document.createElement("div");
+  edge.className = `linked-list-visualizer__edge is-${node.nextStatus}`;
+  edge.dataset.edgeFrom = node.objectId;
+
+  const label = document.createElement("span");
+  label.className = "linked-list-visualizer__edge-label";
+  label.textContent = "next";
+
+  const line = document.createElement("span");
+  line.className = "linked-list-visualizer__edge-line";
+
+  const target = document.createElement("code");
+  target.className = "linked-list-visualizer__edge-target";
+
+  if (node.nextObjectId === null) {
+    edge.dataset.edgeKind = "terminal";
+    edge.dataset.edgeTo = "None";
+    target.textContent = "None";
+  } else if (
+    nextNode &&
+    nextNodeIndex !== undefined &&
+    nextNode.objectId === node.nextObjectId &&
+    nodeIndexById.get(node.objectId)! + 1 === nextNodeIndex
+  ) {
+    edge.dataset.edgeKind = "next";
+    edge.dataset.edgeTo = nextNode.objectId;
+    target.textContent = `Node ${nextNodeIndex + 1}`;
+  } else if (componentNodeIds.has(node.nextObjectId) && nodeIndexById.has(node.nextObjectId)) {
+    const targetNodeIndex = nodeIndexById.get(node.nextObjectId)!;
+    const isCycle = cycleSources.has(node.objectId);
+    edge.classList.add(isCycle ? "is-cycle" : "is-branch");
+    edge.dataset.edgeKind = isCycle ? "cycle" : "branch";
+    edge.dataset.edgeTo = node.nextObjectId;
+    target.textContent = `${isCycle ? "↩" : "↗"} Node ${targetNodeIndex + 1}`;
+  } else {
+    edge.classList.add(nodeById.has(node.nextObjectId) ? "is-external" : "is-dangling");
+    edge.dataset.edgeKind = nodeById.has(node.nextObjectId) ? "external" : "dangling";
+    edge.dataset.edgeTo = node.nextObjectId;
+    target.textContent = node.nextObjectId;
+  }
+
+  edge.append(label, line, target);
+  track.append(edge);
+
+  if (node.nextObjectId === null) {
+    const terminal = document.createElement("div");
+    terminal.className = "linked-list-visualizer__terminal";
+    terminal.dataset.terminal = "None";
+
+    const terminalLabel = document.createElement("span");
+    terminalLabel.className = "linked-list-visualizer__terminal-label";
+    terminalLabel.textContent = "end";
+
+    const terminalValue = document.createElement("code");
+    terminalValue.textContent = "None";
+    terminal.append(terminalLabel, terminalValue);
+    track.append(terminal);
+  }
+}
+
+function renderNode(
+  node: LinkedListVisualModel["nodes"][number],
+  nodeIndex: number,
+  pointers: LinkedListVisualModel["pointers"],
+  nextTarget: string
+): HTMLElement {
+  const item = document.createElement("div");
+  item.className = `linked-list-visualizer__node is-${node.status}`;
+  item.dataset.nodeId = node.objectId;
+  item.dataset.nodeStatus = node.status;
+
+  const pointerRow = document.createElement("div");
+  pointerRow.className = "linked-list-visualizer__pointers";
+  for (const pointer of pointers) {
+    const marker = document.createElement("span");
+    marker.className = `linked-list-visualizer__pointer is-${pointer.status}`;
+    marker.dataset.pointerName = pointer.variableName;
+    marker.dataset.pointerStatus = pointer.status;
+    marker.textContent = `${pointer.variableName}${pointer.status === "moved" ? " →" : ""}`;
+    pointerRow.append(marker);
+  }
+
+  const identity = document.createElement("div");
+  identity.className = "linked-list-visualizer__identity";
+
+  const index = document.createElement("span");
+  index.className = "linked-list-visualizer__index";
+  index.textContent = `Node ${nodeIndex + 1}`;
+
+  const objectId = document.createElement("code");
+  objectId.className = "linked-list-visualizer__object-id";
+  objectId.textContent = node.objectId;
+  identity.append(index, objectId);
+
+  const value = document.createElement("div");
+  value.className = "linked-list-visualizer__value";
+
+  const valueLabel = document.createElement("span");
+  valueLabel.className = "linked-list-visualizer__field-label";
+  valueLabel.textContent = "val";
+
+  const valueCode = document.createElement("code");
+  valueCode.textContent = formatValue(node.label ?? { type: "none", value: null });
+  value.append(valueLabel, valueCode);
+
+  const next = document.createElement("div");
+  next.className = `linked-list-visualizer__next is-${node.nextStatus}`;
+  next.dataset.nextStatus = node.nextStatus;
+
+  const nextLabel = document.createElement("span");
+  nextLabel.className = "linked-list-visualizer__field-label";
+  nextLabel.textContent = "next";
+
+  const nextCode = document.createElement("code");
+  nextCode.textContent = nextTarget;
+  next.append(nextLabel, nextCode);
+
+  item.append(pointerRow, identity, value, next);
+  return item;
+}
+
 function render(model: LinkedListVisualModel): HTMLElement {
   const section = document.createElement("section");
   section.className = "linked-list-visualizer";
@@ -36,43 +237,43 @@ function render(model: LinkedListVisualModel): HTMLElement {
     const row = document.createElement("div");
     row.className = "linked-list-visualizer__component";
     row.dataset.componentId = component.componentId;
-    for (const objectId of component.nodeIds) {
-      const node = model.nodes.find((item) => item.objectId === objectId);
+    const track = document.createElement("div");
+    track.className = "linked-list-visualizer__track";
+    const orderedIds = orderedNodeIds(component, nodeById);
+    const componentNodeIds = new Set(component.nodeIds);
+    const nodeIndexById = new Map(orderedIds.map((objectId, index) => [objectId, index]));
+    const cycleSources = cycleEdgeSources(component, nodeById);
+
+    orderedIds.forEach((objectId, index) => {
+      const node = nodeById.get(objectId);
       if (!node) {
-        continue;
+        return;
       }
-      const item = document.createElement("div");
-      item.className = `linked-list-visualizer__node is-${node.status}`;
-      item.dataset.nodeId = node.objectId;
-      item.dataset.nodeStatus = node.status;
-
-      const pointerRow = document.createElement("div");
-      pointerRow.className = "linked-list-visualizer__pointers";
-      for (const pointer of pointersByNode.get(node.objectId) ?? []) {
-        const marker = document.createElement("span");
-        marker.className = `linked-list-visualizer__pointer is-${pointer.status}`;
-        marker.dataset.pointerName = pointer.variableName;
-        marker.dataset.pointerStatus = pointer.status;
-        marker.textContent = `${pointer.variableName}${pointer.status === "moved" ? " →" : ""}`;
-        pointerRow.append(marker);
-      }
-
-      const value = document.createElement("code");
-      value.className = "linked-list-visualizer__value";
-      value.textContent = formatValue(node.label ?? { type: "none", value: null });
-
-      const next = document.createElement("span");
-      next.className = `linked-list-visualizer__next is-${node.nextStatus}`;
-      next.dataset.nextStatus = node.nextStatus;
+      const nextNode = node.nextObjectId === null ? undefined : nodeById.get(node.nextObjectId);
       const nextTarget = node.nextObjectId === null
         ? "None"
-        : nodeById.has(node.nextObjectId)
-          ? node.nextObjectId
-          : "…";
-      next.textContent = `next -> ${nextTarget}`;
-
-      item.append(pointerRow, value, next);
-      row.append(item);
+        : node.nextObjectId;
+      track.append(renderNode(
+        node,
+        index,
+        pointersByNode.get(node.objectId) ?? [],
+        nextTarget
+      ));
+      appendEdge(
+        track,
+        node,
+        nextNode,
+        nextNode ? nodeIndexById.get(nextNode.objectId) : undefined,
+        componentNodeIds,
+        nodeIndexById,
+        cycleSources,
+        nodeById
+      );
+    });
+    if (orderedIds.length === 0) {
+      row.textContent = "No nodes in this component.";
+    } else {
+      row.append(track);
     }
     section.append(row);
   }

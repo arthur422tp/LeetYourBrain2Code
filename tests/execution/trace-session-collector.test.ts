@@ -23,7 +23,10 @@ const limits: ExecutionLimits = {
   maxSnapshotBytes: 100_000,
   maxSessionBytes: 1_000_000,
   maxStdoutBytes: 10_000,
-  hardTimeoutMs: 20
+  hardTimeoutMs: 20,
+  maxObjectNodes: 200,
+  maxObjectAttributes: 20,
+  maxObjectDepth: 32
 };
 
 const entrypoint: EntryPoint = {

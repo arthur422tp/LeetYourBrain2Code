@@ -44,6 +44,9 @@ export interface ExecutionLimits {
   maxSessionBytes: number;
   maxStdoutBytes: number;
   hardTimeoutMs: number;
+  maxObjectNodes: number;
+  maxObjectAttributes: number;
+  maxObjectDepth: number;
 }
 
 export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
@@ -53,7 +56,10 @@ export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
   maxSnapshotBytes: 256_000,
   maxSessionBytes: 8_000_000,
   maxStdoutBytes: 64_000,
-  hardTimeoutMs: 5_000
+  hardTimeoutMs: 5_000,
+  maxObjectNodes: 200,
+  maxObjectAttributes: 20,
+  maxObjectDepth: 32
 };
 
 export interface ExecutionRequest {

@@ -67,7 +67,10 @@ function session(): TraceSession {
       maxSnapshotBytes: 10000,
       maxSessionBytes: 100000,
       maxStdoutBytes: 10000,
-      hardTimeoutMs: 1000
+      hardTimeoutMs: 1000,
+      maxObjectNodes: 200,
+      maxObjectAttributes: 20,
+      maxObjectDepth: 32
     },
     subscriptRelations: relations,
     returnValue: null

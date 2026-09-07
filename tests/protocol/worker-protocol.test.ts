@@ -84,4 +84,39 @@ describe("worker protocol", () => {
       })
     ).toBe(true);
   });
+
+  it("accepts trace batches containing object topology snapshots", () => {
+    const traceBatch = {
+      type: "trace_batch",
+      sessionId: "session-3",
+      events: [
+        {
+          step: 1,
+          event: "line",
+          frameId: 1,
+          parentFrameId: null,
+          function: "reverseList",
+          line: 4,
+          callDepth: 1,
+          locals: {
+            head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+          },
+          objects: [
+            {
+              objectId: "obj-1",
+              className: "ListNode",
+              attributes: {
+                val: { type: "int", value: "1" },
+                next: { type: "none", value: null }
+              }
+            }
+          ],
+          objectsTruncated: false,
+          stdoutDelta: ""
+        }
+      ]
+    };
+
+    expect(isWorkerOutboundMessage(traceBatch)).toBe(true);
+  });
 });

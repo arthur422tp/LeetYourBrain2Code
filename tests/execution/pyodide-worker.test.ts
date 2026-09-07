@@ -27,7 +27,10 @@ const request: ExecutionRequest = {
     maxSnapshotBytes: 10_000,
     maxSessionBytes: 100_000,
     maxStdoutBytes: 1_000,
-    hardTimeoutMs: 1_000
+    hardTimeoutMs: 1_000,
+    maxObjectNodes: 200,
+    maxObjectAttributes: 20,
+    maxObjectDepth: 32
   }
 };
 

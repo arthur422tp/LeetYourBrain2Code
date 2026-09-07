@@ -6,7 +6,9 @@ import type {
   TraceSessionStatus
 } from "./execution-types";
 
-export const TRACE_SCHEMA_VERSION = 1;
+export const TRACE_SCHEMA_VERSION = 2;
+
+export type ObjectId = string;
 
 export type FloatSnapshotValue = number | "NaN" | "Infinity" | "-Infinity";
 
@@ -35,6 +37,12 @@ export interface StringValueSnapshot {
 export interface NoneValueSnapshot {
   type: "none";
   value: null;
+}
+
+export interface ObjectReferenceSnapshot {
+  type: "reference";
+  objectId: ObjectId;
+  className: string;
 }
 
 export interface ListValueSnapshot {
@@ -82,6 +90,12 @@ export interface CycleValueSnapshot {
   referenceId: string;
 }
 
+export interface ObjectSnapshot {
+  objectId: ObjectId;
+  className: string;
+  attributes: Record<string, ValueSnapshot>;
+}
+
 export type ValueSnapshot =
   | IntValueSnapshot
   | FloatValueSnapshot
@@ -93,7 +107,8 @@ export type ValueSnapshot =
   | DictValueSnapshot
   | SetValueSnapshot
   | UnknownValueSnapshot
-  | CycleValueSnapshot;
+  | CycleValueSnapshot
+  | ObjectReferenceSnapshot;
 
 export interface SubscriptRelation {
   /** Omitted on traces created before relation kinds were introduced. */
@@ -141,6 +156,8 @@ export interface TraceEvent {
   line: number | null;
   callDepth: number;
   locals: Record<string, ValueSnapshot>;
+  objects?: ObjectSnapshot[];
+  objectsTruncated?: boolean;
   stdoutDelta: string;
   eventPayload?: TraceEventPayload;
 }

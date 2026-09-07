@@ -7,6 +7,7 @@ import type {
   IntValueSnapshot,
   ListValueSnapshot,
   NoneValueSnapshot,
+  ObjectReferenceSnapshot,
   SetValueSnapshot,
   StringValueSnapshot,
   TupleValueSnapshot,
@@ -23,6 +24,7 @@ export type {
   IntValueSnapshot,
   ListValueSnapshot,
   NoneValueSnapshot,
+  ObjectReferenceSnapshot,
   SetValueSnapshot,
   StringValueSnapshot,
   TupleValueSnapshot,
@@ -119,6 +121,8 @@ export function valueSnapshotKey(snapshot: ValueSnapshot): string {
       ]);
     case "cycle":
       return JSON.stringify([snapshot.type, snapshot.referenceId]);
+    case "reference":
+      return JSON.stringify([snapshot.type, snapshot.objectId, snapshot.className]);
   }
 }
 

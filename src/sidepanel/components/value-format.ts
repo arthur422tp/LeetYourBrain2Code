@@ -33,5 +33,7 @@ export function formatValue(snapshot: ValueSnapshot | undefined): string {
       return snapshot.repr || `<${snapshot.className}>`;
     case "cycle":
       return `<cycle ${snapshot.referenceId}>`;
+    case "reference":
+      return `${snapshot.className}@${snapshot.objectId}`;
   }
 }

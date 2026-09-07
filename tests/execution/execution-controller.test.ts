@@ -22,7 +22,10 @@ function request(sessionId: string, hardTimeoutMs = 1_000): ExecutionRequest {
       maxSnapshotBytes: 10_000,
       maxSessionBytes: 100_000,
       maxStdoutBytes: 1_000,
-      hardTimeoutMs
+      hardTimeoutMs,
+      maxObjectNodes: 200,
+      maxObjectAttributes: 20,
+      maxObjectDepth: 32
     }
   };
 }

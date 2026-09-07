@@ -54,6 +54,9 @@ describe("Pyodide runtime", () => {
     expect(script).toContain('sys.modules["ast_analyzer"]');
     expect(script).toContain("leetcode-runner");
     expect(script).toContain("run_request");
+    expect(script).toContain("ObjectIdentityRegistry");
+    expect(script).toContain("ObjectTopologyCollector");
+    expect(script).toContain("topology_collector");
     expect(script).toContain(JSON.stringify(request.sourceCode));
     expect(script).not.toContain(`${JSON.stringify(request.sourceCode)} +`);
   });
@@ -90,6 +93,67 @@ describe("Pyodide runtime", () => {
       ],
       objectsTruncated: false
     }));
+  });
+
+  it("preserves stable object ids and return topology across an event sequence", () => {
+    const rawEvents = [
+      {
+        step: 1,
+        event: "line",
+        frame_id: 1,
+        parent_frame_id: null,
+        function: "reverseList",
+        line: 4,
+        call_depth: 1,
+        locals: { head: { type: "reference", objectId: "obj-1", className: "ListNode" } },
+        objects: [{
+          objectId: "obj-1",
+          className: "ListNode",
+          attributes: {
+            val: { type: "int", value: "1" },
+            next: { type: "none", value: null }
+          }
+        }],
+        objects_truncated: false,
+        stdout_delta: ""
+      },
+      {
+        step: 2,
+        event: "return",
+        frame_id: 1,
+        parent_frame_id: null,
+        function: "reverseList",
+        line: 5,
+        call_depth: 1,
+        locals: {},
+        objects: [{
+          objectId: "obj-1",
+          className: "ListNode",
+          attributes: {
+            val: { type: "int", value: "1" },
+            next: { type: "none", value: null }
+          }
+        }],
+        objects_truncated: false,
+        stdout_delta: "",
+        event_payload: {
+          return_value: { type: "reference", objectId: "obj-1", className: "ListNode" }
+        }
+      }
+    ];
+
+    const events = rawEvents.map(normalizePythonTraceEvent);
+
+    expect(events[0]?.locals.head).toEqual({
+      type: "reference",
+      objectId: "obj-1",
+      className: "ListNode"
+    });
+    expect(events[1]?.eventPayload).toEqual({
+      type: "return",
+      value: { type: "reference", objectId: "obj-1", className: "ListNode" }
+    });
+    expect(events[1]?.objects?.[0]?.objectId).toBe(events[0]?.objects?.[0]?.objectId);
   });
 
   it("initializes from a local index URL and reports a simple return value", async () => {

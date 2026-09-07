@@ -4,6 +4,8 @@ import time
 import traceback
 
 from serializer import ValueSerializer
+from object_identity import ObjectIdentityRegistry
+from object_topology import ObjectTopologyCollector
 
 
 USER_CODE_FILENAME = "<leetcode-user-code>"
@@ -52,6 +54,11 @@ class TraceCollector:
         self.previous_trace = None
         self.stdout_offset = 0
         self.last_exception = None
+        self.identity_registry = ObjectIdentityRegistry()
+        self.topology_collector = ObjectTopologyCollector(
+            limits=self.limits,
+            identity_registry=self.identity_registry,
+        )
 
     def _max_trace_steps(self):
         return max(0, int(_limit(self.limits, "max_trace_steps", "maxTraceSteps", 10000)))
@@ -100,19 +107,34 @@ class TraceCollector:
         if self.step_count > self._max_trace_steps():
             raise TraceLimitExceeded("step_limit")
 
-        serializer = ValueSerializer(self.limits)
+        serializer = ValueSerializer(
+            self.limits,
+            identity_registry=self.identity_registry,
+        )
+        visible_locals = {
+            name: value
+            for name, value in frame.f_locals.items()
+            if not name.startswith("__lc_")
+            and not (
+                frame.f_code.co_name == "<module>"
+                and (name == "__builtins__" or name in self.baseline_global_names)
+            )
+        }
         try:
             locals_snapshot = {
                 name: serializer.serialize(value)
-                for name, value in frame.f_locals.items()
-                if not name.startswith("__lc_")
-                and not (
-                    frame.f_code.co_name == "<module>"
-                    and (name == "__builtins__" or name in self.baseline_global_names)
-                )
+                for name, value in visible_locals.items()
             }
         except Exception as error:
             raise TraceLimitExceeded("trace_byte_limit") from error
+
+        roots = list(visible_locals.values())
+        if event_name == "return":
+            roots.append(argument)
+        try:
+            topology = self.topology_collector.capture(roots)
+        except Exception:
+            topology = {"objects": [], "truncated": True}
 
         frame_id = info["frame_id"]
         payload = None
@@ -132,6 +154,8 @@ class TraceCollector:
             "line": frame.f_lineno,
             "call_depth": info["call_depth"],
             "locals": locals_snapshot,
+            "objects": topology["objects"],
+            "objects_truncated": topology["truncated"],
             "stdout_delta": self._stdout_delta(),
         }
         if payload is not None:
@@ -216,4 +240,7 @@ class TraceCollector:
         sys.settrace(self.previous_trace)
 
     def serialize_value(self, value):
-        return ValueSerializer(self.limits).serialize(value)
+        return ValueSerializer(
+            self.limits,
+            identity_registry=self.identity_registry,
+        ).serialize(value)

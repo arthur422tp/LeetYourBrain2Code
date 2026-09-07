@@ -163,13 +163,13 @@ def test_nesting_limit_falls_back_to_a_truncated_snapshot():
     ]
 
 
-def test_unknown_custom_object_falls_back_even_when_repr_raises():
+def test_custom_object_is_serialized_as_a_reference_without_calling_repr():
     class BrokenRepr:
         def __repr__(self):
             raise RuntimeError("repr failed")
 
-    assert serializer().serialize(BrokenRepr()) == {
-        "type": "unknown",
-        "className": "BrokenRepr",
-        "repr": "<unrepresentable>",
-    }
+    snapshot = serializer().serialize(BrokenRepr())
+
+    assert snapshot["type"] == "reference"
+    assert snapshot["className"] == "BrokenRepr"
+    assert snapshot["objectId"].startswith("obj-")

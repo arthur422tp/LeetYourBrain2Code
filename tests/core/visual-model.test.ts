@@ -92,28 +92,6 @@ describe("buildVisualState", () => {
       }],
       primaryVisualId: "list:nums",
       objectChanges: null,
-      primaryVisual: {
-        kind: "list",
-        visualId: "list:nums",
-        variableName: "nums",
-        items: [int(2), int(9), int(11), int(15)],
-        pointers: [
-          { name: "left", index: 1, outOfBounds: false },
-          { name: "right", index: 3, outOfBounds: false }
-        ],
-        changedIndexes: [1]
-      },
-      containerVisuals: [{
-        kind: "list",
-        visualId: "list:nums",
-        variableName: "nums",
-        items: [int(2), int(9), int(11), int(15)],
-        pointers: [
-          { name: "left", index: 1, outOfBounds: false },
-          { name: "right", index: 3, outOfBounds: false }
-        ],
-        changedIndexes: [1]
-      }],
       stateChanges: listDiff,
       locals: { nums: list([2, 9, 11, 15]), left: int(1), right: int(3), target: int(20) },
       callStack: [{ frameId: 4, functionName: "twoSum", line: 7, depth: 1 }],
@@ -128,7 +106,7 @@ describe("buildVisualState", () => {
       [relation("left")]
     );
 
-    expect(state.primaryVisual).toEqual({
+    expect(state.visuals.find((visual) => visual.visualId === "list:nums")).toEqual({
       kind: "list",
       visualId: "list:nums",
       variableName: "nums",
@@ -147,9 +125,11 @@ describe("buildVisualState", () => {
       [relation("left")]
     );
 
-    expect(state.primaryVisual?.pointers).toEqual([
-      { name: "left", index: -1, outOfBounds: false }
-    ]);
+    expect(state.visuals.find((visual) => visual.visualId === "list:nums")).toEqual(expect.objectContaining({
+      pointers: [
+        { name: "left", index: -1, outOfBounds: false }
+      ]
+    }));
   });
 
   it("keeps generic dictionary state when no specialized visual exists", () => {
@@ -173,7 +153,12 @@ describe("buildVisualState", () => {
       []
     );
 
-    expect(state.primaryVisual).toBeNull();
+    expect(state.visuals).toContainEqual({
+      kind: "dict",
+      visualId: "dict:mapping",
+      variableName: "mapping",
+      entries: [{ key: { type: "str", value: "x", length: 1, truncated: false }, value: int(1), status: "unchanged" }]
+    });
     expect(state.locals).toEqual({ mapping });
     expect(state.stateChanges).toEqual({
       frameId: 4,
@@ -197,8 +182,13 @@ describe("buildVisualState", () => {
       []
     );
 
-    expect(state.primaryVisual).toBeNull();
-    expect(state.containerVisuals).toEqual([
+    expect(state.visuals).toEqual([
+      {
+        kind: "dict",
+        visualId: "dict:seen",
+        variableName: "seen",
+        entries: [{ key: int(2), value: int(0), status: "unchanged" }]
+      },
       {
         kind: "list",
         visualId: "list:nums",
@@ -206,12 +196,6 @@ describe("buildVisualState", () => {
         items: [int(2), int(7), int(11), int(15)],
         pointers: [],
         changedIndexes: []
-      },
-      {
-        kind: "dict",
-        visualId: "dict:seen",
-        variableName: "seen",
-        entries: [{ key: int(2), value: int(0), status: "unchanged" }]
       }
     ]);
   });
@@ -232,7 +216,7 @@ describe("buildVisualState", () => {
       [membershipRelation]
     );
 
-    expect(state.containerVisuals).toContainEqual({
+    expect(state.visuals).toContainEqual({
       kind: "dict",
       visualId: "dict:seen",
       variableName: "seen",
@@ -256,5 +240,21 @@ describe("buildVisualState", () => {
     expect(state.visuals.map((visual) => visual.visualId)).toEqual(["list:nums"]);
     expect(state.primaryVisualId).toBe("list:nums");
     expect(state.objectChanges).toBeNull();
+  });
+
+  it("caps the visible visual models at three candidates", () => {
+    const state = buildVisualState(
+      runtime({
+        first: list([1]),
+        second: list([2]),
+        third: dict([[3, 3]]),
+        fourth: dict([[4, 4]])
+      }),
+      null,
+      []
+    );
+
+    expect(state.visuals).toHaveLength(3);
+    expect(new Set(state.visuals.map((visual) => visual.visualId)).size).toBe(3);
   });
 });

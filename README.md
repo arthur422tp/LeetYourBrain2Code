@@ -46,6 +46,7 @@ The MVP is designed to expose:
 - locals, scalar changes, and container mutations;
 - stdout and return values;
 - list state with index/pointer bindings;
+- dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
 - the trace prefix captured before a runtime error, trace limit, or hard timeout.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
@@ -55,7 +56,7 @@ Python execution stays off the Side Panel's main thread. Pyodide is bundled with
 - `completed` means local execution returned normally. It does **not** mean LeetCode Accepted.
 - `timeout` means the local visualization runtime exceeded its wall-clock limit. It does **not** mean LeetCode TLE.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
-- The MVP focuses on Python primitives and containers. Dedicated visualizers for linked lists, trees, node-edge graphs, and DP tables are outside the v0.1 scope.
+- Dedicated linked-list visualization supports Python runtime objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display. Dedicated visualizers for trees, node-edge graphs, and DP tables are outside the current scope.
 - Web Worker and Pyodide isolation should not be treated as a hardened sandbox for hostile code.
 
 ## Development

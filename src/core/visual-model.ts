@@ -5,7 +5,6 @@ import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations"
 import type { ObjectDiff } from "./object-diff";
 import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
 import type { ContainerDiff, FrameDiff } from "./state-diff";
-import { selectPrimaryContainers } from "./primary-container-resolver";
 import type { RuntimeState } from "./runtime-state";
 import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
 import { resolveVisualCandidates, type VisualCandidate } from "./visual-candidate-resolver";
@@ -59,19 +58,11 @@ export interface VisualState {
   visuals: StructureVisualModel[];
   primaryVisualId: string | null;
   objectChanges: ObjectDiff | null;
-  /** @deprecated Use visuals and primaryVisualId. */
-  primaryVisual: ListVisualModel | null;
-  /** @deprecated Use visuals. */
-  containerVisuals: ContainerVisualModel[];
   stateChanges: FrameDiff | null;
   locals: Record<string, ValueSnapshot>;
   callStack: CallStackEntry[];
   stdout: string;
   exception?: ExceptionInfo;
-}
-
-function emptyDiff(frameId: number | null): FrameDiff {
-  return { frameId: frameId ?? -1, variables: [], containerChanges: [] };
 }
 
 function buildCallStack(runtime: RuntimeState): CallStackEntry[] {
@@ -100,6 +91,12 @@ function changedIndexes(diff: FrameDiff | null, container: string): number[] {
     return [];
   }
   return containerChange.changes.map((change) => change.index);
+}
+
+function isContainerSnapshot(snapshot: ValueSnapshot | undefined): boolean {
+  return snapshot?.type === "list" ||
+    snapshot?.type === "tuple" ||
+    snapshot?.type === "dict";
 }
 
 function buildListVisual(
@@ -247,16 +244,11 @@ export function buildVisualState(
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const bindings = resolvePointerBindings(relations, runtime);
-  const selection = selectPrimaryContainers(
-    runtime,
-    bindings,
-    diff ?? emptyDiff(runtime.activeFrameId),
-    relations
-  );
-  const containerNames = [
-    ...(selection.primary === null ? [] : [selection.primary]),
-    ...selection.secondary
-  ];
+  const containerNames = frame
+    ? Object.entries(frame.locals)
+      .filter(([, snapshot]) => isContainerSnapshot(snapshot))
+      .map(([name]) => name)
+    : [];
   const containerVisuals = containerNames
     .map((container) => buildContainerVisual(runtime, bindings, container, diff, relations))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
@@ -312,17 +304,12 @@ export function buildVisualState(
   const visuals = selectionResult.visible
     .map((candidate) => visualById.get(candidate.visualId))
     .filter((visual): visual is StructureVisualModel => visual !== undefined);
-  const primaryVisual = selectionResult.primary
-    ? visualById.get(selectionResult.primary.visualId)
-    : undefined;
   const result: VisualState = {
     step: runtime.step,
     currentLine: runtime.currentLine,
     visuals,
     primaryVisualId: selectionResult.primary?.visualId ?? null,
     objectChanges: objectDiff,
-    primaryVisual: primaryVisual?.kind === "list" ? primaryVisual : null,
-    containerVisuals,
     stateChanges: diff,
     locals: frame ? cloneLocals(frame.locals) : {},
     callStack: buildCallStack(runtime),

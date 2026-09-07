@@ -71,7 +71,7 @@ describe("interpretTrace", () => {
       kind: "list",
       changes: [{ index: 1, kind: "changed", before: int(7), after: int(9) }]
     }]);
-    expect(result.visualStates[1]?.primaryVisual).toEqual({
+    expect(result.visualStates[1]?.visuals.find((visual) => visual.visualId === "list:nums")).toEqual({
       kind: "list",
       visualId: "list:nums",
       variableName: "nums",
@@ -97,10 +97,12 @@ describe("interpretTrace", () => {
       [relation("dp", "i")]
     );
 
-    expect(binary.visualStates[0]?.primaryVisual?.pointers).toEqual([
-      { name: "mid", index: 1, outOfBounds: false }
-    ]);
-    expect(dp.visualStates[1]?.primaryVisual).toEqual({
+    expect(binary.visualStates[0]?.visuals.find((visual) => visual.visualId === "list:nums")).toEqual(expect.objectContaining({
+      pointers: [
+        { name: "mid", index: 1, outOfBounds: false }
+      ]
+    }));
+    expect(dp.visualStates[1]?.visuals.find((visual) => visual.visualId === "list:dp")).toEqual({
       kind: "list",
       visualId: "list:dp",
       variableName: "dp",
@@ -123,7 +125,7 @@ describe("interpretTrace", () => {
       []
     );
 
-    expect(result.visualStates[0]?.primaryVisual).toBeNull();
+    expect(result.visualStates[0]?.visuals).toEqual([]);
     expect(result.visualStates[0]?.locals).toEqual({ matrix });
   });
 
@@ -149,9 +151,29 @@ describe("interpretTrace", () => {
       current: int(0)
     })], []);
 
-    expect(hashMap.visualStates[0]?.primaryVisual).toBeNull();
+    expect(hashMap.visualStates[0]?.visuals).toContainEqual({
+      kind: "dict",
+      visualId: "dict:mapping",
+      variableName: "mapping",
+      entries: [{ key: { type: "str", value: "a", length: 1, truncated: false }, value: int(1), status: "unchanged" }]
+    });
     expect(hashMap.visualStates[0]?.locals).toEqual({ mapping });
-    expect(graphState.visualStates[0]?.primaryVisual).toBeNull();
+    expect(graphState.visualStates[0]?.visuals).toEqual([
+      {
+        kind: "dict",
+        visualId: "dict:graph",
+        variableName: "graph",
+        entries: [{ key: int(0), value: list([1, 2]), status: "unchanged" }]
+      },
+      {
+        kind: "list",
+        visualId: "list:queue",
+        variableName: "queue",
+        items: [int(0)],
+        pointers: [],
+        changedIndexes: []
+      }
+    ]);
     expect(graphState.visualStates[0]?.locals).toEqual({
       graph,
       queue: list([0]),
@@ -202,18 +224,16 @@ describe("interpretTrace", () => {
     });
     const result = interpretTrace([
       event(1, "reverseList", {
-        head: reference("obj-1"),
         prev: { type: "none", value: null },
         curr: reference("obj-1")
       }, {
         objects: [objectNode("obj-1", "obj-2"), objectNode("obj-2", "obj-3"), objectNode("obj-3", null)]
       }),
       event(2, "reverseList", {
-        head: reference("obj-2"),
-        prev: reference("obj-1"),
-        curr: reference("obj-3")
+        prev: { type: "none", value: null },
+        curr: reference("obj-1")
       }, {
-        objects: [objectNode("obj-1", null), objectNode("obj-2", "obj-1"), objectNode("obj-3", "obj-2")]
+        objects: [objectNode("obj-1", null), objectNode("obj-2", "obj-3"), objectNode("obj-3", null)]
       })
     ]);
 
@@ -225,19 +245,21 @@ describe("interpretTrace", () => {
       truncated: false,
       components: [{
         componentId: "component:obj-1",
-        nodeIds: ["obj-1", "obj-2", "obj-3"],
-        entryNodeIds: ["obj-3"]
+        nodeIds: ["obj-1"],
+        entryNodeIds: ["obj-1"]
+      }, {
+        componentId: "component:obj-2",
+        nodeIds: ["obj-2", "obj-3"],
+        entryNodeIds: ["obj-2"]
       }]
     });
     expect(visual?.nodes.map((node) => [node.objectId, node.nextObjectId])).toEqual([
       ["obj-1", null],
-      ["obj-2", "obj-1"],
-      ["obj-3", "obj-2"]
+      ["obj-2", "obj-3"],
+      ["obj-3", null]
     ]);
     expect(visual?.pointers).toEqual([
-      { variableName: "curr", objectId: "obj-3", status: "moved" },
-      { variableName: "head", objectId: "obj-2", status: "moved" },
-      { variableName: "prev", objectId: "obj-1", status: "added" }
+      { variableName: "curr", objectId: "obj-1", status: "unchanged" }
     ]);
   });
 });

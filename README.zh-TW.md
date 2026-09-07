@@ -44,6 +44,7 @@ MVP 的目標是呈現：
 - locals、scalar changes 與 container mutations；
 - stdout 與 return value；
 - 帶有 index／pointer bindings 的 list state；
+- 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
 - Runtime Error、trace limit 或 hard timeout 發生前已取得的 trace prefix。
 
 Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功能一起 bundle，並在本機 Web Worker 中運作；MVP 不需要 backend。
@@ -53,7 +54,7 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - `completed` 只代表本機執行正常返回，**不代表** LeetCode Accepted。
 - `timeout` 只代表本機視覺化 runtime 超過 wall-clock limit，**不等於** LeetCode TLE。
 - Pyodide 無法完整重現 LeetCode judge environment。
-- MVP 聚焦於 Python primitive 與 container。Linked list、tree、node-edge graph 和 DP table 的專用 visualizer 不在 v0.1 範圍內。
+- 目前已支援具有 `next` topology 的 Python runtime object 的 linked-list 專用 visualizer，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；tree、node-edge graph 和 DP table 的專用 visualizer 仍不在目前範圍內。
 - Web Worker 與 Pyodide 的隔離不應被視為可執行惡意程式碼的 hardened sandbox。
 
 ## 開發

@@ -15,6 +15,9 @@ LIMITS = {
     "max_snapshot_bytes": 20_000,
     "max_session_bytes": 100_000,
     "max_stdout_bytes": 2_000,
+    "max_object_nodes": 200,
+    "max_object_attributes": 20,
+    "max_object_depth": 32,
 }
 
 
@@ -325,3 +328,33 @@ def test_value_parameter_keeps_a_literal_list_as_a_builtin_list():
 
     assert result["status"] == "completed"
     assert result["return_value"]["type"] == "list"
+
+
+def test_object_topology_respects_node_bound_and_marks_truncation():
+    result = run_request(
+        """class Node:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+class Solution:
+    def build(self):
+        head = Node(0)
+        tail = head
+        for value in range(12):
+            tail.next = Node(value + 1)
+            tail = tail.next
+        return head
+""",
+        "",
+        {"class_name": "Solution", "method_name": "build", "parameter_count": 0},
+        {**LIMITS, "max_object_nodes": 5},
+    )
+
+    assert result["status"] == "completed"
+    bounded_events = [
+        event for event in result["events"]
+        if event.get("objects_truncated") is True
+    ]
+    assert bounded_events
+    assert all(len(event["objects"]) <= 5 for event in bounded_events)

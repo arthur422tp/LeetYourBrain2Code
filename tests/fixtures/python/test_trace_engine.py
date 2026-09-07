@@ -272,3 +272,56 @@ class Solution:
 
     assert result["status"] == "completed"
     assert markers[:2] == ["batch", "after"]
+
+
+def test_linked_list_parameter_builds_a_user_defined_node_chain_and_captures_topology():
+    result = run_request(
+        """class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+class Solution:
+    def reverseList(self, head: ListNode | None):
+        return head
+""",
+        "[1,2,3]",
+        {
+            "class_name": "Solution",
+            "method_name": "reverseList",
+            "parameter_count": 1,
+            "parameter_kinds": ["linked_list"],
+        },
+        LIMITS,
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"]["type"] == "reference"
+    assert result["return_value"]["className"] == "ListNode"
+    assert any(event["objects"] for event in result["events"])
+    assert any(
+        object_snapshot["attributes"]["next"]["type"] == "reference"
+        for event in result["events"]
+        for object_snapshot in event["objects"]
+        if "next" in object_snapshot["attributes"]
+    )
+
+
+def test_value_parameter_keeps_a_literal_list_as_a_builtin_list():
+    result = run_request(
+        """class Solution:
+    def keep(self, values: list[int]):
+        return values
+""",
+        "[1,2,3]",
+        {
+            "class_name": "Solution",
+            "method_name": "keep",
+            "parameter_count": 1,
+            "parameter_kinds": ["value"],
+        },
+        LIMITS,
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"]["type"] == "list"

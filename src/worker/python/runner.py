@@ -8,6 +8,29 @@ from tracer import TraceCollector, TraceLimitExceeded, USER_CODE_FILENAME, _limi
 from ast_analyzer import analyze_subscript_relations, relations_as_dicts
 
 
+class UnsupportedTestcaseFormat(Exception):
+    pass
+
+
+class _FallbackListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+
+def _build_linked_list(values, node_class):
+    head = None
+    tail = None
+    for value in values:
+        node = node_class(value)
+        if head is None:
+            head = node
+        else:
+            tail.next = node
+        tail = node
+    return head
+
+
 def _exception_info(error):
     line = getattr(error, "lineno", None)
     if line is None:
@@ -77,6 +100,10 @@ def run_request(
     if len(arguments) != parameter_count:
         return _empty_result("input_error", "unsupported_testcase_format")
 
+    parameter_kinds = entrypoint.get("parameter_kinds", entrypoint.get("parameterKinds", []))
+    if not isinstance(parameter_kinds, list):
+        parameter_kinds = []
+
     try:
         user_code = compile(source_code, USER_CODE_FILENAME, "exec")
     except SyntaxError as error:
@@ -104,9 +131,24 @@ def run_request(
     try:
         with contextlib.redirect_stdout(stdout_buffer):
             exec(user_code, namespace, namespace)
+            node_class = namespace.get("ListNode", _FallbackListNode)
+            converted_arguments = []
+            for index, argument in enumerate(arguments):
+                parameter_kind = parameter_kinds[index] if index < len(parameter_kinds) else "value"
+                if parameter_kind != "linked_list":
+                    converted_arguments.append(argument)
+                    continue
+                if argument is None:
+                    converted_arguments.append(None)
+                elif isinstance(argument, list):
+                    converted_arguments.append(_build_linked_list(argument, node_class))
+                else:
+                    raise UnsupportedTestcaseFormat(
+                        "linked-list parameters require a literal list or None"
+                    )
             instance = namespace[entrypoint["class_name"]]
             method = getattr(instance(), entrypoint["method_name"])
-            return_value = method(*arguments)
+            return_value = method(*converted_arguments)
     except TraceLimitExceeded as error:
         return _empty_result(
             "trace_limit",
@@ -114,6 +156,15 @@ def run_request(
             stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
             events=collector.events,
             subscript_relations=subscript_relations,
+        )
+    except UnsupportedTestcaseFormat as error:
+        return _empty_result(
+            "input_error",
+            "unsupported_testcase_format",
+            stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
+            events=collector.events,
+            subscript_relations=subscript_relations,
+            exception=_exception_info(error),
         )
     except Exception as error:
         exception = collector.last_exception or _exception_info(error)

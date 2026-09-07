@@ -43,6 +43,7 @@ describe("Pyodide runtime", () => {
     expect(script).toContain(`compile(`);
     expect(script).toContain(USER_CODE_FILENAME);
     expect(script).toContain("leetcode-runtime-prelude");
+    expect(script).toContain("class ListNode");
     expect(script).toContain("leetcode-serializer");
     expect(script).toContain("leetcode-tracer");
     expect(script).toContain('sys.modules["serializer"]');
@@ -54,6 +55,7 @@ describe("Pyodide runtime", () => {
     expect(script).toContain('sys.modules["ast_analyzer"]');
     expect(script).toContain("leetcode-runner");
     expect(script).toContain("run_request");
+    expect(script).toContain("parameter_kinds");
     expect(script).toContain("ObjectIdentityRegistry");
     expect(script).toContain("ObjectTopologyCollector");
     expect(script).toContain("topology_collector");

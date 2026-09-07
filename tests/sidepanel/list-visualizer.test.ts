@@ -15,6 +15,7 @@ const int = (value: number): ValueSnapshot => ({
 function model(overrides: Partial<ListVisualModel> = {}): ListVisualModel {
   return {
     kind: "list",
+    visualId: "list:nums",
     variableName: "nums",
     items: [int(2), int(7), int(11), int(15)],
     pointers: [

@@ -73,6 +73,7 @@ describe("interpretTrace", () => {
     }]);
     expect(result.visualStates[1]?.primaryVisual).toEqual({
       kind: "list",
+      visualId: "list:nums",
       variableName: "nums",
       items: [int(2), int(9), int(11), int(15)],
       pointers: [
@@ -101,6 +102,7 @@ describe("interpretTrace", () => {
     ]);
     expect(dp.visualStates[1]?.primaryVisual).toEqual({
       kind: "list",
+      visualId: "list:dp",
       variableName: "dp",
       items: [int(0), int(5), int(0)],
       pointers: [{ name: "i", index: 1, outOfBounds: false }],

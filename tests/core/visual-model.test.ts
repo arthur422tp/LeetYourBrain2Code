@@ -79,8 +79,22 @@ describe("buildVisualState", () => {
     expect(state).toEqual({
       step: 12,
       currentLine: 7,
+      visuals: [{
+        kind: "list",
+        visualId: "list:nums",
+        variableName: "nums",
+        items: [int(2), int(9), int(11), int(15)],
+        pointers: [
+          { name: "left", index: 1, outOfBounds: false },
+          { name: "right", index: 3, outOfBounds: false }
+        ],
+        changedIndexes: [1]
+      }],
+      primaryVisualId: "list:nums",
+      objectChanges: null,
       primaryVisual: {
         kind: "list",
+        visualId: "list:nums",
         variableName: "nums",
         items: [int(2), int(9), int(11), int(15)],
         pointers: [
@@ -91,6 +105,7 @@ describe("buildVisualState", () => {
       },
       containerVisuals: [{
         kind: "list",
+        visualId: "list:nums",
         variableName: "nums",
         items: [int(2), int(9), int(11), int(15)],
         pointers: [
@@ -115,6 +130,7 @@ describe("buildVisualState", () => {
 
     expect(state.primaryVisual).toEqual({
       kind: "list",
+      visualId: "list:nums",
       variableName: "nums",
       items: [int(2), int(7)],
       pointers: [{ name: "left", index: 5, outOfBounds: true }],
@@ -185,6 +201,7 @@ describe("buildVisualState", () => {
     expect(state.containerVisuals).toEqual([
       {
         kind: "list",
+        visualId: "list:nums",
         variableName: "nums",
         items: [int(2), int(7), int(11), int(15)],
         pointers: [],
@@ -192,6 +209,7 @@ describe("buildVisualState", () => {
       },
       {
         kind: "dict",
+        visualId: "dict:seen",
         variableName: "seen",
         entries: [{ key: int(2), value: int(0), status: "unchanged" }]
       }
@@ -216,6 +234,7 @@ describe("buildVisualState", () => {
 
     expect(state.containerVisuals).toContainEqual({
       kind: "dict",
+      visualId: "dict:seen",
       variableName: "seen",
       entries: [{ key: int(2), value: int(0), status: "unchanged" }],
       probes: [{
@@ -225,5 +244,17 @@ describe("buildVisualState", () => {
         operation: "membership"
       }]
     });
+  });
+
+  it("exposes structure-neutral visuals and a primary visual id", () => {
+    const state = buildVisualState(
+      runtime({ nums: list([2, 9, 11, 15]), left: int(1), right: int(3) }),
+      listDiff,
+      [relation("left"), relation("right")]
+    );
+
+    expect(state.visuals.map((visual) => visual.visualId)).toEqual(["list:nums"]);
+    expect(state.primaryVisualId).toBe("list:nums");
+    expect(state.objectChanges).toBeNull();
   });
 });

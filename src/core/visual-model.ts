@@ -2,13 +2,17 @@ import type { ExceptionInfo } from "../shared/execution-types";
 import type { ValueSnapshot } from "../shared/trace-types";
 import { resolvePointerBindings, type PointerBinding } from "./binding-resolver";
 import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations";
+import type { ObjectDiff } from "./object-diff";
+import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
 import type { ContainerDiff, FrameDiff } from "./state-diff";
 import { selectPrimaryContainers } from "./primary-container-resolver";
 import type { RuntimeState } from "./runtime-state";
 import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
+import { resolveVisualCandidates, type VisualCandidate } from "./visual-candidate-resolver";
 
 export interface ListVisualModel {
   kind: "list";
+  visualId: string;
   variableName: string;
   items: ValueSnapshot[];
   pointers: Array<{
@@ -23,6 +27,7 @@ export interface ListVisualModel {
 
 export interface DictVisualModel {
   kind: "dict";
+  visualId: string;
   variableName: string;
   entries: Array<{
     key: ValueSnapshot;
@@ -39,6 +44,8 @@ export interface DictVisualModel {
 
 export type ContainerVisualModel = ListVisualModel | DictVisualModel;
 
+export type StructureVisualModel = ContainerVisualModel | LinkedListVisualModel;
+
 export interface CallStackEntry {
   frameId: number;
   functionName: string;
@@ -49,7 +56,12 @@ export interface CallStackEntry {
 export interface VisualState {
   step: number;
   currentLine: number | null;
+  visuals: StructureVisualModel[];
+  primaryVisualId: string | null;
+  objectChanges: ObjectDiff | null;
+  /** @deprecated Use visuals and primaryVisualId. */
   primaryVisual: ListVisualModel | null;
+  /** @deprecated Use visuals. */
   containerVisuals: ContainerVisualModel[];
   stateChanges: FrameDiff | null;
   locals: Record<string, ValueSnapshot>;
@@ -93,24 +105,25 @@ function changedIndexes(diff: FrameDiff | null, container: string): number[] {
 function buildListVisual(
   runtime: RuntimeState,
   bindings: PointerBinding[],
-  primary: string | null,
+  container: string,
   diff: FrameDiff | null
 ): ListVisualModel | null {
-  if (primary === null || runtime.activeFrameId === null) {
+  if (runtime.activeFrameId === null) {
     return null;
   }
   const frame = runtime.frames.get(runtime.activeFrameId);
-  const snapshot = frame?.locals[primary];
+  const snapshot = frame?.locals[container];
   if (snapshot?.type !== "list" && snapshot?.type !== "tuple") {
     return null;
   }
 
   return {
     kind: "list",
-    variableName: primary,
+    visualId: `list:${container}`,
+    variableName: container,
     items: snapshot.items.map(cloneValueSnapshot),
     pointers: bindings
-      .filter((binding) => binding.container === primary)
+      .filter((binding) => binding.container === container)
       .map((binding) => ({
         name: binding.variable,
         index: binding.index,
@@ -122,7 +135,7 @@ function buildListVisual(
             }
           : {})
       })),
-    changedIndexes: changedIndexes(diff, primary)
+    changedIndexes: changedIndexes(diff, container)
   };
 }
 
@@ -181,6 +194,7 @@ function buildDictVisual(
 
   return {
     kind: "dict",
+    visualId: `dict:${container}`,
     variableName: container,
     entries: snapshot.entries.map((entry) => ({
       key: cloneValueSnapshot(entry.key),
@@ -211,10 +225,23 @@ function buildContainerVisual(
   return null;
 }
 
+function isSpecializedListCandidate(visual: StructureVisualModel): boolean {
+  if (visual.kind !== "list") {
+    return true;
+  }
+  return visual.items.every((item) =>
+    item.type !== "list" &&
+    item.type !== "tuple" &&
+    item.type !== "dict" &&
+    item.type !== "set"
+  );
+}
+
 export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
-  relations: StaticRelation[]
+  relations: StaticRelation[],
+  objectDiff: ObjectDiff | null = null
 ): VisualState {
   const frame = runtime.activeFrameId === null
     ? undefined
@@ -233,10 +260,68 @@ export function buildVisualState(
   const containerVisuals = containerNames
     .map((container) => buildContainerVisual(runtime, bindings, container, diff, relations))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
+  const linkedListVisuals = buildLinkedListVisuals(runtime, diff, objectDiff);
+  const allVisuals: StructureVisualModel[] = [...containerVisuals, ...linkedListVisuals];
+  const candidateVisuals = allVisuals.filter(isSpecializedListCandidate);
+  const changedContainers = new Set(
+    (diff?.frameId === runtime.activeFrameId ? diff.containerChanges : [])
+      .map((change) => change.container)
+  );
+  const activeLineContainers = new Set(
+    relations
+      .filter((relation) =>
+        relation.kind !== "membership" &&
+        relation.line === runtime.currentLine &&
+        frame !== undefined &&
+        relationMatchesFrameScope(relation, frame.functionName)
+      )
+      .map((relation) => relation.container)
+  );
+  const visualCandidates: VisualCandidate[] = candidateVisuals.map((visual) => {
+    if (visual.kind === "linked_list") {
+      const pointerRelevant = visual.pointers.length > 0;
+      const mutated = objectDiff !== null && (
+        objectDiff.addedObjectIds.length > 0 ||
+        objectDiff.removedObjectIds.length > 0 ||
+        objectDiff.attributeChanges.length > 0
+      );
+      return {
+        visualId: visual.visualId,
+        kind: visual.kind,
+        priority: [false, mutated, pointerRelevant, visual.pointers.length] as const
+      };
+    }
+    const pointerRelevant = visual.kind === "list"
+      ? visual.pointers.length > 0
+      : (visual.probes?.length ?? 0) > 0;
+    const mutated = changedContainers.has(visual.variableName) ||
+      (visual.kind === "list" && visual.changedIndexes.length > 0);
+    return {
+      visualId: visual.visualId,
+      kind: visual.kind,
+      priority: [
+        activeLineContainers.has(visual.variableName),
+        mutated,
+        pointerRelevant,
+        visual.kind === "list" ? visual.pointers.length : 0
+      ] as const
+    };
+  });
+  const selectionResult = resolveVisualCandidates(visualCandidates);
+  const visualById = new Map(candidateVisuals.map((visual) => [visual.visualId, visual]));
+  const visuals = selectionResult.visible
+    .map((candidate) => visualById.get(candidate.visualId))
+    .filter((visual): visual is StructureVisualModel => visual !== undefined);
+  const primaryVisual = selectionResult.primary
+    ? visualById.get(selectionResult.primary.visualId)
+    : undefined;
   const result: VisualState = {
     step: runtime.step,
     currentLine: runtime.currentLine,
-    primaryVisual: buildListVisual(runtime, bindings, selection.primary, diff),
+    visuals,
+    primaryVisualId: selectionResult.primary?.visualId ?? null,
+    objectChanges: objectDiff,
+    primaryVisual: primaryVisual?.kind === "list" ? primaryVisual : null,
     containerVisuals,
     stateChanges: diff,
     locals: frame ? cloneLocals(frame.locals) : {},

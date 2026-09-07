@@ -46,12 +46,50 @@ describe("Pyodide runtime", () => {
     expect(script).toContain("leetcode-serializer");
     expect(script).toContain("leetcode-tracer");
     expect(script).toContain('sys.modules["serializer"]');
+    expect(script).toContain("leetcode-object-identity");
+    expect(script).toContain('sys.modules["object_identity"]');
+    expect(script).toContain("leetcode-object-topology");
+    expect(script).toContain('sys.modules["object_topology"]');
     expect(script).toContain("leetcode-ast-analyzer");
     expect(script).toContain('sys.modules["ast_analyzer"]');
     expect(script).toContain("leetcode-runner");
     expect(script).toContain("run_request");
     expect(script).toContain(JSON.stringify(request.sourceCode));
     expect(script).not.toContain(`${JSON.stringify(request.sourceCode)} +`);
+  });
+
+  it("normalizes object references and bounded topology fields", () => {
+    const event = normalizePythonTraceEvent({
+      step: 1,
+      event: "line",
+      frame_id: 1,
+      parent_frame_id: null,
+      function: "reverseList",
+      line: 4,
+      call_depth: 1,
+      locals: {
+        head: { type: "reference", objectId: "obj-1", className: "ListNode" }
+      },
+      objects: [
+        {
+          objectId: "obj-1",
+          className: "ListNode",
+          attributes: {
+            val: { type: "int", value: "1" },
+            next: { type: "none", value: null }
+          }
+        }
+      ],
+      objects_truncated: false,
+      stdout_delta: ""
+    });
+
+    expect(event).toEqual(expect.objectContaining({
+      objects: [
+        expect.objectContaining({ objectId: "obj-1", className: "ListNode" })
+      ],
+      objectsTruncated: false
+    }));
   });
 
   it("initializes from a local index URL and reports a simple return value", async () => {

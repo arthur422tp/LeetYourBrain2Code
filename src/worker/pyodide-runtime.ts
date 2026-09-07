@@ -6,12 +6,14 @@ import type {
   ExecutionRequest,
   ExecutionTerminalResult
 } from "../shared/execution-types";
-import type { TraceEvent, ValueSnapshot } from "../shared/trace-types";
+import type { ObjectSnapshot, TraceEvent, ValueSnapshot } from "../shared/trace-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
 import astAnalyzerSource from "./python/ast_analyzer.py?raw";
 import runnerSource from "./python/runner.py?raw";
 import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
+import objectIdentitySource from "./python/object_identity.py?raw";
+import objectTopologySource from "./python/object_topology.py?raw";
 
 export const USER_CODE_FILENAME = "<leetcode-user-code>";
 const RUNTIME_PRELUDE_FILENAME = "<leetcode-runtime-prelude>";
@@ -48,8 +50,8 @@ export const DEFAULT_PYODIDE_INDEX_URL = new URL(
   import.meta.url
 ).href;
 
-function quotePython(value: string): string {
-  return JSON.stringify(value);
+function quotePython(value: unknown): string {
+  return JSON.stringify(value) ?? "null";
 }
 
 export function buildExecutionScript(request: ExecutionRequest): string {
@@ -65,6 +67,14 @@ exec(compile(${quotePython(runtimePrelude)}, ${quotePython(
 __lc_ast_analyzer_module = types.ModuleType("ast_analyzer")
 exec(compile(${quotePython(astAnalyzerSource)}, "<leetcode-ast-analyzer>", "exec"), vars(__lc_ast_analyzer_module), vars(__lc_ast_analyzer_module))
 sys.modules["ast_analyzer"] = __lc_ast_analyzer_module
+
+__lc_object_identity_module = types.ModuleType("object_identity")
+exec(compile(${quotePython(objectIdentitySource)}, "<leetcode-object-identity>", "exec"), vars(__lc_object_identity_module), vars(__lc_object_identity_module))
+sys.modules["object_identity"] = __lc_object_identity_module
+
+__lc_object_topology_module = types.ModuleType("object_topology")
+exec(compile(${quotePython(objectTopologySource)}, "<leetcode-object-topology>", "exec"), vars(__lc_object_topology_module), vars(__lc_object_topology_module))
+sys.modules["object_topology"] = __lc_object_topology_module
 
 __lc_serializer_module = types.ModuleType("serializer")
 exec(compile(${quotePython(serializerSource)}, "<leetcode-serializer>", "exec"), vars(__lc_serializer_module), vars(__lc_serializer_module))
@@ -84,6 +94,7 @@ __lc_runner_module.run_request(
         "class_name": ${quotePython(request.entrypoint.className)},
         "method_name": ${quotePython(request.entrypoint.methodName)},
         "parameter_count": ${request.entrypoint.parameterCount},
+        "parameter_kinds": ${quotePython(request.entrypoint.parameterKinds)},
     },
     {
         "max_trace_steps": ${request.limits.maxTraceSteps},
@@ -92,6 +103,9 @@ __lc_runner_module.run_request(
         "max_snapshot_bytes": ${request.limits.maxSnapshotBytes},
         "max_session_bytes": ${request.limits.maxSessionBytes},
         "max_stdout_bytes": ${request.limits.maxStdoutBytes},
+        "max_object_nodes": ${request.limits.maxObjectNodes},
+        "max_object_attributes": ${request.limits.maxObjectAttributes},
+        "max_object_depth": ${request.limits.maxObjectDepth},
     },
     runtime_globals=__lc_runtime_namespace,
     session_id=${quotePython(request.sessionId)},
@@ -291,9 +305,21 @@ function isValueSnapshot(value: unknown): value is ValueSnapshot {
       );
     case "cycle":
       return typeof value.referenceId === "string";
+    case "reference":
+      return typeof value.objectId === "string" && typeof value.className === "string";
     default:
       return false;
   }
+}
+
+function isObjectSnapshot(value: unknown): value is ObjectSnapshot {
+  return (
+    isRecord(value) &&
+    typeof value.objectId === "string" &&
+    typeof value.className === "string" &&
+    isRecord(value.attributes) &&
+    Object.values(value.attributes).every((attribute) => isValueSnapshot(attribute))
+  );
 }
 
 function normalizeException(value: unknown): ExceptionInfo | undefined {
@@ -351,6 +377,10 @@ export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
   }
 
   const parentFrameId = value.parent_frame_id ?? value.parentFrameId;
+  const objects = Array.isArray(value.objects)
+    ? value.objects.filter((object): object is ObjectSnapshot => isObjectSnapshot(object))
+    : undefined;
+  const objectsTruncated = value.objects_truncated ?? value.objectsTruncated;
   return {
     step: value.step,
     event: eventName,
@@ -361,6 +391,8 @@ export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
     callDepth: value.call_depth,
     locals: value.locals as Record<string, ValueSnapshot>,
     stdoutDelta: value.stdout_delta,
+    ...(objects ? { objects } : {}),
+    ...(typeof objectsTruncated === "boolean" ? { objectsTruncated } : {}),
     ...(normalizedPayload ? { eventPayload: normalizedPayload } : {})
   };
 }

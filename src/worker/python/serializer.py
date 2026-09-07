@@ -1,5 +1,8 @@
 import json
 import math
+import types
+
+from object_identity import ObjectIdentityRegistry
 
 
 def _limit(limits, snake_name, camel_name, default):
@@ -13,7 +16,7 @@ def _limit(limits, snake_name, camel_name, default):
 class ValueSerializer:
     """Convert Python runtime values into bounded, JSON-safe snapshots."""
 
-    def __init__(self, limits):
+    def __init__(self, limits, identity_registry=None):
         self.max_container_items = max(
             0, int(_limit(limits, "max_container_items", "maxContainerItems", 1000))
         )
@@ -26,6 +29,25 @@ class ValueSerializer:
         self.active_objects = set()
         self.references = {}
         self.next_reference_id = 1
+        self.identity_registry = identity_registry or ObjectIdentityRegistry()
+
+    def _safe_instance_state(self, value):
+        if isinstance(
+            value,
+            (
+                type,
+                types.ModuleType,
+                types.FunctionType,
+                types.BuiltinFunctionType,
+                types.MethodType,
+            ),
+        ):
+            return None
+        try:
+            attributes = vars(value)
+        except Exception:
+            return None
+        return attributes if isinstance(attributes, dict) else None
 
     def _cycle(self, value):
         object_id = id(value)
@@ -175,6 +197,13 @@ class ValueSerializer:
                 "value": value,
                 "length": len(value),
                 "truncated": False,
+            }
+
+        if self._safe_instance_state(value) is not None:
+            return {
+                "type": "reference",
+                "objectId": self.identity_registry.object_id(value),
+                "className": self._safe_class_name(value),
             }
 
         if depth >= self.max_nesting_depth:

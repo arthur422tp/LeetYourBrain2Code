@@ -1,7 +1,7 @@
-import type { FrameDiff, VariableDiff } from "../../core/state-diff";
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
+import { createMutationList } from "./MutationList";
 import { formatValue } from "./value-format";
 import {
   createVisualizer,
@@ -154,115 +154,6 @@ function createVisualStateRenderer(): {
   };
 }
 
-function renderVariableDiff(diff: VariableDiff): HTMLDivElement {
-  const row = createElement("div", `trace-viewer__change-row is-${diff.kind}`);
-  row.dataset.variableName = diff.name;
-
-  const name = createElement("span", "trace-viewer__change-name", diff.name);
-  const value = createElement("code", "trace-viewer__change-value");
-  const before = formatValue(diff.before);
-  const after = formatValue(diff.after);
-
-  if (diff.kind === "changed") {
-    value.append(
-      createElement("span", "trace-viewer__change-before", before),
-      createElement("span", "trace-viewer__change-arrow", "→"),
-      createElement("span", "trace-viewer__change-after", after)
-    );
-  } else if (diff.kind === "added") {
-    value.append(
-      createElement("span", "trace-viewer__change-arrow", "+"),
-      createElement("span", "trace-viewer__change-after", after)
-    );
-  } else if (diff.kind === "removed") {
-    value.append(
-      createElement("span", "trace-viewer__change-before", before),
-      createElement("span", "trace-viewer__change-arrow", "−")
-    );
-  } else {
-    value.textContent = after;
-  }
-
-  row.append(name, value);
-  return row;
-}
-
-function renderContainerChanges(diff: FrameDiff): HTMLDivElement {
-  const container = createElement("div", "trace-viewer__container-changes");
-
-  const appendChange = (locationText: string, valueText: string): void => {
-    const row = createElement("div", "trace-viewer__container-change");
-    row.append(
-      createElement("span", "trace-viewer__change-name", locationText),
-      createElement("code", "trace-viewer__change-value", valueText)
-    );
-    container.append(row);
-  };
-
-  for (const change of diff.containerChanges) {
-    if (change.kind === "list" || change.kind === "tuple") {
-      for (const item of change.changes) {
-        appendChange(
-          `${change.container}[${item.index}]`,
-          `${formatValue(item.before)} → ${formatValue(item.after)}`
-        );
-      }
-    } else if (change.kind === "dict") {
-      for (const item of change.changes) {
-        const value = item.kind === "changed"
-          ? `${formatValue(item.before)} → ${formatValue(item.after)}`
-          : item.kind === "added"
-            ? `+ ${formatValue(item.after)}`
-            : `− ${formatValue(item.before)}`;
-        appendChange(`${change.container}[${formatValue(item.key)}]`, value);
-      }
-    } else if (change.kind === "set") {
-      for (const item of change.changes) {
-        appendChange(
-          `${change.container} · ${formatValue(item.member)}`,
-          item.kind === "added" ? "added" : "removed"
-        );
-      }
-    }
-  }
-  return container;
-}
-
-function renderChanges(state: VisualState | undefined): HTMLDivElement {
-  const body = createElement("div", "trace-viewer__changes");
-  const diff = state?.stateChanges;
-  if (!diff) {
-    body.append(renderEmptyState("No state change recorded at this step."));
-    return body;
-  }
-
-  const changed = diff.variables.filter((variable) => variable.kind !== "unchanged");
-  const unchanged = diff.variables.filter((variable) => variable.kind === "unchanged");
-
-  const createGroup = (title: string, className: string, variables: VariableDiff[]): HTMLDivElement => {
-    const group = createElement("div", `trace-viewer__change-group ${className}`);
-    group.append(createElement("div", "trace-viewer__change-group-title", title));
-    if (variables.length === 0) {
-      group.append(createElement("div", "trace-viewer__change-group-empty", "None"));
-    } else {
-      group.append(...variables.map(renderVariableDiff));
-    }
-    return group;
-  };
-
-  body.append(
-    createGroup("Changed", "is-changed", changed),
-    createGroup("Unchanged", "is-unchanged", unchanged)
-  );
-  if (diff.containerChanges.length > 0) {
-    body.append(
-      createElement("div", "trace-viewer__change-group-title trace-viewer__container-title", "Container details"),
-      renderContainerChanges(diff)
-    );
-  }
-  return body;
-}
-
 function renderLocals(state: VisualState | undefined): HTMLDivElement {
   const body = createElement("div", "trace-viewer__locals");
   const entries = state ? Object.entries(state.locals) : [];
@@ -360,7 +251,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const visualPanel = createPanel("Visual State", "trace-viewer__visual-panel");
   const visualStateRenderer = createVisualStateRenderer();
   visualPanel.body.append(visualStateRenderer.body);
-  const changesPanel = createPanel("State Changes", "trace-viewer__changes-panel");
+  const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel");
   const localsPanel = createPanel("Locals", "trace-viewer__locals-panel");
   let callStackPanel = renderCallStack(undefined, "trace-viewer__call-stack-panel", false);
   const outputPanel = createPanel("Output", "trace-viewer__output-panel", false);
@@ -407,7 +298,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
       visualStateRenderer.setState(undefined);
-      changesPanel.body.replaceChildren(renderChanges(undefined));
+      changesPanel.body.replaceChildren(createMutationList([]));
       localsPanel.body.replaceChildren(renderLocals(undefined));
       const emptyCallStack = renderCallStack(undefined, "trace-viewer__call-stack-panel", callStackPanel.open);
       callStackPanel.replaceWith(emptyCallStack);
@@ -442,7 +333,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       : `Line ${state.currentLine}`;
 
     visualStateRenderer.setState(state);
-    changesPanel.body.replaceChildren(renderChanges(state));
+    changesPanel.body.replaceChildren(createMutationList(state?.mutations ?? []));
     localsPanel.body.replaceChildren(renderLocals(state));
 
     const updatedCallStack = renderCallStack(

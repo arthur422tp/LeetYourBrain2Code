@@ -212,6 +212,54 @@ function cyclicLinkedListSession(): TraceSession {
 }
 
 describe("createTraceVisualizer", () => {
+  it("renders What Changed from mutations without unchanged-variable groups", () => {
+    const view = createTraceVisualizer(session());
+    const panelTitles = [...view.element.querySelectorAll(".trace-viewer__panel-title")]
+      .map((element) => element.textContent);
+    const changes = view.element.querySelector(".trace-viewer__mutations");
+
+    expect(panelTitles).toContain("What Changed");
+    expect(panelTitles).not.toContain("State Changes");
+    expect(view.element.querySelector(".trace-viewer__change-group")).toBeNull();
+    expect(changes?.textContent).toContain("Initial observations");
+    expect(changes?.textContent).toContain("initial observation");
+    expect(view.element.querySelector(".trace-viewer__locals-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__call-stack-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__output-panel")).not.toBeNull();
+  });
+
+  it("replaces mutation content when navigating to the current step", () => {
+    const view = createTraceVisualizer(session());
+    const next = view.element.querySelector<HTMLButtonElement>("#trace-next");
+
+    expect(view.element.querySelector(".trace-viewer__mutation-row")?.textContent)
+      .toContain("left");
+    next?.click();
+
+    const changes = view.element.querySelector(".trace-viewer__mutations");
+    expect(changes?.textContent).toContain("left");
+    expect(changes?.textContent).toContain("0 → 1");
+    expect(view.element.querySelector(".trace-viewer__mutation-row"))
+      .not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__change-group")).toBeNull();
+  });
+
+  it("renders a neutral empty mutation state while preserving the other panels", () => {
+    const view = createTraceVisualizer({
+      ...session(),
+      events: [],
+      status: "parse_error",
+      terminationReason: "syntax_error"
+    });
+
+    expect(view.element.querySelector(".trace-viewer__mutations")?.textContent)
+      .toBe("No observed state change at this step.");
+    expect(view.element.querySelector(".trace-viewer__change-group")).toBeNull();
+    expect(view.element.querySelector(".trace-viewer__locals-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__call-stack-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__output-panel")).not.toBeNull();
+  });
+
   it("renders readable trace state and keeps raw JSON in a collapsed debug section", () => {
     const view = createTraceVisualizer(session());
 
@@ -243,10 +291,9 @@ describe("createTraceVisualizer", () => {
       .toBe("Step 2 / 2");
     expect(view.element.querySelector(".trace-viewer__code-line.is-active")?.textContent)
       .toContain("left += 1");
-    expect(view.element.querySelector('[data-variable-name="left"] .trace-viewer__change-before')?.textContent)
-      .toBe("0");
-    expect(view.element.querySelector('[data-variable-name="left"] .trace-viewer__change-after')?.textContent)
-      .toBe("1");
+    const leftMutation = view.element.querySelector('[data-mutation-kind="variable"]');
+    expect(leftMutation?.textContent).toContain("left");
+    expect(leftMutation?.textContent).toContain("0 → 1");
     expect(next?.disabled).toBe(true);
 
     previous?.click();
@@ -284,8 +331,8 @@ describe("createTraceVisualizer", () => {
 
     expect(view.element.querySelector(".trace-viewer__visual-state-body")?.textContent ?? "")
       .toContain("No execution steps");
-    expect(view.element.querySelector(".trace-viewer__changes")?.textContent ?? "")
-      .toContain("No state change");
+    expect(view.element.querySelector(".trace-viewer__mutations")?.textContent ?? "")
+      .toContain("No observed state change");
     expect(view.element.querySelector(".trace-viewer__locals")?.textContent ?? "")
       .toContain("No local variables");
     expect(view.element.querySelector(".trace-viewer__exception")?.textContent ?? "")
@@ -374,7 +421,7 @@ describe("createTraceVisualizer", () => {
 
     expect(view.element.querySelector('[data-cycle-indicator="true"]')?.textContent)
       .toContain("back-edge");
-    expect(view.element.querySelector('[data-next-status="changed"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-next-status="added"]')).not.toBeNull();
     expect(view.element.querySelector(".trace-viewer__exception")?.textContent)
       .toContain("cycle detected while traversing");
     expect(view.element.querySelector('[data-visual-id="linked_list:obj-1"]')).not.toBeNull();

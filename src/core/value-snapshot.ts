@@ -66,6 +66,26 @@ export function cloneLocals(
   );
 }
 
+export function isValueSnapshotComplete(snapshot: ValueSnapshot): boolean {
+  switch (snapshot.type) {
+    case "str":
+      return !snapshot.truncated;
+    case "list":
+    case "tuple":
+    case "set":
+      return !snapshot.truncated && snapshot.items.every(isValueSnapshotComplete);
+    case "dict":
+      return !snapshot.truncated && snapshot.entries.every((entry) =>
+        isValueSnapshotComplete(entry.key) &&
+        isValueSnapshotComplete(entry.value)
+      );
+    case "unknown":
+      return snapshot.truncated !== true;
+    default:
+      return true;
+  }
+}
+
 export function valueSnapshotKey(snapshot: ValueSnapshot): string {
   switch (snapshot.type) {
     case "list":

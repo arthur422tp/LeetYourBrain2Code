@@ -26,6 +26,9 @@ class ObjectTopologyCollector:
         self.max_object_depth = max(
             0, int(_limit(limits, "max_object_depth", "maxObjectDepth", 32))
         )
+        self.max_container_items = max(
+            0, int(_limit(limits, "max_container_items", "maxContainerItems", 1000))
+        )
 
     def _safe_attributes(self, value):
         try:
@@ -41,28 +44,66 @@ class ObjectTopologyCollector:
             return False
         return self._safe_attributes(value) is not None
 
+    def _is_traversal_container(self, value):
+        return type(value) in (list, tuple, dict, set, frozenset)
+
+    def _container_children(self, value):
+        if type(value) in (list, tuple):
+            items = list(value[: self.max_container_items])
+            return items, len(value) > len(items)
+
+        if type(value) is dict:
+            entries = list(value.items())[: self.max_container_items]
+            children = []
+            for key, item in entries:
+                children.extend((key, item))
+            return children, len(value) > len(entries)
+
+        if type(value) in (set, frozenset):
+            items = []
+            for item in value:
+                if len(items) >= self.max_container_items:
+                    break
+                items.append(item)
+            return items, len(value) > len(items)
+
+        return [], False
+
     def capture(self, roots):
         from serializer import ValueSerializer
 
         serializer = ValueSerializer(self.limits, identity_registry=self.identity_registry)
         queue = deque((root, 0) for root in roots)
-        visited = set()
+        visited_objects = set()
+        visited_containers = set()
         objects = []
         truncated = False
 
         while queue:
             value, depth = queue.popleft()
-            if not self._is_object_node(value):
-                continue
-
             if depth > self.max_object_depth:
                 truncated = True
                 continue
 
-            identity = id(value)
-            if identity in visited:
+            if self._is_traversal_container(value):
+                identity = id(value)
+                if identity in visited_containers:
+                    continue
+                visited_containers.add(identity)
+
+                children, container_truncated = self._container_children(value)
+                truncated = truncated or container_truncated
+                for child in children:
+                    queue.append((child, depth + 1))
                 continue
-            visited.add(identity)
+
+            if not self._is_object_node(value):
+                continue
+
+            identity = id(value)
+            if identity in visited_objects:
+                continue
+            visited_objects.add(identity)
 
             if len(objects) >= self.max_object_nodes:
                 truncated = True
@@ -84,7 +125,7 @@ class ObjectTopologyCollector:
                 except Exception:
                     truncated = True
                     continue
-                if self._is_object_node(attribute_value):
+                if self._is_object_node(attribute_value) or self._is_traversal_container(attribute_value):
                     queue.append((attribute_value, depth + 1))
 
             objects.append(

@@ -59,6 +59,9 @@ describe("Pyodide runtime", () => {
     expect(script).toContain("ObjectIdentityRegistry");
     expect(script).toContain("ObjectTopologyCollector");
     expect(script).toContain("topology_collector");
+    expect(script).toContain("max_container_items");
+    expect(script).toContain("_is_traversal_container");
+    expect(script).toContain("_container_children");
     expect(script).toContain(JSON.stringify(request.sourceCode));
     expect(script).not.toContain(`${JSON.stringify(request.sourceCode)} +`);
   });

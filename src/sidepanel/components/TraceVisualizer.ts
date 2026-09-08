@@ -6,6 +6,10 @@ import {
   resolveBehavioralEvidenceMap
 } from "../behavioral-navigation";
 import { createBehavioralSignals } from "./BehavioralSignals";
+import {
+  createBehavioralTimeline,
+  type BehavioralTimelineHandle
+} from "./BehavioralTimeline";
 import { createMutationList } from "./MutationList";
 import { formatValue } from "./value-format";
 import {
@@ -298,6 +302,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   let currentIndex = 0;
   let timer: number | null = null;
   let navigateDirect: (index: number) => void;
+  let timelineHandle: BehavioralTimelineHandle | null = null;
 
   const stopPlaying = (): void => {
     if (timer !== null) {
@@ -382,6 +387,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     previous.disabled = currentIndex === 0;
     next.disabled = currentIndex === interpretation.visualStates.length - 1;
     play.disabled = interpretation.visualStates.length < 2;
+    timelineHandle?.setCurrentIndex(currentIndex);
     if (currentIndex === interpretation.visualStates.length - 1) {
       stopPlaying();
     }
@@ -391,6 +397,14 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     stopPlaying();
     setStep(index);
   };
+
+  timelineHandle = createBehavioralTimeline({
+    analysis: interpretation.behavioralAnalysis,
+    traceIndex,
+    evidenceByPatternId,
+    currentIndex,
+    onNavigate: navigateDirect
+  });
 
   previous.addEventListener("click", () => setStep(currentIndex - 1));
   next.addEventListener("click", () => setStep(currentIndex + 1));
@@ -418,6 +432,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     callStackPanel,
     outputPanel.panel,
     debugPanel.panel,
+    timelineHandle.element,
     controls
   );
   setStep(0);

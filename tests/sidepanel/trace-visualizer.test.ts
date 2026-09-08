@@ -313,6 +313,47 @@ describe("createTraceVisualizer", () => {
     }
   });
 
+  it("scrubs the raw timeline through setStep", () => {
+    const view = createTraceVisualizer(alternatingRepeatedStateSession());
+    const range = view.element.querySelector<HTMLInputElement>('[data-role="trace-range"]')!;
+    range.value = "4";
+
+    range.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 5 / 5");
+  });
+
+  it("navigates a behavioral timeline band to its first evidence", () => {
+    const view = createTraceVisualizer(alternatingRepeatedStateSession());
+    view.setStep(4);
+    const band = view.element.querySelector<HTMLButtonElement>(
+      '.trace-viewer__timeline-band[data-pattern-kind="repeated_state"]'
+    )!;
+
+    band.click();
+
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 1 / 5");
+  });
+
+  it("keeps timeline position synchronized with raw Previous and Next navigation", () => {
+    const view = createTraceVisualizer(alternatingRepeatedStateSession());
+    const range = view.element.querySelector<HTMLInputElement>('[data-role="trace-range"]')!;
+
+    view.element.querySelector<HTMLButtonElement>("#trace-next")!.click();
+
+    expect(range.value).toBe("1");
+    expect(view.element.querySelector(".trace-viewer__timeline-current")?.textContent)
+      .toBe("Step 2 / 5");
+  });
+
+  it("keeps a raw scrubber when no behavioral pattern exists", () => {
+    const view = createTraceVisualizer(session());
+
+    expect(view.element.querySelector('[data-role="trace-range"]')).not.toBeNull();
+  });
+
   it("shows repeated transitions for a finite changing loop without no-progress wording", () => {
     const base = session();
     const finiteEvents = [0, 1, 2, 3].map((value, index) => ({

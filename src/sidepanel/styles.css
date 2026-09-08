@@ -1014,6 +1014,94 @@ button.is-primary:hover:not(:disabled) {
   font-size: 9px;
 }
 
+.trace-viewer__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 10px 12px 12px;
+}
+
+.trace-viewer__timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-size: 11px;
+}
+
+.trace-viewer__timeline-current {
+  color: #64748b;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+}
+
+.trace-viewer__timeline-range {
+  width: 100%;
+}
+
+.trace-viewer__timeline-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trace-viewer__timeline-lane {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.trace-viewer__timeline-lane-label {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.trace-viewer__timeline-track {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+}
+
+.trace-viewer__timeline-band {
+  position: absolute;
+  top: 3px;
+  height: 10px;
+  min-width: 6px;
+  border: 1px solid #94a3b8;
+  border-radius: 999px;
+  background: #e2e8f0;
+  padding: 0;
+}
+
+.trace-viewer__timeline-band[data-pattern-kind="repeated_state"] {
+  border-color: #7aa7ef;
+  background: #dbeafe;
+}
+
+.trace-viewer__timeline-band[data-pattern-kind="no_progress"] {
+  border-color: #f59e0b;
+  background: #fef3c7;
+}
+
+.trace-viewer__timeline-band[data-pattern-kind="repeated_transition"] {
+  border-color: #8b5cf6;
+  background: #ede9fe;
+}
+
+.trace-viewer__timeline-band.is-active {
+  box-shadow: 0 0 0 2px rgba(29, 103, 237, 0.22);
+}
+
 .trace-viewer__change-group {
   min-width: 0;
   overflow: hidden;
@@ -1302,6 +1390,11 @@ button.is-primary:hover:not(:disabled) {
 
   .trace-viewer__behavioral-nav-actions {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .trace-viewer__timeline-lane {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 
   .trace-viewer__inspector-grid {

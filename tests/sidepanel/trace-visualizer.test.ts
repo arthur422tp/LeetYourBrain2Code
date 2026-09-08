@@ -219,6 +219,7 @@ describe("createTraceVisualizer", () => {
     const changes = view.element.querySelector(".trace-viewer__mutations");
 
     expect(panelTitles).toContain("What Changed");
+    expect(panelTitles).toContain("Behavioral Signals");
     expect(panelTitles).not.toContain("State Changes");
     expect(view.element.querySelector(".trace-viewer__change-group")).toBeNull();
     expect(changes?.textContent).toContain("Initial observations");
@@ -226,6 +227,37 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector(".trace-viewer__locals-panel")).not.toBeNull();
     expect(view.element.querySelector(".trace-viewer__call-stack-panel")).not.toBeNull();
     expect(view.element.querySelector(".trace-viewer__output-panel")).not.toBeNull();
+  });
+
+  it("renders repeated behavioral evidence without changing raw step navigation", () => {
+    const base = session();
+    const repeatedEvents = [1, 2, 3].map((step) => ({
+      ...base.events[0]!,
+      step,
+      locals: {
+        nums: list([2, 7]),
+        left: int(0),
+        right: int(1),
+        target: int(9),
+        total: int(9)
+      }
+    }));
+    const view = createTraceVisualizer({
+      ...base,
+      events: repeatedEvents
+    });
+
+    expect(view.element.querySelector(".trace-viewer__behavioral-signals")?.textContent)
+      .toContain("No observable progress");
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 1 / 3");
+
+    view.element.querySelector<HTMLButtonElement>("#trace-next")?.click();
+
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 2 / 3");
+    expect(view.element.querySelector(".trace-viewer__behavioral-signals")?.textContent)
+      .toContain("No observable progress");
   });
 
   it("replaces mutation content when navigating to the current step", () => {
@@ -254,6 +286,8 @@ describe("createTraceVisualizer", () => {
 
     expect(view.element.querySelector(".trace-viewer__mutations")?.textContent)
       .toBe("No observed state change at this step.");
+    expect(view.element.querySelector(".trace-viewer__behavioral-signals")?.textContent)
+      .toBe("No repeated behavioral signal in the captured trace.");
     expect(view.element.querySelector(".trace-viewer__change-group")).toBeNull();
     expect(view.element.querySelector(".trace-viewer__locals-panel")).not.toBeNull();
     expect(view.element.querySelector(".trace-viewer__call-stack-panel")).not.toBeNull();

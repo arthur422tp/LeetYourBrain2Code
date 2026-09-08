@@ -1,6 +1,7 @@
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
+import { createBehavioralSignals } from "./BehavioralSignals";
 import { createMutationList } from "./MutationList";
 import { formatValue } from "./value-format";
 import {
@@ -252,6 +253,11 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const visualStateRenderer = createVisualStateRenderer();
   visualPanel.body.append(visualStateRenderer.body);
   const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel");
+  const behavioralPanel = createPanel(
+    "Behavioral Signals",
+    "trace-viewer__behavioral-panel",
+    true
+  );
   const localsPanel = createPanel("Locals", "trace-viewer__locals-panel");
   let callStackPanel = renderCallStack(undefined, "trace-viewer__call-stack-panel", false);
   const outputPanel = createPanel("Output", "trace-viewer__output-panel", false);
@@ -278,7 +284,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   controls.append(previous, stepInfo, next, play);
 
   const inspectorGrid = createElement("div", "trace-viewer__inspector-grid");
-  inspectorGrid.append(changesPanel.panel, localsPanel.panel);
+  inspectorGrid.append(changesPanel.panel, behavioralPanel.panel, localsPanel.panel);
 
   let currentIndex = 0;
   let timer: number | null = null;
@@ -299,6 +305,10 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       stepMeta.textContent = "";
       visualStateRenderer.setState(undefined);
       changesPanel.body.replaceChildren(createMutationList([]));
+      behavioralPanel.body.replaceChildren(createBehavioralSignals(
+        interpretation.behavioralAnalysis,
+        currentIndex + 1
+      ));
       localsPanel.body.replaceChildren(renderLocals(undefined));
       const emptyCallStack = renderCallStack(undefined, "trace-viewer__call-stack-panel", callStackPanel.open);
       callStackPanel.replaceWith(emptyCallStack);
@@ -334,6 +344,10 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
 
     visualStateRenderer.setState(state);
     changesPanel.body.replaceChildren(createMutationList(state?.mutations ?? []));
+    behavioralPanel.body.replaceChildren(createBehavioralSignals(
+      interpretation.behavioralAnalysis,
+      state?.step ?? currentIndex + 1
+    ));
     localsPanel.body.replaceChildren(renderLocals(state));
 
     const updatedCallStack = renderCallStack(

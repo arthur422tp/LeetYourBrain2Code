@@ -965,6 +965,37 @@ button.is-primary:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+.trace-viewer__behavioral-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.trace-viewer__behavioral-signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.trace-viewer__behavioral-signal.is-active {
+  border-color: #bfd5fb;
+  background: #f5f9ff;
+}
+
+.trace-viewer__behavioral-signal-title {
+  color: #334155;
+  font-size: 11px;
+}
+
+.trace-viewer__behavioral-signal-detail {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .trace-viewer__change-group {
   min-width: 0;
   overflow: hidden;

@@ -1,6 +1,10 @@
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
+import {
+  buildTraceStepIndex,
+  resolveBehavioralEvidenceMap
+} from "../behavioral-navigation";
 import { createBehavioralSignals } from "./BehavioralSignals";
 import { createMutationList } from "./MutationList";
 import { formatValue } from "./value-format";
@@ -232,6 +236,11 @@ function renderOutput(state: VisualState | undefined, session: TraceSession): HT
 
 export function createTraceVisualizer(session: TraceSession): TraceVisualizerHandle {
   const interpretation = interpretTrace(session.events, session.subscriptRelations ?? []);
+  const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
+  const evidenceByPatternId = resolveBehavioralEvidenceMap(
+    interpretation.behavioralAnalysis.patterns,
+    traceIndex
+  );
   const root = createElement("section", "trace-viewer");
   root.id = "trace-viewer";
 
@@ -288,6 +297,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
 
   let currentIndex = 0;
   let timer: number | null = null;
+  let navigateDirect: (index: number) => void;
 
   const stopPlaying = (): void => {
     if (timer !== null) {
@@ -306,8 +316,12 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       visualStateRenderer.setState(undefined);
       changesPanel.body.replaceChildren(createMutationList([]));
       behavioralPanel.body.replaceChildren(createBehavioralSignals(
-        interpretation.behavioralAnalysis,
-        currentIndex + 1
+        {
+          analysis: interpretation.behavioralAnalysis,
+          currentIndex,
+          evidenceByPatternId,
+          onNavigate: navigateDirect
+        }
       ));
       localsPanel.body.replaceChildren(renderLocals(undefined));
       const emptyCallStack = renderCallStack(undefined, "trace-viewer__call-stack-panel", callStackPanel.open);
@@ -345,8 +359,12 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     visualStateRenderer.setState(state);
     changesPanel.body.replaceChildren(createMutationList(state?.mutations ?? []));
     behavioralPanel.body.replaceChildren(createBehavioralSignals(
-      interpretation.behavioralAnalysis,
-      state?.step ?? currentIndex + 1
+      {
+        analysis: interpretation.behavioralAnalysis,
+        currentIndex,
+        evidenceByPatternId,
+        onNavigate: navigateDirect
+      }
     ));
     localsPanel.body.replaceChildren(renderLocals(state));
 
@@ -367,6 +385,11 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     if (currentIndex === interpretation.visualStates.length - 1) {
       stopPlaying();
     }
+  };
+
+  navigateDirect = (index: number): void => {
+    stopPlaying();
+    setStep(index);
   };
 
   previous.addEventListener("click", () => setStep(currentIndex - 1));

@@ -3,6 +3,18 @@ import type {
   BehavioralPattern,
   ExecutionLocation
 } from "../../core/behavioral-pattern";
+import {
+  nextEvidenceIndex,
+  previousEvidenceIndex,
+  type ResolvedBehavioralEvidence
+} from "../behavioral-navigation";
+
+export interface BehavioralSignalsOptions {
+  analysis: BehavioralAnalysis;
+  currentIndex: number;
+  evidenceByPatternId: ReadonlyMap<string, ResolvedBehavioralEvidence>;
+  onNavigate(index: number): void;
+}
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
   tagName: K,
@@ -45,26 +57,75 @@ function detail(pattern: BehavioralPattern): string {
   }
 }
 
-function renderPattern(pattern: BehavioralPattern, currentStep: number): HTMLDivElement {
+function navigationButton(
+  label: string,
+  action: "first" | "previous" | "next" | "last",
+  targetIndex: number | null,
+  onNavigate: (index: number) => void,
+  disabledWhenCurrent: boolean
+): HTMLButtonElement {
+  const button = createElement("button", "trace-viewer__behavioral-nav-button", label);
+  button.type = "button";
+  button.dataset.behaviorAction = action;
+  button.disabled = targetIndex === null || disabledWhenCurrent;
+  button.addEventListener("click", () => {
+    if (targetIndex !== null) {
+      onNavigate(targetIndex);
+    }
+  });
+  return button;
+}
+
+function renderPattern(
+  pattern: BehavioralPattern,
+  currentIndex: number,
+  evidence: ResolvedBehavioralEvidence | undefined,
+  onNavigate: (index: number) => void
+): HTMLDivElement {
   const row = createElement("div", "trace-viewer__behavioral-signal");
   row.dataset.patternId = pattern.patternId;
   row.dataset.patternKind = pattern.kind;
-  if (pattern.evidenceSteps.includes(currentStep)) {
+
+  const valid: ResolvedBehavioralEvidence = evidence ?? {
+    patternId: pattern.patternId,
+    evidenceSteps: [],
+    evidenceIndexes: [],
+    firstIndex: null,
+    lastIndex: null
+  };
+  const previous = previousEvidenceIndex(valid, currentIndex);
+  const next = nextEvidenceIndex(valid, currentIndex);
+
+  if (valid.evidenceIndexes.includes(currentIndex)) {
     row.classList.add("is-active");
   }
+
+  const meta = valid.evidenceIndexes.length > 0
+    ? `Evidence: steps ${valid.evidenceSteps[0]}–${valid.evidenceSteps.at(-1)} · ${valid.evidenceIndexes.length} observations`
+    : "Navigation unavailable for this signal.";
+
+  const actions = createElement("div", "trace-viewer__behavioral-nav-actions");
+  actions.append(
+    navigationButton("First", "first", valid.firstIndex, onNavigate, currentIndex === valid.firstIndex),
+    navigationButton("Previous", "previous", previous, onNavigate, false),
+    navigationButton("Next", "next", next, onNavigate, false),
+    navigationButton("Last", "last", valid.lastIndex, onNavigate, currentIndex === valid.lastIndex)
+  );
+
   row.append(
     createElement("strong", "trace-viewer__behavioral-signal-title", title(pattern)),
-    createElement("span", "trace-viewer__behavioral-signal-detail", detail(pattern))
+    createElement("span", "trace-viewer__behavioral-signal-detail", detail(pattern)),
+    createElement("span", "trace-viewer__behavioral-nav-meta", meta),
+    actions
   );
   return row;
 }
 
 export function createBehavioralSignals(
-  analysis: BehavioralAnalysis,
-  currentStep: number
+  options: BehavioralSignalsOptions
 ): HTMLDivElement {
   const body = createElement("div", "trace-viewer__behavioral-signals");
-  if (analysis.patterns.length === 0) {
+  if (options.analysis.patterns.length === 0) {
     body.append(createElement(
       "div",
       "trace-viewer__empty",
@@ -73,6 +134,11 @@ export function createBehavioralSignals(
     return body;
   }
 
-  body.append(...analysis.patterns.map((pattern) => renderPattern(pattern, currentStep)));
+  body.append(...options.analysis.patterns.map((pattern) => renderPattern(
+    pattern,
+    options.currentIndex,
+    options.evidenceByPatternId.get(pattern.patternId),
+    options.onNavigate
+  )));
   return body;
 }

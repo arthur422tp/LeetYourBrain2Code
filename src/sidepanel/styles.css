@@ -996,6 +996,24 @@ button.is-primary:hover:not(:disabled) {
   line-height: 1.4;
 }
 
+.trace-viewer__behavioral-nav-meta {
+  color: #94a3b8;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+}
+
+.trace-viewer__behavioral-nav-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.trace-viewer__behavioral-nav-button {
+  padding: 5px 6px;
+  font-size: 9px;
+}
+
 .trace-viewer__change-group {
   min-width: 0;
   overflow: hidden;
@@ -1279,6 +1297,10 @@ button.is-primary:hover:not(:disabled) {
   }
 
   .trace-viewer__controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .trace-viewer__behavioral-nav-actions {
     grid-template-columns: 1fr 1fr;
   }
 

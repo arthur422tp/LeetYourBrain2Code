@@ -82,6 +82,23 @@ function session(): TraceSession {
   };
 }
 
+function alternatingRepeatedStateSession(): TraceSession {
+  const base = session();
+  const events = [0, 1, 0, 1, 0].map((left, index) => ({
+    ...base.events[0]!,
+    step: index + 1,
+    line: index % 2 === 0 ? 5 : 6,
+    locals: {
+      nums: list([2, 7]),
+      left: int(left),
+      right: int(1),
+      target: int(9),
+      total: int(9)
+    }
+  }));
+  return { ...base, events };
+}
+
 function twoSumSession(): TraceSession {
   return {
     ...session(),
@@ -258,6 +275,42 @@ describe("createTraceVisualizer", () => {
       .toBe("Step 2 / 3");
     expect(view.element.querySelector(".trace-viewer__behavioral-signals")?.textContent)
       .toContain("No observable progress");
+  });
+
+  it("routes Next evidence through the same raw step state owner", () => {
+    const view = createTraceVisualizer(alternatingRepeatedStateSession());
+    const row = view.element.querySelector('[data-pattern-kind="repeated_state"]')!;
+
+    row.querySelector<HTMLButtonElement>('[data-behavior-action="next"]')!.click();
+
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 3 / 5");
+    expect(view.element.querySelector(".trace-viewer__code-line.is-active")?.textContent)
+      .toContain("total = nums[left] + nums[right]");
+    expect(view.element.querySelector(".trace-viewer__locals")?.textContent)
+      .toContain("left");
+  });
+
+  it("stops autoplay when the user directly navigates behavioral evidence", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createTraceVisualizer(alternatingRepeatedStateSession());
+      const play = view.element.querySelector<HTMLButtonElement>("#trace-play")!;
+
+      view.setStep(1);
+      play.click();
+      expect(view.element.dataset.playing).toBe("true");
+
+      const row = view.element.querySelector('[data-pattern-kind="repeated_state"]')!;
+      row.querySelector<HTMLButtonElement>('[data-behavior-action="previous"]')!.click();
+
+      expect(view.element.dataset.playing).toBe("false");
+      expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+        .toBe("Step 1 / 5");
+      view.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows repeated transitions for a finite changing loop without no-progress wording", () => {

@@ -4,7 +4,7 @@
 
 **Goal:** Turn existing `BehavioralPattern` evidence into direct Side Panel navigation and a compact behavioral timeline without changing analyzer semantics or raw trace ownership.
 
-**Architecture:** Keep `behavioral-analyzer.ts` and `BehavioralPattern` unchanged. Add a pure Side Panel step/index resolution unit, make `BehavioralSignals` callback-driven, add a dedicated `BehavioralTimeline` component, and wire every new navigation path back through the existing `TraceVisualizer.setStep(index)` state owner. Resolve behavioral evidence once per trace instance and never infer UI indexes with `event.step - 1`.
+**Architecture:** Keep `behavioral-analyzer.ts` and `BehavioralPattern` unchanged. Add a pure Side Panel step/index resolution unit, make `BehavioralSignals` callback-driven, add a dedicated `BehavioralTimeline` component, and route every new navigation path through the existing `TraceVisualizer.setStep(index)` state owner. Resolve behavioral evidence once per trace instance and never infer UI indexes with `event.step - 1`.
 
 **Tech Stack:** TypeScript 5.8, Vitest 3, jsdom 26, Vite 6, Chrome Manifest V3 Side Panel, existing `trace-viewer__*` CSS system.
 
@@ -152,8 +152,10 @@ describe("behavioral navigation", () => {
   });
 
   it("drops missing evidence, deduplicates resolved indexes, and sorts in trace order", () => {
-    const index = buildTraceStepIndex([10, 30, 50, 70]);
-    const resolved = resolveBehavioralEvidence(pattern, index);
+    const resolved = resolveBehavioralEvidence(
+      pattern,
+      buildTraceStepIndex([10, 30, 50, 70])
+    );
 
     expect(resolved).toEqual({
       patternId: pattern.patternId,
@@ -164,26 +166,18 @@ describe("behavioral navigation", () => {
     });
   });
 
-  it("returns null previous and next indexes instead of wrapping", () => {
+  it("returns nearest strict previous and next evidence without wrapping", () => {
     const evidence = resolveBehavioralEvidence(
       pattern,
       buildTraceStepIndex([10, 30, 50, 70])
     );
 
     expect(previousEvidenceIndex(evidence, 0)).toBeNull();
+    expect(previousEvidenceIndex(evidence, 2)).toBe(1);
     expect(previousEvidenceIndex(evidence, 3)).toBe(1);
     expect(nextEvidenceIndex(evidence, 0)).toBe(1);
-    expect(nextEvidenceIndex(evidence, 3)).toBeNull();
-  });
-
-  it("chooses the nearest strict previous and next evidence indexes", () => {
-    const evidence = resolveBehavioralEvidence(
-      pattern,
-      buildTraceStepIndex([10, 30, 50, 70])
-    );
-
-    expect(previousEvidenceIndex(evidence, 2)).toBe(1);
     expect(nextEvidenceIndex(evidence, 2)).toBe(3);
+    expect(nextEvidenceIndex(evidence, 3)).toBeNull();
   });
 
   it("returns a disabled shape when every evidence step is unresolved", () => {
@@ -215,8 +209,6 @@ describe("behavioral navigation", () => {
 ```
 
 - [ ] **Step 2: Run the new test to verify it fails**
-
-Run:
 
 ```bash
 npx vitest run tests/sidepanel/behavioral-navigation.test.ts
@@ -342,14 +334,17 @@ git commit -m "feat: resolve behavioral evidence navigation"
 
 ---
 
-### Task 2: Make Behavioral Signals Navigable
+### Task 2: Make Behavioral Signals Navigable Through the Existing Step Owner
 
 **Files:**
 - Modify: `src/sidepanel/components/BehavioralSignals.ts`
+- Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `src/sidepanel/styles.css`
 - Modify: `tests/sidepanel/behavioral-signals.test.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
 
 **Interfaces:**
-- Consumes: `BehavioralAnalysis`, current raw index, resolved evidence map from Task 1, and an `onNavigate(index)` callback.
+- Consumes: Task 1 evidence resolver, `BehavioralAnalysis`, current raw index, and `TraceVisualizer.setStep(index)`.
 - Produces:
 
 ```ts
@@ -365,12 +360,12 @@ export function createBehavioralSignals(
 ): HTMLDivElement;
 ```
 
-- Active row semantics use `resolved.evidenceIndexes.includes(currentIndex)`.
-- Each row gets `data-pattern-id`, `data-pattern-kind`, and buttons with `data-behavior-action="first|previous|next|last"`.
+- `TraceVisualizer` resolves step/index mappings once per trace and passes a direct navigation callback that stops autoplay then calls the existing `setStep(index)`.
+- This task must end with the repository compiling; do not leave the old `createBehavioralSignals(analysis, currentStep)` call site behind.
 
-- [ ] **Step 1: Replace passive signal tests with callback-driven navigation tests**
+- [ ] **Step 1: Update signal unit tests for callback-driven evidence navigation**
 
-Update `tests/sidepanel/behavioral-signals.test.ts` so its imports include the Task 1 helpers and `vi`:
+In `tests/sidepanel/behavioral-signals.test.ts`, change imports to:
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
@@ -383,7 +378,7 @@ import {
 import { createBehavioralSignals } from "../../src/sidepanel/components/BehavioralSignals";
 ```
 
-Keep the existing `analysis` fixture, then add:
+Keep the current three-pattern `analysis` fixture and add:
 
 ```ts
 function render(currentIndex: number, onNavigate = vi.fn()) {
@@ -404,7 +399,7 @@ function render(currentIndex: number, onNavigate = vi.fn()) {
 }
 ```
 
-Replace the existing active-row assertion with exact resolved evidence semantics:
+Add/replace tests with:
 
 ```ts
 it("renders every factual pattern kind and marks exact current evidence", () => {
@@ -419,22 +414,17 @@ it("renders every factual pattern kind and marks exact current evidence", () => 
     .toHaveLength(3);
   expect(text).not.toMatch(/infinite loop|TLE|bug|fix/i);
 });
-```
 
-Add navigation behavior:
-
-```ts
 it("navigates to the next exact evidence index rather than current plus one", () => {
   const { element, onNavigate } = render(0);
   const row = element.querySelector('[data-pattern-kind="repeated_state"]')!;
-  const next = row.querySelector<HTMLButtonElement>('[data-behavior-action="next"]')!;
 
-  next.click();
+  row.querySelector<HTMLButtonElement>('[data-behavior-action="next"]')!.click();
 
   expect(onNavigate).toHaveBeenCalledWith(3); // evidence steps [1,4,7]
 });
 
-it("disables previous and first at the first evidence and next and last at the last evidence", () => {
+it("disables first/previous at first evidence and next/last at last evidence", () => {
   const first = render(0).element.querySelector('[data-pattern-kind="repeated_state"]')!;
   expect(first.querySelector<HTMLButtonElement>('[data-behavior-action="first"]')?.disabled)
     .toBe(true);
@@ -468,21 +458,91 @@ it("keeps factual text but disables navigation when evidence cannot resolve", ()
   expect([...element.querySelectorAll<HTMLButtonElement>("button")]
     .every((button) => button.disabled)).toBe(true);
 });
+
+it("renders a neutral empty state when no patterns are available", () => {
+  expect(createBehavioralSignals({
+    analysis: { patterns: [], stepAnnotations: [] },
+    currentIndex: 0,
+    evidenceByPatternId: new Map(),
+    onNavigate: vi.fn()
+  }).textContent).toBe("No repeated behavioral signal in the captured trace.");
+});
 ```
 
-Keep the neutral empty-state test, updated to the new options signature.
+- [ ] **Step 2: Add an integration fixture with non-adjacent repeated evidence**
 
-- [ ] **Step 2: Run the focused test to verify the old component fails**
+In `tests/sidepanel/trace-visualizer.test.ts`, add:
+
+```ts
+function alternatingRepeatedStateSession(): TraceSession {
+  const base = session();
+  const events = [0, 1, 0, 1, 0].map((left, index) => ({
+    ...base.events[0]!,
+    step: index + 1,
+    line: index % 2 === 0 ? 5 : 6,
+    locals: {
+      nums: list([2, 7]),
+      left: int(left),
+      right: int(1),
+      target: int(9),
+      total: int(9)
+    }
+  }));
+  return { ...base, events };
+}
+```
+
+Add:
+
+```ts
+it("routes Next evidence through the same raw step state owner", () => {
+  const view = createTraceVisualizer(alternatingRepeatedStateSession());
+  const row = view.element.querySelector('[data-pattern-kind="repeated_state"]')!;
+
+  row.querySelector<HTMLButtonElement>('[data-behavior-action="next"]')!.click();
+
+  expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+    .toBe("Step 3 / 5");
+  expect(view.element.querySelector(".trace-viewer__code-line.is-active")?.textContent)
+    .toContain("total = nums[left] + nums[right]");
+  expect(view.element.querySelector(".trace-viewer__locals")?.textContent)
+    .toContain("left");
+});
+
+it("stops autoplay when the user directly navigates behavioral evidence", () => {
+  vi.useFakeTimers();
+  const view = createTraceVisualizer(alternatingRepeatedStateSession());
+  const play = view.element.querySelector<HTMLButtonElement>("#trace-play")!;
+
+  view.setStep(1);
+  play.click();
+  expect(view.element.dataset.playing).toBe("true");
+
+  const row = view.element.querySelector('[data-pattern-kind="repeated_state"]')!;
+  row.querySelector<HTMLButtonElement>('[data-behavior-action="previous"]')!.click();
+
+  expect(view.element.dataset.playing).toBe("false");
+  expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+    .toBe("Step 1 / 5");
+  vi.useRealTimers();
+});
+```
+
+Keep the existing raw Previous/Next/Play and timeout-prefix tests.
+
+- [ ] **Step 3: Run the focused tests to verify they fail against the passive component**
 
 ```bash
-npx vitest run tests/sidepanel/behavioral-signals.test.ts
+npx vitest run \
+  tests/sidepanel/behavioral-signals.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
 ```
 
-Expected: FAIL because `createBehavioralSignals()` still accepts `(analysis, currentStep)` and renders no navigation controls.
+Expected: FAIL because signals have no navigation controls and the old call signature remains passive.
 
-- [ ] **Step 3: Refactor `BehavioralSignals.ts` to render navigation intent only**
+- [ ] **Step 4: Refactor `BehavioralSignals.ts` to emit navigation intent only**
 
-Add imports:
+Add:
 
 ```ts
 import {
@@ -490,11 +550,7 @@ import {
   previousEvidenceIndex,
   type ResolvedBehavioralEvidence
 } from "../behavioral-navigation";
-```
 
-Add the public options contract:
-
-```ts
 export interface BehavioralSignalsOptions {
   analysis: BehavioralAnalysis;
   currentIndex: number;
@@ -503,7 +559,7 @@ export interface BehavioralSignalsOptions {
 }
 ```
 
-Add a button helper:
+Add:
 
 ```ts
 function navigationButton(
@@ -526,7 +582,7 @@ function navigationButton(
 }
 ```
 
-Render one row from resolved evidence:
+Replace `renderPattern(...)` with a resolved-index version:
 
 ```ts
 function renderPattern(
@@ -539,7 +595,7 @@ function renderPattern(
   row.dataset.patternId = pattern.patternId;
   row.dataset.patternKind = pattern.kind;
 
-  const valid = evidence ?? {
+  const valid: ResolvedBehavioralEvidence = evidence ?? {
     patternId: pattern.patternId,
     evidenceSteps: [],
     evidenceIndexes: [],
@@ -548,15 +604,13 @@ function renderPattern(
   };
   const previous = previousEvidenceIndex(valid, currentIndex);
   const next = nextEvidenceIndex(valid, currentIndex);
-  const firstStep = valid.evidenceSteps[0];
-  const lastStep = valid.evidenceSteps.at(-1);
 
   if (valid.evidenceIndexes.includes(currentIndex)) {
     row.classList.add("is-active");
   }
 
   const meta = valid.evidenceIndexes.length > 0
-    ? `Evidence: steps ${firstStep}–${lastStep} · ${valid.evidenceIndexes.length} observations`
+    ? `Evidence: steps ${valid.evidenceSteps[0]}–${valid.evidenceSteps.at(-1)} · ${valid.evidenceIndexes.length} observations`
     : "Navigation unavailable for this signal.";
 
   const actions = createElement("div", "trace-viewer__behavioral-nav-actions");
@@ -603,23 +657,114 @@ export function createBehavioralSignals(
 }
 ```
 
-Do not import `TraceVisualizer`, mutate global state, or maintain a second cursor.
+Do not import `TraceVisualizer` or maintain an independent cursor.
 
-- [ ] **Step 4: Run signal and resolver tests**
+- [ ] **Step 5: Wire the new signal contract into `TraceVisualizer.ts` immediately**
+
+Add:
+
+```ts
+import {
+  buildTraceStepIndex,
+  resolveBehavioralEvidenceMap
+} from "../behavioral-navigation";
+```
+
+Immediately after `interpretTrace(...)`:
+
+```ts
+const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
+const evidenceByPatternId = resolveBehavioralEvidenceMap(
+  interpretation.behavioralAnalysis.patterns,
+  traceIndex
+);
+```
+
+Near the existing cursor/timer state:
+
+```ts
+let currentIndex = 0;
+let timer: number | null = null;
+let navigateDirect: (index: number) => void;
+```
+
+Keep the existing `stopPlaying()` function.
+
+Inside both branches of `setStep()`, replace old `createBehavioralSignals(...)` calls with:
+
+```ts
+createBehavioralSignals({
+  analysis: interpretation.behavioralAnalysis,
+  currentIndex,
+  evidenceByPatternId,
+  onNavigate: navigateDirect
+})
+```
+
+After the complete `setStep` function definition, assign:
+
+```ts
+navigateDirect = (index: number): void => {
+  stopPlaying();
+  setStep(index);
+};
+```
+
+The existing initial `setStep(0)` call must remain after this assignment.
+
+- [ ] **Step 6: Add compact signal-navigation styles**
+
+Near the existing behavioral signal rules in `src/sidepanel/styles.css`, add:
+
+```css
+.trace-viewer__behavioral-nav-meta {
+  color: #94a3b8;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+}
+
+.trace-viewer__behavioral-nav-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.trace-viewer__behavioral-nav-button {
+  padding: 5px 6px;
+  font-size: 9px;
+}
+```
+
+Inside the existing `@media (max-width: 430px)` block add:
+
+```css
+.trace-viewer__behavioral-nav-actions {
+  grid-template-columns: 1fr 1fr;
+}
+```
+
+- [ ] **Step 7: Run signal integration tests and typecheck**
 
 ```bash
 npx vitest run \
   tests/sidepanel/behavioral-navigation.test.ts \
-  tests/sidepanel/behavioral-signals.test.ts
+  tests/sidepanel/behavioral-signals.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
 npm run typecheck
 ```
 
-Expected: PASS for these files. `trace-visualizer.test.ts` may still fail to compile until Task 4 updates the call site; do not run the full suite yet.
+Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/sidepanel/components/BehavioralSignals.ts tests/sidepanel/behavioral-signals.test.ts
+git add \
+  src/sidepanel/components/BehavioralSignals.ts \
+  src/sidepanel/components/TraceVisualizer.ts \
+  src/sidepanel/styles.css \
+  tests/sidepanel/behavioral-signals.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
 git commit -m "feat: navigate behavioral signal evidence"
 ```
 
@@ -656,8 +801,9 @@ export function createBehavioralTimeline(
 
 - The component renders exactly one raw range input and at most one band per valid `BehavioralPattern`.
 - Lane kinds are fixed to `repeated_state`, `no_progress`, and `repeated_transition`.
+- This component has no knowledge of autoplay or `TraceVisualizer`; it emits raw index navigation intent only.
 
-- [ ] **Step 1: Write failing component tests**
+- [ ] **Step 1: Write failing timeline component tests**
 
 Create `tests/sidepanel/behavioral-timeline.test.ts`:
 
@@ -767,16 +913,15 @@ describe("createBehavioralTimeline", () => {
     expect(onNavigate).toHaveBeenCalledWith(0);
   });
 
-  it("updates current position and exact active-band evidence without rebuilding the component", () => {
+  it("updates current position and exact active-band evidence without rebuilding", () => {
     const { handle } = render(0);
     const stateBand = handle.element.querySelector<HTMLButtonElement>('[data-pattern-id="state"]')!;
 
     handle.setCurrentIndex(2); // step 50 is not repeated-state evidence
-
     expect(handle.element.textContent).toContain("Step 3 / 4");
     expect(stateBand.classList.contains("is-active")).toBe(false);
 
-    handle.setCurrentIndex(3); // step 70 is evidence
+    handle.setCurrentIndex(3); // step 70 is repeated-state evidence
     expect(stateBand.classList.contains("is-active")).toBe(true);
   });
 
@@ -932,13 +1077,22 @@ export function createBehavioralTimeline(
 
   let renderedBands = 0;
   for (const kind of KIND_ORDER) {
-    const patterns = options.analysis.patterns.filter((pattern) => pattern.kind === kind);
-    const valid = patterns.flatMap((pattern) => {
+    const valid: Array<{
+      pattern: BehavioralPattern;
+      evidence: ResolvedBehavioralEvidence;
+    }> = [];
+
+    for (const pattern of options.analysis.patterns) {
+      if (pattern.kind !== kind) {
+        continue;
+      }
       const evidence = options.evidenceByPatternId.get(pattern.patternId);
-      return evidence?.firstIndex === null || evidence?.lastIndex === null || !evidence
-        ? []
-        : [{ pattern, evidence }];
-    });
+      if (!evidence || evidence.firstIndex === null || evidence.lastIndex === null) {
+        continue;
+      }
+      valid.push({ pattern, evidence });
+    }
+
     if (valid.length === 0) {
       continue;
     }
@@ -1005,17 +1159,16 @@ export function createBehavioralTimeline(
 
 Do not render one DOM marker per evidence step. Each pattern gets at most one band.
 
-- [ ] **Step 4: Run timeline, signal, resolver tests and typecheck**
+- [ ] **Step 4: Run timeline tests and typecheck**
 
 ```bash
 npx vitest run \
   tests/sidepanel/behavioral-navigation.test.ts \
-  tests/sidepanel/behavioral-signals.test.ts \
   tests/sidepanel/behavioral-timeline.test.ts
 npm run typecheck
 ```
 
-Expected: PASS except any still-unupdated `TraceVisualizer` call-site compile errors in the full suite; focused test files pass.
+Expected: PASS. The timeline is not integrated yet, so existing Side Panel behavior remains unchanged.
 
 - [ ] **Step 5: Commit**
 
@@ -1026,7 +1179,7 @@ git commit -m "feat: add behavioral trace timeline"
 
 ---
 
-### Task 4: Wire Signals and Timeline Through `TraceVisualizer.setStep()`
+### Task 4: Integrate the Timeline With `TraceVisualizer.setStep()`
 
 **Files:**
 - Modify: `src/sidepanel/components/TraceVisualizer.ts`
@@ -1034,55 +1187,14 @@ git commit -m "feat: add behavioral trace timeline"
 - Modify: `tests/sidepanel/trace-visualizer.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1 resolver functions, Task 2 callback-driven signals, Task 3 timeline handle.
-- Produces: one integrated navigation state owner where raw buttons, autoplay, signal controls, timeline bands, and timeline scrub all route to `setStep(index)`.
-- Preserves the public `TraceVisualizerHandle` interface unchanged.
+- Consumes: `traceIndex`, `evidenceByPatternId`, and `navigateDirect` already established by Task 2 plus the `BehavioralTimelineHandle` from Task 3.
+- Produces: one persistent timeline instance whose range and bands update from `setStep(index)` and whose navigation intent calls the same `navigateDirect` path as signal buttons.
 
-- [ ] **Step 1: Add integration fixtures that create non-adjacent repeated evidence**
+- [ ] **Step 1: Write failing integrated timeline navigation tests**
 
-In `tests/sidepanel/trace-visualizer.test.ts`, add this helper near the existing session fixtures:
-
-```ts
-function alternatingRepeatedStateSession(): TraceSession {
-  const base = session();
-  const events = [0, 1, 0, 1, 0].map((left, index) => ({
-    ...base.events[0]!,
-    step: index + 1,
-    line: index % 2 === 0 ? 5 : 6,
-    locals: {
-      nums: list([2, 7]),
-      left: int(left),
-      right: int(1),
-      target: int(9),
-      total: int(9)
-    }
-  }));
-  return { ...base, events };
-}
-```
-
-This yields repeated exact state on steps `1, 3, 5`, so `Next evidence` from index `0` must jump to raw index `2`, not raw index `1`.
-
-- [ ] **Step 2: Write failing integrated navigation tests**
-
-Add:
+Using `alternatingRepeatedStateSession()` from Task 2, add to `tests/sidepanel/trace-visualizer.test.ts`:
 
 ```ts
-it("routes Next evidence through the same raw step state owner", () => {
-  const view = createTraceVisualizer(alternatingRepeatedStateSession());
-  const row = view.element.querySelector('[data-pattern-kind="repeated_state"]')!;
-  const nextEvidence = row.querySelector<HTMLButtonElement>('[data-behavior-action="next"]')!;
-
-  nextEvidence.click();
-
-  expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
-    .toBe("Step 3 / 5");
-  expect(view.element.querySelector(".trace-viewer__code-line.is-active")?.textContent)
-    .toContain("total = nums[left] + nums[right]");
-  expect(view.element.querySelector(".trace-viewer__locals")?.textContent)
-    .toContain("left");
-});
-
 it("scrubs the raw timeline through setStep", () => {
   const view = createTraceVisualizer(alternatingRepeatedStateSession());
   const range = view.element.querySelector<HTMLInputElement>('[data-role="trace-range"]')!;
@@ -1107,106 +1219,52 @@ it("navigates a behavioral timeline band to its first evidence", () => {
     .toBe("Step 1 / 5");
 });
 
-it("stops autoplay when the user directly navigates behavioral evidence", () => {
-  vi.useFakeTimers();
+it("keeps timeline position synchronized with raw Previous and Next navigation", () => {
   const view = createTraceVisualizer(alternatingRepeatedStateSession());
-  const play = view.element.querySelector<HTMLButtonElement>("#trace-play")!;
+  const range = view.element.querySelector<HTMLInputElement>('[data-role="trace-range"]')!;
 
-  view.setStep(1);
-  play.click();
-  expect(view.element.dataset.playing).toBe("true");
+  view.element.querySelector<HTMLButtonElement>("#trace-next")!.click();
 
-  const row = view.element.querySelector('[data-pattern-kind="repeated_state"]')!;
-  row.querySelector<HTMLButtonElement>('[data-behavior-action="previous"]')!.click();
+  expect(range.value).toBe("1");
+  expect(view.element.querySelector(".trace-viewer__timeline-current")?.textContent)
+    .toBe("Step 2 / 5");
+});
 
-  expect(view.element.dataset.playing).toBe("false");
-  expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
-    .toBe("Step 1 / 5");
-  vi.useRealTimers();
+it("keeps a raw scrubber when no behavioral pattern exists", () => {
+  const view = createTraceVisualizer(session());
+
+  expect(view.element.querySelector('[data-role="trace-range"]')).not.toBeNull();
 });
 ```
 
-Keep the existing timeout-prefix test and raw Previous/Next/Play tests.
+The existing Task 2 autoplay-stop test already covers `navigateDirect`; because the timeline also receives `navigateDirect`, no second timer-specific implementation path is allowed.
 
-- [ ] **Step 3: Run the integration test to verify the current wiring fails**
+- [ ] **Step 2: Run the integration test to verify the timeline is not wired yet**
 
 ```bash
 npx vitest run tests/sidepanel/trace-visualizer.test.ts
 ```
 
-Expected: FAIL because the new signal signature is not wired and no timeline exists.
+Expected: FAIL because no timeline is mounted.
 
-- [ ] **Step 4: Add resolver and timeline imports in `TraceVisualizer.ts`**
+- [ ] **Step 3: Import and instantiate the timeline once**
 
-Add:
+In `TraceVisualizer.ts`, add:
 
 ```ts
-import {
-  buildTraceStepIndex,
-  resolveBehavioralEvidenceMap
-} from "../behavioral-navigation";
 import {
   createBehavioralTimeline,
   type BehavioralTimelineHandle
 } from "./BehavioralTimeline";
 ```
 
-Immediately after `interpretTrace(...)`, resolve navigation once:
+Near `currentIndex` / `timer` / `navigateDirect`, add:
 
 ```ts
-const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
-const evidenceByPatternId = resolveBehavioralEvidenceMap(
-  interpretation.behavioralAnalysis.patterns,
-  traceIndex
-);
-```
-
-Do not rebuild these maps inside `setStep()`.
-
-- [ ] **Step 5: Keep `setStep()` as the single state transition and add direct-navigation stop semantics**
-
-Near the existing cursor/timer state:
-
-```ts
-let currentIndex = 0;
-let timer: number | null = null;
 let timelineHandle: BehavioralTimelineHandle | null = null;
-let navigateDirect: (index: number) => void;
 ```
 
-Keep the existing `stopPlaying()` implementation.
-
-Inside both the empty-trace and non-empty branches of `setStep()`, replace the old `createBehavioralSignals(...)` calls with:
-
-```ts
-createBehavioralSignals({
-  analysis: interpretation.behavioralAnalysis,
-  currentIndex,
-  evidenceByPatternId,
-  onNavigate: navigateDirect
-})
-```
-
-At the end of the non-empty branch, after button disabled state is updated, add:
-
-```ts
-timelineHandle?.setCurrentIndex(currentIndex);
-```
-
-After the complete `setStep` function is defined, assign:
-
-```ts
-navigateDirect = (index: number): void => {
-  stopPlaying();
-  setStep(index);
-};
-```
-
-This ordering ensures the callback exists before the initial `setStep(0)` call.
-
-- [ ] **Step 6: Create the timeline once and place it immediately before raw controls**
-
-After `navigateDirect` is assigned:
+After `navigateDirect` is assigned, create one timeline:
 
 ```ts
 timelineHandle = createBehavioralTimeline({
@@ -1218,7 +1276,17 @@ timelineHandle = createBehavioralTimeline({
 });
 ```
 
-Append the root children in this order:
+Inside the non-empty branch of `setStep()`, after updating raw button state, add:
+
+```ts
+timelineHandle?.setCurrentIndex(currentIndex);
+```
+
+The empty trace timeline has its own neutral state and needs no index update.
+
+- [ ] **Step 4: Place the timeline immediately before existing raw controls**
+
+Use:
 
 ```ts
 root.append(
@@ -1235,31 +1303,13 @@ root.append(
 setStep(0);
 ```
 
-Do not create a second current-index owner inside `BehavioralTimeline` or `BehavioralSignals`.
+Do not move `Code`, `Visual State`, or the inspector panels above/below their existing product hierarchy.
 
-- [ ] **Step 7: Add compact Side Panel styles for navigation actions and timeline**
+- [ ] **Step 5: Add timeline styles**
 
-Append near the existing behavioral signal styles in `src/sidepanel/styles.css`:
+Near the behavioral styles in `src/sidepanel/styles.css`, add:
 
 ```css
-.trace-viewer__behavioral-nav-meta {
-  color: #94a3b8;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 9px;
-}
-
-.trace-viewer__behavioral-nav-actions {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
-  margin-top: 2px;
-}
-
-.trace-viewer__behavioral-nav-button {
-  padding: 5px 6px;
-  font-size: 9px;
-}
-
 .trace-viewer__timeline {
   display: flex;
   flex-direction: column;
@@ -1349,22 +1399,18 @@ Append near the existing behavioral signal styles in `src/sidepanel/styles.css`:
 }
 ```
 
-Inside the existing `@media (max-width: 430px)` block add:
+Inside `@media (max-width: 430px)` add:
 
 ```css
-.trace-viewer__behavioral-nav-actions {
-  grid-template-columns: 1fr 1fr;
-}
-
 .trace-viewer__timeline-lane {
   grid-template-columns: 1fr;
   gap: 3px;
 }
 ```
 
-Text lane labels remain present, so color is not the only distinction.
+Lane headings remain text, so pattern kinds are not encoded by color alone.
 
-- [ ] **Step 8: Run all Side Panel navigation tests**
+- [ ] **Step 6: Run all Side Panel navigation tests and typecheck**
 
 ```bash
 npx vitest run \
@@ -1377,14 +1423,14 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add \
   src/sidepanel/components/TraceVisualizer.ts \
   src/sidepanel/styles.css \
   tests/sidepanel/trace-visualizer.test.ts
-git commit -m "feat: integrate behavioral trace navigation"
+git commit -m "feat: integrate behavioral trace timeline"
 ```
 
 ---
@@ -1399,7 +1445,7 @@ git commit -m "feat: integrate behavioral trace navigation"
 - Consumes: completed Side Panel behavior from Tasks 1-4.
 - Produces: public documentation that advertises navigation and timeline only, not future folding/failure-first features.
 
-- [ ] **Step 1: Update the English architecture pipeline**
+- [ ] **Step 1: Update the English architecture pipeline and feature list**
 
 In `README.md`, replace:
 
@@ -1421,7 +1467,7 @@ Visual interpretation + Behavioral Evidence Navigation
 Behavioral Timeline + Chrome Side Panel visualization
 ```
 
-Replace the current behavioral feature bullet with:
+Replace the behavioral feature bullet with:
 
 ```markdown
 - factual behavioral signals for repeated observable state, no observable progress at a repeated execution anchor, and repeated execution/mutation motifs, with direct first/previous/next/last evidence navigation;
@@ -1430,7 +1476,7 @@ Replace the current behavioral feature bullet with:
 
 Keep the Important Boundaries wording that Behavioral Signals do not diagnose an infinite loop, correctness failure, bug, or fix.
 
-Append these project-document links:
+Append:
 
 ```markdown
 - [Behavioral Trace Navigation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-trace-navigation-design.md)

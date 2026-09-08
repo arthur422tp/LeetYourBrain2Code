@@ -27,9 +27,9 @@ RuntimeState + FrameDiff/ObjectDiff
                 ↓
 RuntimeMutation + BehavioralPattern
                 ↓
-Visual interpretation + Behavioral Signals
+Visual interpretation + Behavioral Evidence Navigation
                 ↓
-Chrome Side Panel visualization
+Behavioral Timeline + Chrome Side Panel visualization
 ```
 
 The Side Panel mirrors the active LeetCode editor while you type; pressing
@@ -51,7 +51,8 @@ The MVP is designed to expose:
 - stdout and return values;
 - list state with index/pointer bindings;
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
-- factual behavioral signals for repeated observable state, no observable progress at a repeated execution anchor, and repeated execution/mutation motifs;
+- factual behavioral signals for repeated observable state, no observable progress at a repeated execution anchor, and repeated execution/mutation motifs, with direct first/previous/next/last evidence navigation;
+- a behavioral trace timeline with raw scrubbing and compact evidence-span bands while preserving raw Previous/Next/Play navigation;
 - the trace prefix captured before a runtime error, trace limit, or hard timeout.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
@@ -92,3 +93,5 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 - [Runtime Mutation Semantics Implementation Plan](docs/superpowers/plans/2026-09-08-runtime-mutation-semantics-implementation-plan.md)
 - [Behavioral Debugging Foundation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-debugging-foundation-design.md)
 - [Behavioral Debugging Foundation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-debugging-foundation-implementation-plan.md)
+- [Behavioral Trace Navigation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-trace-navigation-design.md)
+- [Behavioral Trace Navigation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-trace-navigation-implementation-plan.md)

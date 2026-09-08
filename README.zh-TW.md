@@ -27,9 +27,9 @@ RuntimeState + FrameDiff/ObjectDiff
                     ↓
 RuntimeMutation + BehavioralPattern
                     ↓
-Visual interpretation + Behavioral Signals
+Visual interpretation + Behavioral Evidence Navigation
                     ↓
-Chrome Side Panel 視覺化
+Behavioral Timeline + Chrome Side Panel 視覺化
 ```
 
 Side Panel 會在你輸入時持續同步目前 active LeetCode editor 的程式碼；
@@ -49,7 +49,8 @@ MVP 的目標是呈現：
 - stdout 與 return value；
 - 帶有 index／pointer bindings 的 list state；
 - 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
-- 基於事實的 behavioral signals：重複可觀察狀態、同一 execution anchor 沒有可觀察進展，以及重複 execution / mutation motif；
+- 基於事實的 behavioral signals：重複可觀察狀態、同一 execution anchor 沒有可觀察進展，以及重複 execution / mutation motif，並可直接在 first／previous／next／last evidence 之間導航；
+- behavioral trace timeline，支援 raw trace scrub 與 compact evidence-span bands，同時保留原本的 Previous／Next／Play raw navigation；
 - Runtime Error、trace limit 或 hard timeout 發生前已取得的 trace prefix。
 
 Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功能一起 bundle，並在本機 Web Worker 中運作；MVP 不需要 backend。
@@ -90,3 +91,5 @@ Build 完成後，前往 `chrome://extensions`，以「載入未封裝項目」�
 - [Runtime Mutation Semantics Implementation Plan](docs/superpowers/plans/2026-09-08-runtime-mutation-semantics-implementation-plan.md)
 - [Behavioral Debugging Foundation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-debugging-foundation-design.md)
 - [Behavioral Debugging Foundation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-debugging-foundation-implementation-plan.md)
+- [Behavioral Trace Navigation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-trace-navigation-design.md)
+- [Behavioral Trace Navigation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-trace-navigation-implementation-plan.md)

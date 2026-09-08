@@ -153,6 +153,37 @@ describe("interpretTrace", () => {
     }));
   });
 
+  it("keeps behavioral evidence before a runtime exception", () => {
+    const result = interpretTrace([
+      event(1, "solve", { left: int(2) }),
+      event(2, "solve", { left: int(2) }),
+      event(3, "solve", { left: int(2) }),
+      event(4, "solve", { left: int(2) }, {
+        event: "exception",
+        line: 8,
+        eventPayload: {
+          type: "exception",
+          exception: {
+            type: "RuntimeError",
+            message: "boom",
+            line: 8,
+            stack: [],
+            frameId: 4
+          }
+        }
+      })
+    ]);
+
+    expect(result.behavioralAnalysis.patterns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "repeated_state" }),
+      expect.objectContaining({ kind: "no_progress" })
+    ]));
+    expect(result.runtimeStates.at(-1)?.exception).toEqual(expect.objectContaining({
+      type: "RuntimeError",
+      message: "boom"
+    }));
+  });
+
   it("tracks initial snapshot origin independently for each frame", () => {
     const result = interpretTrace([
       event(1, "dfs", { node: int(3) }, { frameId: 1, event: "call", line: 1 }),

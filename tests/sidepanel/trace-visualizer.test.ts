@@ -260,6 +260,52 @@ describe("createTraceVisualizer", () => {
       .toContain("No observable progress");
   });
 
+  it("shows repeated transitions for a finite changing loop without no-progress wording", () => {
+    const base = session();
+    const finiteEvents = [0, 1, 2, 3].map((value, index) => ({
+      ...base.events[0]!,
+      step: index + 1,
+      locals: {
+        nums: list([2, 7]),
+        left: int(value),
+        right: int(1),
+        target: int(9),
+        total: int(9)
+      }
+    }));
+    const view = createTraceVisualizer({ ...base, events: finiteEvents });
+    const text = view.element.querySelector(".trace-viewer__behavioral-signals")?.textContent ?? "";
+
+    expect(text).toContain("Repeated transition motif");
+    expect(text).not.toContain("No observable progress");
+  });
+
+  it("keeps repeated behavioral evidence in a hard-timeout trace prefix", () => {
+    const base = session();
+    const repeatedEvents = [1, 2, 3].map((step) => ({
+      ...base.events[0]!,
+      step,
+      locals: {
+        nums: list([2, 7]),
+        left: int(0),
+        right: int(1),
+        target: int(9),
+        total: int(9)
+      }
+    }));
+    const view = createTraceVisualizer({
+      ...base,
+      status: "timeout",
+      terminationReason: "hard_timeout",
+      events: repeatedEvents
+    });
+
+    expect(view.element.textContent).toContain("hard timeout");
+    expect(view.element.textContent).toContain("Behavioral Signals");
+    expect(view.element.textContent).toContain("No observable progress");
+    expect(view.element.textContent).not.toContain("LeetCode TLE");
+  });
+
   it("replaces mutation content when navigating to the current step", () => {
     const view = createTraceVisualizer(session());
     const next = view.element.querySelector<HTMLButtonElement>("#trace-next");

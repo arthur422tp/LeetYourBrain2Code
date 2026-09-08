@@ -141,6 +141,44 @@ describe("ExecutionController", () => {
     }
   });
 
+  it("retains streamed trace events when a running request reaches hard timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new ControlledWorker();
+      const controller = new ExecutionController({ workerFactory: () => worker });
+      const pending = controller.execute(request("timeout-prefix", 20));
+
+      worker.emit({ type: "ready" });
+      await Promise.resolve();
+      worker.emit({
+        type: "trace_batch",
+        sessionId: "timeout-prefix",
+        events: [{
+          step: 1,
+          event: "line",
+          frameId: 1,
+          parentFrameId: null,
+          function: "one",
+          line: 2,
+          callDepth: 1,
+          locals: { value: { type: "int", value: "1" } },
+          stdoutDelta: ""
+        }]
+      });
+
+      await vi.advanceTimersByTimeAsync(20);
+      const result = await pending;
+
+      expect(result).toEqual(expect.objectContaining({
+        status: "timeout",
+        terminationReason: "hard_timeout"
+      }));
+      expect(result.events).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rebuilds after an initialization worker_error", async () => {
     const workers = [new ControlledWorker(), new ControlledWorker()];
     let workerIndex = 0;

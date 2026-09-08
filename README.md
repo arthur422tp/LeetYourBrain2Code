@@ -23,7 +23,11 @@ Warm bundled Pyodide Web Worker
                 ↓
 Ordered line-level execution trace
                 ↓
-Runtime state + state diff
+RuntimeState + FrameDiff/ObjectDiff
+                ↓
+RuntimeMutation + BehavioralPattern
+                ↓
+Visual interpretation + Behavioral Signals
                 ↓
 Chrome Side Panel visualization
 ```
@@ -47,6 +51,7 @@ The MVP is designed to expose:
 - stdout and return values;
 - list state with index/pointer bindings;
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
+- factual behavioral signals for repeated observable state, no observable progress at a repeated execution anchor, and repeated execution/mutation motifs;
 - the trace prefix captured before a runtime error, trace limit, or hard timeout.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
@@ -55,6 +60,7 @@ Python execution stays off the Side Panel's main thread. Pyodide is bundled with
 
 - `completed` means local execution returned normally. It does **not** mean LeetCode Accepted.
 - `timeout` means the local visualization runtime exceeded its wall-clock limit. It does **not** mean LeetCode TLE.
+- Behavioral Signals describe evidence in the captured trace. They do not diagnose an infinite loop, correctness failure, bug, or fix.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
 - Dedicated linked-list visualization supports Python runtime objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display. Dedicated visualizers for trees, node-edge graphs, and DP tables are outside the current scope.
 - Web Worker and Pyodide isolation should not be treated as a hardened sandbox for hostile code.
@@ -80,3 +86,9 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 - [Live Visualization Implementation Plan](docs/superpowers/plans/2026-09-06-live-visualization-implementation-plan.md)
 - [Active Tab Ownership Design Spec](docs/superpowers/specs/2026-09-06-active-tab-ownership-design.md)
 - [Active Tab Ownership Implementation Plan](docs/superpowers/plans/2026-09-06-active-tab-ownership-implementation-plan.md)
+- [Linked List Visualization Design Spec](docs/superpowers/specs/2026-09-07-visualization-coverage-linked-list-design.md)
+- [Linked List Visualization Implementation Plan](docs/superpowers/plans/2026-09-07-linked-list-visualization-implementation-plan.md)
+- [Runtime Mutation Semantics Design Spec](docs/superpowers/specs/2026-09-08-runtime-mutation-semantics-design.md)
+- [Runtime Mutation Semantics Implementation Plan](docs/superpowers/plans/2026-09-08-runtime-mutation-semantics-implementation-plan.md)
+- [Behavioral Debugging Foundation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-debugging-foundation-design.md)
+- [Behavioral Debugging Foundation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-debugging-foundation-implementation-plan.md)

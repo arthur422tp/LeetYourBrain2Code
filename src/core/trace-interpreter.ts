@@ -8,12 +8,20 @@ import { diffObjectTopology, type ObjectDiff } from "./object-diff";
 import type { ObjectTopologyState } from "./runtime-state";
 import { normalizeRuntimeMutations } from "./runtime-mutation-normalizer";
 import type { MutationOrigin, RuntimeMutationBatch } from "./runtime-mutation";
+import {
+  analyzeBehavioralPatternsSafely
+} from "./behavioral-analyzer";
+import {
+  buildBehavioralObservations
+} from "./behavioral-observation";
+import type { BehavioralAnalysis } from "./behavioral-pattern";
 
 export interface TraceInterpretation {
   runtimeStates: RuntimeState[];
   frameDiffs: Array<FrameDiff | null>;
   objectDiffs: ObjectDiff[];
   mutationBatches: RuntimeMutationBatch[];
+  behavioralAnalysis: BehavioralAnalysis;
   visualStates: VisualState[];
 }
 
@@ -63,6 +71,11 @@ export function interpretTrace(
       objectOrigin: index === 0 ? "initial_snapshot" : "transition"
     })
   }));
+  const behavioralObservations = buildBehavioralObservations(
+    runtimeStates,
+    mutationBatches
+  );
+  const behavioralAnalysis = analyzeBehavioralPatternsSafely(behavioralObservations);
   const visualStates = runtimeStates.map((runtime, index) =>
     buildVisualState(
       runtime,
@@ -73,7 +86,14 @@ export function interpretTrace(
     )
   );
 
-  return { runtimeStates, frameDiffs, objectDiffs, mutationBatches, visualStates };
+  return {
+    runtimeStates,
+    frameDiffs,
+    objectDiffs,
+    mutationBatches,
+    behavioralAnalysis,
+    visualStates
+  };
 }
 
 export const interpretTraceEvents = interpretTrace;

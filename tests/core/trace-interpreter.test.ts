@@ -66,6 +66,10 @@ describe("interpretTrace", () => {
     expect(result.runtimeStates.length).toBe(result.objectDiffs.length);
     expect(result.mutationBatches).toHaveLength(result.runtimeStates.length);
     expect(result.runtimeStates.length).toBe(result.visualStates.length);
+    expect(result.behavioralAnalysis).toEqual(expect.objectContaining({
+      patterns: expect.any(Array),
+      stepAnnotations: expect.any(Array)
+    }));
     expect(result.mutationBatches.map((batch) => batch.step)).toEqual([1, 2]);
     expect(result.mutationBatches[0]?.mutations[0]).toMatchObject({
       kind: "variable",
@@ -100,6 +104,53 @@ describe("interpretTrace", () => {
       kind: "variable",
       after: { type: "int", value: "1" }
     });
+  });
+
+  it("reports repeated state and no progress for an exact repeated anchor", () => {
+    const result = interpretTrace([
+      event(1, "solve", { left: int(2) }),
+      event(2, "solve", { left: int(2) }),
+      event(3, "solve", { left: int(2) })
+    ]);
+
+    expect(result.behavioralAnalysis.patterns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "repeated_state", repeatCount: 3 }),
+      expect.objectContaining({ kind: "no_progress", revisitCount: 2 })
+    ]));
+    expect(result.behavioralAnalysis.patterns.map((pattern) => pattern.kind as string))
+      .not.toContain("infinite_loop");
+  });
+
+  it("reports a finite changing transition motif without no-progress evidence", () => {
+    const result = interpretTrace([
+      event(1, "solve", { i: int(0) }),
+      event(2, "solve", { i: int(1) }),
+      event(3, "solve", { i: int(2) }),
+      event(4, "solve", { i: int(3) })
+    ]);
+
+    expect(result.behavioralAnalysis.patterns).toContainEqual(expect.objectContaining({
+      kind: "repeated_transition",
+      periodSteps: 1,
+      repeatCount: 3
+    }));
+    expect(result.behavioralAnalysis.patterns.filter((pattern) => pattern.kind === "no_progress")).toEqual([]);
+  });
+
+  it("does not claim exact repeated state from truncated topology", () => {
+    const result = interpretTrace([
+      event(1, "solve", { i: int(0) }, { objectsTruncated: true }),
+      event(2, "solve", { i: int(1) }, { objectsTruncated: true }),
+      event(3, "solve", { i: int(2) }, { objectsTruncated: true }),
+      event(4, "solve", { i: int(3) }, { objectsTruncated: true })
+    ]);
+
+    expect(result.behavioralAnalysis.patterns.filter((pattern) =>
+      pattern.kind === "repeated_state" || pattern.kind === "no_progress"
+    )).toEqual([]);
+    expect(result.behavioralAnalysis.patterns).toContainEqual(expect.objectContaining({
+      kind: "repeated_transition"
+    }));
   });
 
   it("tracks initial snapshot origin independently for each frame", () => {

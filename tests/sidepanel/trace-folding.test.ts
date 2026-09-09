@@ -33,6 +33,13 @@ describe("buildTraceFoldModel", () => {
     expect(buildTraceFoldModel(6, [pattern], new Map([["p", resolved("p", pattern.evidenceSteps, [1, 2, 3, 4, 5])]])).foldedPatternIds).toEqual([]);
   });
 
+  it("rejects evidence whose endpoints do not bind the contiguous indexes", () => {
+    const pattern = transition("p", [1, 2, 3, 4, 5, 6], 2, 3);
+    const evidence = resolved("p", pattern.evidenceSteps, [0, 1, 2, 3, 4, 5]);
+    expect(buildTraceFoldModel(8, [pattern], new Map([["p", { ...evidence, firstIndex: 1, lastIndex: 6 }]])).foldedPatternIds).toEqual([]);
+    expect(buildTraceFoldModel(8, [pattern], new Map([["p", { ...evidence, evidenceIndexes: [0, 1, 2, 3, 4.5, 5] }]])).foldedPatternIds).toEqual([]);
+  });
+
   it("returns one raw range when no fold is eligible", () => {
     expect(buildTraceFoldModel(4, [], new Map()).segments).toEqual([{ kind: "raw_range", segmentId: "raw:0:3", startIndex: 0, endIndex: 3 }]);
   });

@@ -26,7 +26,9 @@ function candidateFromPattern(rawTraceLength: number, pattern: RepeatedTransitio
   if (!evidence || !Number.isInteger(pattern.periodSteps) || pattern.periodSteps <= 0 || !Number.isInteger(pattern.repeatCount) || pattern.repeatCount < 3) return null;
   if (evidence.patternId !== pattern.patternId || evidence.firstIndex === null || evidence.lastIndex === null) return null;
   if (evidence.evidenceSteps.length !== pattern.evidenceSteps.length || !evidence.evidenceSteps.every((step, i) => step === pattern.evidenceSteps[i])) return null;
-  if (evidence.evidenceIndexes.length !== pattern.periodSteps * pattern.repeatCount || !contiguous(evidence.evidenceIndexes)) return null;
+  if (!Number.isInteger(evidence.firstIndex) || !Number.isInteger(evidence.lastIndex)) return null;
+  if (evidence.evidenceIndexes.length !== pattern.periodSteps * pattern.repeatCount || !evidence.evidenceIndexes.every(Number.isInteger) || !contiguous(evidence.evidenceIndexes)) return null;
+  if (evidence.firstIndex !== evidence.evidenceIndexes[0] || evidence.lastIndex !== evidence.evidenceIndexes.at(-1)) return null;
   if (evidence.firstIndex < 0 || evidence.lastIndex >= rawTraceLength || evidence.lastIndex - evidence.firstIndex + 1 !== evidence.evidenceIndexes.length) return null;
   const iterations = Array.from({ length: pattern.repeatCount }, (_, zeroBased) => {
     const startIndex = evidence.firstIndex! + zeroBased * pattern.periodSteps;

@@ -82,3 +82,51 @@ Tests 306 passed (306)
 ## Concerns
 
 No known concerns for the requirements in Task 1. The implementation intentionally exposes only the pure projection API; later outline and visualizer integration remains outside this task.
+
+## Fix report: endpoint and raw-index validation
+
+### Finding addressed
+
+Validated that `firstIndex` and `lastIndex` are integer values bound exactly to the first and last entries of `evidenceIndexes`. Also validated every raw evidence index is an integer. Added a regression test using manually inconsistent endpoint fields, plus a fractional-index case.
+
+### RED
+
+Command:
+
+```bash
+npx vitest run tests/sidepanel/trace-folding.test.ts
+```
+
+Relevant output before the fix:
+
+```text
+tests/sidepanel/trace-folding.test.ts (9 tests | 1 failed)
+FAIL ... rejects evidence whose endpoints do not bind the contiguous indexes
+expected [ 'p' ] to deeply equal []
+Tests 1 failed | 8 passed (9)
+```
+
+### GREEN
+
+Commands:
+
+```bash
+npx vitest run tests/sidepanel/trace-folding.test.ts
+npm run typecheck
+```
+
+Output:
+
+```text
+✓ tests/sidepanel/trace-folding.test.ts (9 tests)
+Test Files 1 passed (1)
+Tests 9 passed (9)
+
+tsc --noEmit: passed
+```
+
+### Files changed for the fix
+
+- `src/sidepanel/trace-folding.ts` — added integer and endpoint-binding validation.
+- `tests/sidepanel/trace-folding.test.ts` — added malformed endpoint and fractional raw-index regression coverage.
+- `.superpowers/sdd/2026-09-09-behavioral-trace-folding-implementation-plan/task-1-report.md` — appended this fix report.

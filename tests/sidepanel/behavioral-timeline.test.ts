@@ -228,6 +228,25 @@ describe("createBehavioralTimeline", () => {
       .toBe("2");
   });
 
+  it("keeps stacked bands above non-interactive subtrack backgrounds", () => {
+    const analysis = overlappingRepeatedStateAnalysis();
+    const traceIndex = buildTraceStepIndex([10, 30, 50, 70]);
+    const handle = createBehavioralTimeline({
+      analysis,
+      traceIndex,
+      evidenceByPatternId: resolveBehavioralEvidenceMap(analysis.patterns, traceIndex),
+      currentIndex: 0,
+      onNavigate: vi.fn()
+    });
+
+    const lane = handle.element.querySelector('[data-timeline-kind="repeated_state"]')!;
+    const bands = [...lane.querySelectorAll<HTMLButtonElement>(".trace-viewer__timeline-band")];
+    const subtracks = [...lane.querySelectorAll<HTMLDivElement>(".trace-viewer__timeline-subtrack")];
+
+    expect(bands.map((band) => band.style.zIndex)).toEqual(["1", "1"]);
+    expect(subtracks.map((subtrack) => subtrack.style.pointerEvents)).toEqual(["none", "none"]);
+  });
+
   it("uses resolved interval order and pattern ID as deterministic layout tie-breakers", () => {
     const analysis = shuffledRepeatedStateAnalysis();
     const traceIndex = buildTraceStepIndex([10, 30, 50, 70]);

@@ -29,7 +29,9 @@ RuntimeMutation + BehavioralPattern
                 ↓
 Visual interpretation + Behavioral Evidence Navigation
                 ↓
-Behavioral Timeline + Chrome Side Panel visualization
+Repeated-transition Trace Folding
+                ↓
+Trace Outline + Behavioral Timeline + Chrome Side Panel visualization
 ```
 
 The Side Panel mirrors the active LeetCode editor while you type; pressing
@@ -53,6 +55,9 @@ The MVP is designed to expose:
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
 - factual behavioral signals for repeated observable state, no observable progress at a repeated execution anchor, and repeated execution/mutation motifs, with direct first/previous/next/last evidence navigation;
 - a behavioral trace timeline with raw scrubbing and compact evidence-span bands while preserving raw Previous/Next/Play navigation;
+- a folded Trace Outline for eligible contiguous `RepeatedTransitionPattern` regions, with collapsed summaries and expandable motif-repetition ranges;
+- collision-safe Behavioral Timeline subtracks so overlapping same-kind evidence bands remain independently visible;
+- raw Previous / Next / Play navigation remains authoritative even when folded presentation is available;
 - the trace prefix captured before a runtime error, trace limit, or hard timeout.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
@@ -62,6 +67,7 @@ Python execution stays off the Side Panel's main thread. Pyodide is bundled with
 - `completed` means local execution returned normally. It does **not** mean LeetCode Accepted.
 - `timeout` means the local visualization runtime exceeded its wall-clock limit. It does **not** mean LeetCode TLE.
 - Behavioral Signals describe evidence in the captured trace. They do not diagnose an infinite loop, correctness failure, bug, or fix.
+- Trace folding is a deterministic presentation projection over captured raw steps. It does not delete raw events or diagnose why execution failed.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
 - Dedicated linked-list visualization supports Python runtime objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display. Dedicated visualizers for trees, node-edge graphs, and DP tables are outside the current scope.
 - Web Worker and Pyodide isolation should not be treated as a hardened sandbox for hostile code.
@@ -95,3 +101,5 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 - [Behavioral Debugging Foundation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-debugging-foundation-implementation-plan.md)
 - [Behavioral Trace Navigation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-trace-navigation-design.md)
 - [Behavioral Trace Navigation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-trace-navigation-implementation-plan.md)
+- [Behavioral Trace Folding Design Spec](docs/superpowers/specs/2026-09-09-behavioral-trace-folding-design.md)
+- [Behavioral Trace Folding Implementation Plan](docs/superpowers/plans/2026-09-09-behavioral-trace-folding-implementation-plan.md)

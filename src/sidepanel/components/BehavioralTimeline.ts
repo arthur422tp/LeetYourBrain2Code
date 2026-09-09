@@ -20,6 +20,18 @@ export interface BehavioralTimelineHandle {
   setCurrentIndex(index: number): void;
 }
 
+interface TimelineBandLayout {
+  pattern: BehavioralPattern;
+  evidence: ResolvedBehavioralEvidence;
+  subtrack: number;
+}
+
+interface TimelineLaneLayout {
+  kind: BehavioralPattern["kind"];
+  subtrackCount: number;
+  bands: TimelineBandLayout[];
+}
+
 const KIND_ORDER: BehavioralPattern["kind"][] = [
   "repeated_state",
   "no_progress",
@@ -57,6 +69,33 @@ function clampIndex(index: number, total: number): number {
     return 0;
   }
   return Math.max(0, Math.min(Math.trunc(index), total - 1));
+}
+
+function layoutTimelineLane(
+  kind: BehavioralPattern["kind"],
+  entries: readonly {
+    pattern: BehavioralPattern;
+    evidence: ResolvedBehavioralEvidence;
+  }[]
+): TimelineLaneLayout {
+  const sorted = [...entries].sort((a, b) =>
+    a.evidence.firstIndex! - b.evidence.firstIndex! ||
+    a.evidence.lastIndex! - b.evidence.lastIndex! ||
+    a.pattern.patternId.localeCompare(b.pattern.patternId)
+  );
+  const lastIndexByTrack: number[] = [];
+  const bands = sorted.map((entry) => {
+    let subtrack = 0;
+    while (
+      subtrack < lastIndexByTrack.length &&
+      lastIndexByTrack[subtrack]! >= entry.evidence.firstIndex!
+    ) {
+      subtrack += 1;
+    }
+    lastIndexByTrack[subtrack] = entry.evidence.lastIndex!;
+    return { ...entry, subtrack };
+  });
+  return { kind, subtrackCount: Math.max(lastIndexByTrack.length, 1), bands };
 }
 
 export function createBehavioralTimeline(
@@ -120,12 +159,18 @@ export function createBehavioralTimeline(
       continue;
     }
 
+    const layout = layoutTimelineLane(kind, valid);
     const lane = createElement("div", "trace-viewer__timeline-lane");
-    lane.dataset.timelineKind = kind;
+    lane.dataset.timelineKind = layout.kind;
+    lane.dataset.subtrackCount = String(layout.subtrackCount);
     lane.append(createElement("span", "trace-viewer__timeline-lane-label", kindLabel(kind)));
-    const track = createElement("div", "trace-viewer__timeline-track");
+    const trackStack = createElement("div", "trace-viewer__timeline-track-stack");
+    const subtracks = Array.from({ length: layout.subtrackCount }, () =>
+      createElement("div", "trace-viewer__timeline-subtrack")
+    );
+    trackStack.append(...subtracks);
 
-    for (const { pattern, evidence } of valid) {
+    for (const { pattern, evidence, subtrack } of layout.bands) {
       const firstIndex = evidence.firstIndex!;
       const lastIndex = evidence.lastIndex!;
       const denominator = Math.max(total - 1, 1);
@@ -137,6 +182,7 @@ export function createBehavioralTimeline(
       band.type = "button";
       band.dataset.patternId = pattern.patternId;
       band.dataset.patternKind = pattern.kind;
+      band.dataset.subtrack = String(subtrack);
       band.style.left = `${left}%`;
       band.style.width = `${Math.min(width, 100 - left)}%`;
       band.setAttribute(
@@ -144,12 +190,12 @@ export function createBehavioralTimeline(
         `${kindLabel(pattern.kind)} evidence span steps ${firstStep} to ${lastStep}; ${evidence.evidenceIndexes.length} evidence steps`
       );
       band.addEventListener("click", () => options.onNavigate(firstIndex));
-      track.append(band);
+      subtracks[subtrack]!.append(band);
       activeBands.push({ button: band, evidence });
       renderedBands += 1;
     }
 
-    lane.append(track);
+    lane.append(trackStack);
     lanes.append(lane);
   }
 

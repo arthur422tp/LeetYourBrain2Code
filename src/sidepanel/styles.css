@@ -1063,7 +1063,14 @@ button.is-primary:hover:not(:disabled) {
   font-weight: 700;
 }
 
-.trace-viewer__timeline-track {
+.trace-viewer__timeline-track-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.trace-viewer__timeline-subtrack {
   position: relative;
   height: 18px;
   overflow: hidden;

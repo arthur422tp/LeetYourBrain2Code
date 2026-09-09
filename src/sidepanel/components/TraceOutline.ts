@@ -74,7 +74,7 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
     const inspect = createElement("button", "trace-viewer__outline-inspect", "Inspect") as HTMLButtonElement;
     inspect.type = "button";
     inspect.dataset.outlineAction = "inspect";
-    inspect.setAttribute("aria-label", `Inspect motif repetition ${iteration.iteration}`);
+    inspect.setAttribute("aria-label", `Inspect motif repetition ${iteration.iteration} · ${displayRange(iteration.startIndex, iteration.endIndex)}`);
     inspect.addEventListener("click", () => options.onNavigate(iteration.startIndex));
     row.append(inspect);
     return { startIndex: iteration.startIndex, endIndex: iteration.endIndex, row };
@@ -109,7 +109,7 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
       toggle.type = "button";
       toggle.dataset.outlineAction = "toggle";
       toggle.setAttribute("aria-expanded", "false");
-      toggle.setAttribute("aria-label", "Toggle motif repetitions");
+      toggle.setAttribute("aria-label", `Toggle motif repetitions · ${displayRange(segment.startIndex, segment.endIndex)}`);
       const iterationHost = createElement("div", "trace-viewer__outline-iterations");
       toggle.addEventListener("click", () => {
         if (expandedPatternIds.has(segment.patternId)) {

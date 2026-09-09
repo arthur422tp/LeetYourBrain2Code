@@ -282,24 +282,64 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector(".trace-viewer__locals")?.textContent).toContain("left");
   });
 
-  it("keeps fold expansion presentation-only while direct Inspect stops autoplay", () => {
+  it("preserves the raw cursor and playback deadline across expansion and collapse until Inspect", () => {
     vi.useFakeTimers();
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    const schedulePlayback = vi.spyOn(window, "setInterval");
+    const clearPlayback = vi.spyOn(window, "clearInterval");
     try {
-      const view = createTraceVisualizer(repeatedTransitionFoldSession());
+      view.setStep(1);
       view.element.querySelector<HTMLButtonElement>("#trace-play")!.click();
       expect(view.element.dataset.playing).toBe("true");
+      expect(schedulePlayback).toHaveBeenCalledTimes(1);
+      const playbackTimer = schedulePlayback.mock.results[0]!.value;
 
-      view.element.querySelector<HTMLButtonElement>(
+      const toggle = view.element.querySelector<HTMLButtonElement>(
         '[data-segment-kind="repeated_transition_fold"] [data-outline-action="toggle"]'
-      )!.click();
+      )!;
+      vi.advanceTimersByTime(200);
+      toggle.click();
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(view.element.dataset.stepIndex).toBe("1");
       expect(view.element.dataset.playing).toBe("true");
+      expect(schedulePlayback).toHaveBeenCalledTimes(1);
+      expect(clearPlayback).not.toHaveBeenCalled();
 
+      vi.advanceTimersByTime(200);
+      toggle.click();
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(view.element.querySelectorAll(".trace-viewer__outline-iteration")).toHaveLength(0);
+      expect(view.element.dataset.stepIndex).toBe("1");
+      expect(view.element.dataset.playing).toBe("true");
+      expect(schedulePlayback).toHaveBeenCalledTimes(1);
+      expect(clearPlayback).not.toHaveBeenCalled();
+
+      // The original 700 ms deadline survives both toggles; neither restarts the interval.
+      vi.advanceTimersByTime(299);
+      expect(view.element.dataset.stepIndex).toBe("1");
+      vi.advanceTimersByTime(1);
+      expect(view.element.dataset.stepIndex).toBe("2");
+      expect(view.element.querySelector(".trace-viewer__step-label")?.textContent).toBe("Step 3 / 7");
+      vi.advanceTimersByTime(700);
+      expect(view.element.dataset.stepIndex).toBe("3");
+      expect(view.element.dataset.playing).toBe("true");
+      expect(schedulePlayback).toHaveBeenCalledTimes(1);
+      expect(clearPlayback).not.toHaveBeenCalled();
+
+      toggle.click();
       view.element.querySelector<HTMLButtonElement>(
-        '[data-segment-kind="repeated_transition_fold"] [data-outline-action="inspect"]'
+        '[data-iteration="3"] [data-outline-action="inspect"]'
       )!.click();
       expect(view.element.dataset.playing).toBe("false");
-      view.dispose();
+      expect(view.element.dataset.stepIndex).toBe("5");
+      expect(clearPlayback).toHaveBeenCalledExactlyOnceWith(playbackTimer);
+      vi.advanceTimersByTime(1400);
+      expect(view.element.dataset.stepIndex).toBe("5");
+      expect(view.element.querySelector(".trace-viewer__step-label")?.textContent).toBe("Step 6 / 7");
     } finally {
+      view.dispose();
+      schedulePlayback.mockRestore();
+      clearPlayback.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -314,7 +354,21 @@ describe("createTraceVisualizer", () => {
   });
 
   it("synchronizes expanded motif repetition navigation to one raw step", () => {
-    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    const base = repeatedTransitionFoldSession();
+    // Preserve the accepted priming event and six-event motif; add captured output
+    // to distinguish the destination's accumulated stdout from adjacent steps.
+    const captured: TraceSession = {
+      ...base,
+      events: base.events.map((event) => ({ ...event, stdoutDelta: `captured ${event.step}\n` })),
+      stdout: "captured 1\ncaptured 2\ncaptured 3\ncaptured 4\ncaptured 5\ncaptured 6\ncaptured 7\n"
+    };
+    const view = createTraceVisualizer(captured);
+    view.setStep(2);
+    expect(view.element.querySelector('[data-pointer-name="left"]')?.getAttribute("data-pointer-index")).toBe("1");
+    expect(view.element.querySelector('[data-local-name="left"] .trace-viewer__local-value')?.textContent).toBe("1");
+    expect(view.element.querySelector(".trace-viewer__mutations")?.textContent).toContain("0 → 1");
+    expect(view.element.querySelector(".trace-viewer__call-line")?.textContent).toBe("line 6");
+    expect(view.element.querySelector(".trace-viewer__stdout pre")?.textContent).toBe("captured 1\ncaptured 2\ncaptured 3\n");
     view.element.querySelector<HTMLButtonElement>(
       '[data-segment-kind="repeated_transition_fold"] [data-outline-action="toggle"]'
     )!.click();
@@ -326,6 +380,19 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector(".trace-viewer__timeline-current")?.textContent).toBe("Step 4 / 7");
     expect(view.element.querySelector<HTMLElement>(".trace-viewer__code-line.is-active")?.dataset.line).toBe("5");
     expect(view.element.querySelector('[data-iteration="2"]')?.classList.contains("is-active")).toBe(true);
+    expect(view.element.dataset.stepIndex).toBe("3");
+    expect(view.element.querySelector(".trace-viewer__visual-state-body .trace-viewer__state-meta")?.textContent).toBe("Line 5");
+    expect(view.element.querySelector('[data-pointer-name="left"]')?.getAttribute("data-pointer-index")).toBe("0");
+    const mutations = view.element.querySelectorAll(".trace-viewer__mutation-row");
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]?.querySelector(".trace-viewer__mutation-name")?.textContent).toBe("left");
+    expect(mutations[0]?.querySelector(".trace-viewer__mutation-value")?.textContent).toBe("1 → 0");
+    expect(view.element.querySelector('[data-local-name="left"] .trace-viewer__local-value')?.textContent).toBe("0");
+    expect(view.element.querySelectorAll(".trace-viewer__call-frame")).toHaveLength(1);
+    expect(view.element.querySelector(".trace-viewer__call-frame.is-active code")?.textContent).toBe("twoSum");
+    expect(view.element.querySelector(".trace-viewer__call-frame.is-active .trace-viewer__call-line")?.textContent).toBe("line 5");
+    expect(view.element.querySelector(".trace-viewer__stdout pre")?.textContent).toBe("captured 1\ncaptured 2\ncaptured 3\ncaptured 4\n");
+    view.dispose();
   });
 
   it("renders one raw-only outline when no fold is eligible", () => {

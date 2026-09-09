@@ -5,12 +5,17 @@ import {
   buildTraceStepIndex,
   resolveBehavioralEvidenceMap
 } from "../behavioral-navigation";
+import { buildTraceFoldModel } from "../trace-folding";
 import { createBehavioralSignals } from "./BehavioralSignals";
 import {
   createBehavioralTimeline,
   type BehavioralTimelineHandle
 } from "./BehavioralTimeline";
 import { createMutationList } from "./MutationList";
+import {
+  createTraceOutline,
+  type TraceOutlineHandle
+} from "./TraceOutline";
 import { formatValue } from "./value-format";
 import {
   createVisualizer,
@@ -245,6 +250,11 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     interpretation.behavioralAnalysis.patterns,
     traceIndex
   );
+  const traceFoldModel = buildTraceFoldModel(
+    session.events.length,
+    interpretation.behavioralAnalysis.patterns,
+    evidenceByPatternId
+  );
   const root = createElement("section", "trace-viewer");
   root.id = "trace-viewer";
 
@@ -302,6 +312,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   let currentIndex = 0;
   let timer: number | null = null;
   let navigateDirect: (index: number) => void;
+  let outlineHandle: TraceOutlineHandle | null = null;
   let timelineHandle: BehavioralTimelineHandle | null = null;
 
   const stopPlaying = (): void => {
@@ -387,6 +398,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     previous.disabled = currentIndex === 0;
     next.disabled = currentIndex === interpretation.visualStates.length - 1;
     play.disabled = interpretation.visualStates.length < 2;
+    outlineHandle?.setCurrentIndex(currentIndex);
     timelineHandle?.setCurrentIndex(currentIndex);
     if (currentIndex === interpretation.visualStates.length - 1) {
       stopPlaying();
@@ -397,6 +409,12 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     stopPlaying();
     setStep(index);
   };
+
+  outlineHandle = createTraceOutline({
+    model: traceFoldModel,
+    currentIndex,
+    onNavigate: navigateDirect
+  });
 
   timelineHandle = createBehavioralTimeline({
     analysis: interpretation.behavioralAnalysis,
@@ -432,6 +450,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     callStackPanel,
     outputPanel.panel,
     debugPanel.panel,
+    outlineHandle.element,
     timelineHandle.element,
     controls
   );

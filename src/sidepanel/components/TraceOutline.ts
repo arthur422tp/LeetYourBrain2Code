@@ -35,6 +35,9 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
 
 export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHandle {
   const root = createElement("div", "trace-viewer__outline");
+  const header = createElement("div", "trace-viewer__outline-header", "Trace Outline");
+  const segmentHost = createElement("div", "trace-viewer__outline-segments");
+  root.append(header, segmentHost);
   const expandedPatternIds = new Set<string>();
   const segmentRows: Array<{ segment: TracePresentationSegment; row: HTMLDivElement }> = [];
   const iterationRows = new Map<string, Array<{
@@ -45,7 +48,7 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
   let currentIndex = options.currentIndex;
 
   if (options.model.segments.length === 0) {
-    root.append(createElement("div", "trace-viewer__empty", "No execution steps were captured."));
+    segmentHost.append(createElement("div", "trace-viewer__empty", "No execution steps were captured."));
     return { element: root, setCurrentIndex: () => {} };
   }
 
@@ -80,24 +83,26 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
   for (const segment of options.model.segments) {
     const row = createElement("div", "trace-viewer__outline-segment");
     row.dataset.segmentId = segment.segmentId;
+    row.dataset.segmentKind = segment.kind;
     segmentRows.push({ segment, row });
+    const rowContent = createElement("div", "trace-viewer__outline-row");
     const content = createElement("div", "trace-viewer__outline-content");
     const title = segment.kind === "repeated_transition_fold"
       ? `Repeated ${segment.periodSteps}-step behavior × ${segment.repeatCount}`
       : "Captured trace steps";
-    content.append(createElement("strong", undefined, title));
+    content.append(createElement("strong", "trace-viewer__outline-title", title));
     const meta = segment.kind === "repeated_transition_fold"
       ? `${displayRange(segment.startIndex, segment.endIndex)} · ${segment.endIndex - segment.startIndex + 1} captured steps`
       : displayRange(segment.startIndex, segment.endIndex);
     content.append(createElement("span", "trace-viewer__outline-meta", meta));
-    row.append(content);
+    rowContent.append(content);
 
     const inspect = createElement("button", "trace-viewer__outline-inspect", "Inspect") as HTMLButtonElement;
     inspect.type = "button";
     inspect.dataset.outlineAction = "inspect";
     inspect.setAttribute("aria-label", `Inspect ${displayRange(segment.startIndex, segment.endIndex)}`);
     inspect.addEventListener("click", () => options.onNavigate(segment.startIndex));
-    row.append(inspect);
+    rowContent.append(inspect);
 
     if (segment.kind === "repeated_transition_fold") {
       const toggle = createElement("button", "trace-viewer__outline-toggle", "▶") as HTMLButtonElement;
@@ -123,10 +128,11 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
           syncCurrentClasses(currentIndex);
         }
       });
-      row.prepend(toggle);
+      rowContent.prepend(toggle);
       row.append(iterationHost);
     }
-    root.append(row);
+    row.prepend(rowContent);
+    segmentHost.append(row);
   }
 
   syncCurrentClasses(currentIndex);

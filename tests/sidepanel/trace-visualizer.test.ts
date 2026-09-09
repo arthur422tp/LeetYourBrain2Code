@@ -99,6 +99,36 @@ function alternatingRepeatedStateSession(): TraceSession {
   return { ...base, events };
 }
 
+function repeatedTransitionFoldSession(): TraceSession {
+  const base = session();
+  const values = [0, 1, 0, 1, 0, 1];
+  const primingEvent = {
+    ...base.events[0]!,
+    step: 1,
+    line: 6,
+    locals: {
+      nums: list([2, 7]),
+      left: int(9),
+      right: int(1),
+      target: int(9),
+      total: int(9)
+    }
+  };
+  const motifEvents = values.map((value, index) => ({
+    ...base.events[0]!,
+    step: index + 2,
+    line: index % 2 === 0 ? 5 : 6,
+    locals: {
+      nums: list([2, 7]),
+      left: int(value),
+      right: int(1),
+      target: int(9),
+      total: int(9)
+    }
+  }));
+  return { ...base, events: [primingEvent, ...motifEvents] };
+}
+
 function twoSumSession(): TraceSession {
   return {
     ...session(),
@@ -229,6 +259,91 @@ function cyclicLinkedListSession(): TraceSession {
 }
 
 describe("createTraceVisualizer", () => {
+  it("fixture exposes a repeated-transition fold candidate", () => {
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    expect(view.element.querySelector('[data-pattern-kind="repeated_transition"]')).not.toBeNull();
+  });
+
+  it("mounts Trace Outline for non-empty traces", () => {
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    expect(view.element.querySelector(".trace-viewer__outline")).not.toBeNull();
+  });
+
+  it("routes fold Inspect through the existing raw step owner", () => {
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    const inspect = view.element.querySelector<HTMLButtonElement>(
+      '[data-segment-kind="repeated_transition_fold"] [data-outline-action="inspect"]'
+    )!;
+    inspect.click();
+
+    expect(view.element.querySelector('.trace-viewer__outline-segment.is-active[data-segment-kind="repeated_transition_fold"]'))
+      .not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__code-line.is-active")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__locals")?.textContent).toContain("left");
+  });
+
+  it("keeps fold expansion presentation-only while direct Inspect stops autoplay", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createTraceVisualizer(repeatedTransitionFoldSession());
+      view.element.querySelector<HTMLButtonElement>("#trace-play")!.click();
+      expect(view.element.dataset.playing).toBe("true");
+
+      view.element.querySelector<HTMLButtonElement>(
+        '[data-segment-kind="repeated_transition_fold"] [data-outline-action="toggle"]'
+      )!.click();
+      expect(view.element.dataset.playing).toBe("true");
+
+      view.element.querySelector<HTMLButtonElement>(
+        '[data-segment-kind="repeated_transition_fold"] [data-outline-action="inspect"]'
+      )!.click();
+      expect(view.element.dataset.playing).toBe("false");
+      view.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps raw Previous and Next one-step navigation when folds exist", () => {
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    view.setStep(2);
+    view.element.querySelector<HTMLButtonElement>("#trace-next")!.click();
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent).toContain("Step 4 /");
+    view.element.querySelector<HTMLButtonElement>("#trace-previous")!.click();
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent).toContain("Step 3 /");
+  });
+
+  it("synchronizes expanded motif repetition navigation to one raw step", () => {
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+    view.element.querySelector<HTMLButtonElement>(
+      '[data-segment-kind="repeated_transition_fold"] [data-outline-action="toggle"]'
+    )!.click();
+    view.element.querySelector<HTMLButtonElement>(
+      '[data-iteration="2"] [data-outline-action="inspect"]'
+    )!.click();
+
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent).toBe("Step 4 / 7");
+    expect(view.element.querySelector(".trace-viewer__timeline-current")?.textContent).toBe("Step 4 / 7");
+    expect(view.element.querySelector<HTMLElement>(".trace-viewer__code-line.is-active")?.dataset.line).toBe("5");
+    expect(view.element.querySelector('[data-iteration="2"]')?.classList.contains("is-active")).toBe(true);
+  });
+
+  it("renders one raw-only outline when no fold is eligible", () => {
+    const view = createTraceVisualizer(session());
+    expect(view.element.querySelectorAll('[data-segment-kind="raw_range"]')).toHaveLength(1);
+    expect(view.element.querySelector('[data-segment-kind="repeated_transition_fold"]')).toBeNull();
+  });
+
+  it("keeps timeout-prefix fold wording factual", () => {
+    const timedOut: TraceSession = {
+      ...repeatedTransitionFoldSession(),
+      status: "timeout",
+      terminationReason: "hard_timeout"
+    };
+    const text = createTraceVisualizer(timedOut).element.textContent ?? "";
+    expect(text).not.toMatch(/LeetCode TLE|root cause|caused the timeout|infinite loop/i);
+  });
+
   it("renders What Changed from mutations without unchanged-variable groups", () => {
     const view = createTraceVisualizer(session());
     const panelTitles = [...view.element.querySelectorAll(".trace-viewer__panel-title")]

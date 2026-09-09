@@ -168,7 +168,6 @@ export function createBehavioralTimeline(
     const subtracks = Array.from({ length: layout.subtrackCount }, () =>
       createElement("div", "trace-viewer__timeline-subtrack")
     );
-    trackStack.append(...subtracks);
 
     for (const { pattern, evidence, subtrack } of layout.bands) {
       const firstIndex = evidence.firstIndex!;
@@ -183,6 +182,7 @@ export function createBehavioralTimeline(
       band.dataset.patternId = pattern.patternId;
       band.dataset.patternKind = pattern.kind;
       band.dataset.subtrack = String(subtrack);
+      band.style.top = `${subtrack * 21 + 3}px`;
       band.style.left = `${left}%`;
       band.style.width = `${Math.min(width, 100 - left)}%`;
       band.setAttribute(
@@ -190,11 +190,12 @@ export function createBehavioralTimeline(
         `${kindLabel(pattern.kind)} evidence span steps ${firstStep} to ${lastStep}; ${evidence.evidenceIndexes.length} evidence steps`
       );
       band.addEventListener("click", () => options.onNavigate(firstIndex));
-      subtracks[subtrack]!.append(band);
+      trackStack.append(band);
       activeBands.push({ button: band, evidence });
       renderedBands += 1;
     }
 
+    trackStack.append(...subtracks);
     lane.append(trackStack);
     lanes.append(lane);
   }

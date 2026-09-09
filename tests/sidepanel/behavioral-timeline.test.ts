@@ -99,6 +99,72 @@ function nonOverlappingRepeatedStateAnalysis(): BehavioralAnalysis {
   };
 }
 
+function touchingRepeatedStateAnalysis(): BehavioralAnalysis {
+  return {
+    patterns: [
+      {
+        kind: "repeated_state",
+        patternId: "a",
+        startStep: 10,
+        endStep: 30,
+        repeatCount: 2,
+        evidenceSteps: [10, 30],
+        location: { frameId: 1, functionName: "solve", line: 5 },
+        stateFingerprintKey: "a"
+      },
+      {
+        kind: "repeated_state",
+        patternId: "b",
+        startStep: 30,
+        endStep: 50,
+        repeatCount: 2,
+        evidenceSteps: [30, 50],
+        location: { frameId: 1, functionName: "solve", line: 8 },
+        stateFingerprintKey: "b"
+      }
+    ],
+    stepAnnotations: []
+  };
+}
+
+function shuffledRepeatedStateAnalysis(): BehavioralAnalysis {
+  return {
+    patterns: [
+      {
+        kind: "repeated_state",
+        patternId: "later",
+        startStep: 50,
+        endStep: 70,
+        repeatCount: 2,
+        evidenceSteps: [50, 70],
+        location: { frameId: 1, functionName: "solve", line: 11 },
+        stateFingerprintKey: "later"
+      },
+      {
+        kind: "repeated_state",
+        patternId: "zeta",
+        startStep: 10,
+        endStep: 30,
+        repeatCount: 2,
+        evidenceSteps: [10, 30],
+        location: { frameId: 1, functionName: "solve", line: 8 },
+        stateFingerprintKey: "zeta"
+      },
+      {
+        kind: "repeated_state",
+        patternId: "beta",
+        startStep: 10,
+        endStep: 30,
+        repeatCount: 2,
+        evidenceSteps: [10, 30],
+        location: { frameId: 1, functionName: "solve", line: 5 },
+        stateFingerprintKey: "beta"
+      }
+    ],
+    stepAnnotations: []
+  };
+}
+
 function render(currentIndex = 0, onNavigate = vi.fn()) {
   const traceIndex = buildTraceStepIndex([10, 30, 50, 70]);
   const evidenceByPatternId = resolveBehavioralEvidenceMap(analysis.patterns, traceIndex);
@@ -162,8 +228,8 @@ describe("createBehavioralTimeline", () => {
       .toBe("2");
   });
 
-  it("keeps deterministic pattern order and exact evidence active state", () => {
-    const analysis = overlappingRepeatedStateAnalysis();
+  it("uses resolved interval order and pattern ID as deterministic layout tie-breakers", () => {
+    const analysis = shuffledRepeatedStateAnalysis();
     const traceIndex = buildTraceStepIndex([10, 30, 50, 70]);
     const handle = createBehavioralTimeline({
       analysis,
@@ -176,8 +242,25 @@ describe("createBehavioralTimeline", () => {
     const bands = [...handle.element.querySelectorAll<HTMLButtonElement>(
       '[data-timeline-kind="repeated_state"] .trace-viewer__timeline-band'
     )];
-    expect(bands.map((band) => band.dataset.patternId)).toEqual(["a", "b"]);
+    expect(bands.map((band) => band.dataset.patternId)).toEqual(["beta", "zeta", "later"]);
     expect(bands.filter((band) => band.classList.contains("is-active"))).toHaveLength(2);
+  });
+
+  it("separates bands that share a closed-interval endpoint", () => {
+    const analysis = touchingRepeatedStateAnalysis();
+    const traceIndex = buildTraceStepIndex([10, 30, 50, 70]);
+    const handle = createBehavioralTimeline({
+      analysis,
+      traceIndex,
+      evidenceByPatternId: resolveBehavioralEvidenceMap(analysis.patterns, traceIndex),
+      currentIndex: 0,
+      onNavigate: vi.fn()
+    });
+
+    const bands = [...handle.element.querySelectorAll<HTMLButtonElement>(
+      '[data-timeline-kind="repeated_state"] .trace-viewer__timeline-band'
+    )];
+    expect(bands.map((band) => band.dataset.subtrack)).toEqual(["0", "1"]);
   });
 
   it("reuses a subtrack for non-overlapping same-kind bands", () => {

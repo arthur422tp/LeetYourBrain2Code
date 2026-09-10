@@ -129,6 +129,44 @@ function repeatedTransitionFoldSession(): TraceSession {
   return { ...base, events: [primingEvent, ...motifEvents] };
 }
 
+function failureFirstSession(
+  status: "timeout" | "trace_limit" | "exception"
+): TraceSession {
+  const base = repeatedTransitionFoldSession();
+  return {
+    ...base,
+    status,
+    terminationReason:
+      status === "timeout" ? "hard_timeout" :
+      status === "trace_limit" ? "step_limit" :
+      "runtime_exception",
+    ...(status === "exception"
+      ? {
+          exception: {
+            type: "RuntimeError",
+            message: "boom",
+            line: 5,
+            stack: [],
+            frameId: 1
+          }
+        }
+      : {})
+  };
+}
+
+function outOfWindowFailureFirstSession(): TraceSession {
+  const base = failureFirstSession("timeout");
+  const trailingEvents = Array.from({ length: 40 }, (_, index) => ({
+    ...base.events[0]!,
+    step: base.events.length + index + 1,
+    line: 100 + index,
+    locals: {
+      [`value${index}`]: int(index)
+    }
+  }));
+  return { ...base, events: [...base.events, ...trailingEvents] };
+}
+
 function twoSumSession(): TraceSession {
   return {
     ...session(),
@@ -259,6 +297,111 @@ function cyclicLinkedListSession(): TraceSession {
 }
 
 describe("createTraceVisualizer", () => {
+  it.each(["timeout", "trace_limit", "exception"] as const)(
+    "%s renders exactly one Failure-First entry",
+    (status) => {
+      const view = createTraceVisualizer(failureFirstSession(status));
+
+      expect(view.element.querySelectorAll(".trace-viewer__failure-first")).toHaveLength(1);
+    }
+  );
+
+  it("does not render Failure-First for a completed session", () => {
+    const view = createTraceVisualizer(repeatedTransitionFoldSession());
+
+    expect(view.element.querySelector(".trace-viewer__failure-first")).toBeNull();
+  });
+
+  it("renders Failure-First without moving the raw cursor", () => {
+    const view = createTraceVisualizer(failureFirstSession("timeout"));
+
+    expect(view.element.dataset.stepIndex).toBe("0");
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toContain("Step 1");
+  });
+
+  it("lands Inspect on the first raw index of the final repeated motif", () => {
+    const view = createTraceVisualizer(failureFirstSession("timeout"));
+    const inspect = view.element.querySelector<HTMLButtonElement>(
+      ".trace-viewer__failure-first-inspect"
+    )!;
+
+    inspect.click();
+
+    expect(view.element.dataset.stepIndex).toBe("5");
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 6 / 7");
+  });
+
+  it("stops autoplay when Failure-First Inspect navigates", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createTraceVisualizer(failureFirstSession("timeout"));
+      const play = view.element.querySelector<HTMLButtonElement>("#trace-play")!;
+      play.click();
+
+      expect(view.element.dataset.playing).toBe("true");
+
+      view.element.querySelector<HTMLButtonElement>(
+        ".trace-viewer__failure-first-inspect"
+      )!.click();
+
+      expect(view.element.dataset.playing).toBe("false");
+      expect(play.textContent).toBe("▶ Play");
+      vi.advanceTimersByTime(1400);
+      expect(view.element.dataset.stepIndex).toBe("5");
+      view.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps every synchronized view on the inspected raw step", () => {
+    const base = failureFirstSession("timeout");
+    const captured: TraceSession = {
+      ...base,
+      events: base.events.map((event) => ({
+        ...event,
+        stdoutDelta: `captured ${event.step}\n`
+      })),
+      stdout: base.events.map((event) => `captured ${event.step}\n`).join("")
+    };
+    const view = createTraceVisualizer(captured);
+
+    view.element.querySelector<HTMLButtonElement>(
+      ".trace-viewer__failure-first-inspect"
+    )!.click();
+
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent)
+      .toBe("Step 6 / 7");
+    expect(view.element.querySelector<HTMLElement>(".trace-viewer__code-line.is-active")?.dataset.line)
+      .toBe("5");
+    expect(view.element.querySelector(".trace-viewer__visual-state-body .trace-viewer__state-meta")?.textContent)
+      .toBe("Line 5");
+    expect(view.element.querySelector(".trace-viewer__mutations")?.textContent)
+      .toContain("1 → 0");
+    expect(view.element.querySelector('[data-pattern-kind="repeated_transition"]')?.classList.contains("is-active"))
+      .toBe(true);
+    expect(view.element.querySelector(".trace-viewer__locals")?.textContent)
+      .toContain("left");
+    expect(view.element.querySelector(".trace-viewer__call-frame.is-active .trace-viewer__call-line")?.textContent)
+      .toBe("line 5");
+    expect(view.element.querySelector(".trace-viewer__stdout pre")?.textContent)
+      .toBe("captured 1\ncaptured 2\ncaptured 3\ncaptured 4\ncaptured 5\ncaptured 6\n");
+    expect(view.element.querySelector(".trace-viewer__outline-segment.is-active[data-segment-kind=\"repeated_transition_fold\"]"))
+      .not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__timeline-current")?.textContent)
+      .toBe("Step 6 / 7");
+  });
+
+  it("keeps behavioral signals while suppressing an out-of-window recommendation", () => {
+    const view = createTraceVisualizer(outOfWindowFailureFirstSession());
+
+    expect(view.element.querySelector(".trace-viewer__failure-first")).toBeNull();
+    expect(view.element.querySelector('[data-pattern-kind="repeated_transition"]'))
+      .not.toBeNull();
+  });
+
   it("fixture exposes a repeated-transition fold candidate", () => {
     const view = createTraceVisualizer(repeatedTransitionFoldSession());
     expect(view.element.querySelector('[data-pattern-kind="repeated_transition"]')).not.toBeNull();

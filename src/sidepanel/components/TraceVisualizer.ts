@@ -5,12 +5,14 @@ import {
   buildTraceStepIndex,
   resolveBehavioralEvidenceMap
 } from "../behavioral-navigation";
+import { selectFailureFirstEvidence } from "../failure-first-selection";
 import { buildTraceFoldModel } from "../trace-folding";
 import { createBehavioralSignals } from "./BehavioralSignals";
 import {
   createBehavioralTimeline,
   type BehavioralTimelineHandle
 } from "./BehavioralTimeline";
+import { createFailureFirstEntry } from "./FailureFirstEntry";
 import { createMutationList } from "./MutationList";
 import {
   createTraceOutline,
@@ -250,6 +252,12 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     interpretation.behavioralAnalysis.patterns,
     traceIndex
   );
+  const failureFirstSelection = selectFailureFirstEvidence(
+    session.status,
+    session.events.length,
+    interpretation.behavioralAnalysis.patterns,
+    evidenceByPatternId
+  );
   const traceFoldModel = buildTraceFoldModel(
     session.events.length,
     interpretation.behavioralAnalysis.patterns,
@@ -410,6 +418,13 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     setStep(index);
   };
 
+  const failureFirstEntry = failureFirstSelection
+    ? createFailureFirstEntry({
+        selection: failureFirstSelection,
+        onNavigate: navigateDirect
+      })
+    : null;
+
   outlineHandle = createTraceOutline({
     model: traceFoldModel,
     currentIndex,
@@ -442,8 +457,11 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     timer = window.setInterval(() => setStep(currentIndex + 1), PLAY_INTERVAL_MS);
   });
 
+  root.append(summary);
+  if (failureFirstEntry) {
+    root.append(failureFirstEntry);
+  }
   root.append(
-    summary,
     codePanel.panel,
     visualPanel.panel,
     inspectorGrid,

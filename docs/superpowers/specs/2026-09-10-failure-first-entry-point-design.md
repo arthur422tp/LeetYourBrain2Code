@@ -12,18 +12,7 @@ Core invariant:
 Start Here = deterministic inspection priority over validated captured evidence
 ```
 
-It is not:
-
-```text
-root-cause detection
-bug localization
-failure attribution
-correctness diagnosis
-infinite-loop detection
-LeetCode TLE diagnosis
-```
-
-The raw trace remains authoritative.
+It is not root-cause detection, bug localization, failure attribution, correctness diagnosis, infinite-loop detection, or LeetCode TLE diagnosis. The raw trace remains authoritative.
 
 ---
 
@@ -31,13 +20,7 @@ The raw trace remains authoritative.
 
 ### 2.1 No automatic navigation
 
-When an eligible recommendation exists, the Side Panel renders a `Start Here` card.
-
-The raw cursor is **not** moved automatically.
-
-The user must explicitly select `Inspect` before navigation occurs.
-
-This preserves the existing navigation contract and avoids presenting a recommendation as a hidden diagnosis.
+When an eligible recommendation exists, the Side Panel renders a `Start Here` card. The raw cursor is **not** moved automatically. The user must explicitly select `Inspect` before navigation occurs.
 
 ### 2.2 Eligible execution outcomes
 
@@ -59,23 +42,17 @@ input_error
 internal_error
 ```
 
-The selector uses `TraceSession.status` for this decision rather than enumerating `terminationReason` values.
-
-This keeps the policy stable if additional concrete termination reasons are later added under an existing status.
+The selector uses `TraceSession.status` rather than enumerating `terminationReason` values.
 
 ### 2.3 One recommendation only
 
-v0.1 renders at most one `Start Here` entry.
-
-If no candidate satisfies the validation and terminal-window rules, the component is not rendered at all.
-
-Do not render a placeholder such as `No recommendation`.
+v0.1 renders at most one `Start Here` entry. If no candidate satisfies validation and the terminal-window rule, the component is not rendered. Do not render a `No recommendation` placeholder.
 
 ---
 
 ## 3. Architecture
 
-The feature introduces a new pure selection layer between resolved behavioral evidence and presentation.
+The feature introduces a pure selection layer between resolved behavioral evidence and presentation:
 
 ```text
 TraceSession.events
@@ -99,9 +76,7 @@ ResolvedBehavioralEvidence
                            setStep()
 ```
 
-The behavioral analyzer remains unchanged.
-
-The selector consumes existing pattern and evidence contracts; it does not mutate or reinterpret them.
+The behavioral analyzer remains unchanged. The selector consumes existing pattern/evidence contracts and does not mutate or reinterpret them.
 
 Recommended files:
 
@@ -120,14 +95,13 @@ src/sidepanel/components/TraceVisualizer.ts
 
 ## 4. Failure-First Selection Model
 
-Recommended public contract:
+The selection is a discriminated union so `FailureFirstEntry` can render factual pattern-specific copy without querying the analyzer or receiving a second pattern object.
 
 ```ts
 export const FAILURE_FIRST_TERMINAL_WINDOW_STEPS = 32;
 
-export interface FailureFirstSelection {
+interface FailureFirstSelectionBase {
   patternId: string;
-  kind: BehavioralPattern["kind"];
   inspectIndex: number;
   evidenceStartIndex: number;
   evidenceEndIndex: number;
@@ -135,6 +109,28 @@ export interface FailureFirstSelection {
   repeatCount: number;
   reason: "nearest_terminal_evidence";
 }
+
+export interface RepeatedTransitionFailureFirstSelection
+  extends FailureFirstSelectionBase {
+  kind: "repeated_transition";
+  periodSteps: number;
+}
+
+export interface RepeatedStateFailureFirstSelection
+  extends FailureFirstSelectionBase {
+  kind: "repeated_state";
+}
+
+export interface NoProgressFailureFirstSelection
+  extends FailureFirstSelectionBase {
+  kind: "no_progress";
+  revisitCount: number;
+}
+
+export type FailureFirstSelection =
+  | RepeatedTransitionFailureFirstSelection
+  | RepeatedStateFailureFirstSelection
+  | NoProgressFailureFirstSelection;
 
 export function selectFailureFirstEvidence(
   status: TraceSessionStatus,
@@ -144,55 +140,33 @@ export function selectFailureFirstEvidence(
 ): FailureFirstSelection | null;
 ```
 
-The model deliberately excludes:
-
-```text
-confidence
-severity
-rootCause
-bugScore
-failureProbability
-diagnosis
-```
-
-No available evidence justifies those semantics.
+The model deliberately excludes confidence, severity, root cause, bug score, failure probability, and diagnosis fields.
 
 ---
 
 ## 5. Candidate Validation
 
-Failure-First is stricter than ordinary evidence navigation.
-
-Behavioral Signals may still expose whatever evidence can be safely resolved, but a `Start Here` recommendation must be based on **complete resolved evidence**.
+Failure-First is stricter than ordinary evidence navigation. A recommendation must be based on **complete resolved evidence**.
 
 For each pattern, a candidate is valid only when all of the following are true:
 
-1. the execution status is one of `exception`, `trace_limit`, or `timeout`;
+1. execution status is `exception`, `trace_limit`, or `timeout`;
 2. `rawTraceLength` is a positive integer;
 3. `pattern.repeatCount` is an integer greater than or equal to the behavioral analyzer minimum (`3` in v0.1);
-4. the pattern has an entry in `evidenceByPatternId`;
+4. an evidence-map entry exists for the pattern;
 5. `evidence.patternId === pattern.patternId`;
 6. `firstIndex` and `lastIndex` are non-null integers;
 7. every original `pattern.evidenceSteps` entry resolves exactly once;
 8. resolved `evidenceSteps` preserve the same identities and order as `pattern.evidenceSteps`;
-9. `evidenceSteps.length === evidenceIndexes.length`;
-10. resolved indexes are integers and strictly increasing;
-11. all resolved indexes are within `0..rawTraceLength - 1`;
-12. `firstIndex === evidenceIndexes[0]`;
-13. `lastIndex === evidenceIndexes[evidenceIndexes.length - 1]`;
-14. `lastIndex <= rawTraceLength - 1`;
+9. duplicate step identities are rejected;
+10. `evidenceSteps.length === evidenceIndexes.length`;
+11. resolved indexes are integers and strictly increasing;
+12. all resolved indexes are within `0..rawTraceLength - 1`;
+13. `firstIndex === evidenceIndexes[0]`;
+14. `lastIndex === evidenceIndexes[evidenceIndexes.length - 1]`;
 15. `distanceFromTermination <= FAILURE_FIRST_TERMINAL_WINDOW_STEPS`.
 
-Duplicate step identities, stale mappings, partial resolution, malformed endpoints, invalid repeat counts, out-of-bounds indexes, or reordered evidence make the candidate ineligible.
-
-Failure mode:
-
-```text
-invalid candidate → ignore candidate
-no valid candidates → return null
-```
-
-Do not repair, interpolate, or guess missing evidence.
+Invalid, stale, partial, duplicate-derived, reordered, or out-of-bounds evidence makes that candidate ineligible. Do not repair, interpolate, or guess missing evidence.
 
 ---
 
@@ -205,80 +179,46 @@ const terminalIndex = rawTraceLength - 1;
 const distanceFromTermination = terminalIndex - evidence.lastIndex;
 ```
 
-A candidate is eligible only when:
-
-```ts
-distanceFromTermination <= FAILURE_FIRST_TERMINAL_WINDOW_STEPS
-```
-
 For v0.1:
 
 ```ts
-FAILURE_FIRST_TERMINAL_WINDOW_STEPS = 32
+FAILURE_FIRST_TERMINAL_WINDOW_STEPS = 32;
 ```
 
-This fixed window is intentionally simple and explainable.
-
-A pattern that is the nearest available pattern but more than 32 captured raw steps from termination is **not** recommended.
+A candidate is eligible only when `distanceFromTermination <= 32`. A nearest pattern farther than 32 captured raw steps from termination is not recommended.
 
 ---
 
 ## 7. Ranking
 
-Among eligible candidates, choose exactly one using the following deterministic ordering:
+Among eligible candidates, choose exactly one using this deterministic ordering:
 
 1. smaller `distanceFromTermination`;
-2. larger evidence span;
+2. larger evidence span (`evidenceEndIndex - evidenceStartIndex + 1`);
 3. larger `repeatCount`;
 4. lexicographically smaller `patternId`.
 
-Evidence span is:
+There is **no pattern-kind priority**. Do not encode `repeated_transition > no_progress > repeated_state` or any other semantic severity ordering.
 
-```ts
-const evidenceSpanLength = evidenceEndIndex - evidenceStartIndex + 1;
-```
-
-Pseudo-order:
-
-```text
-nearest termination
-    ↓
-longest evidence span
-    ↓
-higher repeat count
-    ↓
-stable pattern ID
-```
-
-There is **no pattern-kind priority**.
-
-Do not define rules such as:
-
-```text
-repeated_transition > no_progress > repeated_state
-```
-
-Such a ranking would imply that one behavioral pattern kind is inherently more diagnostic than another.
+The selected result copies only factual metadata needed by presentation: `periodSteps` for repeated transition and `revisitCount` for no progress.
 
 ---
 
 ## 8. Inspect Landing Semantics
 
-The ranking endpoint and inspection landing point are deliberately separate.
+Ranking endpoint and inspection landing point are deliberately separate.
 
 ### 8.1 `RepeatedTransitionPattern`
 
-Navigate to the beginning of the **last complete motif repetition**.
-
-A repeated-transition candidate has additional fail-closed requirements beyond the common validation in Section 5:
+Navigate to the beginning of the **last complete motif repetition**. A transition candidate has additional fail-closed requirements:
 
 - `periodSteps` is a positive integer;
 - `repeatCount` is an integer greater than or equal to `3`;
 - `evidenceIndexes.length === periodSteps * repeatCount`;
-- resolved evidence indexes are contiguous, i.e. for every offset `k`, `evidenceIndexes[k] === firstIndex + k`;
+- resolved evidence indexes are contiguous: for every offset `k`, `evidenceIndexes[k] === firstIndex + k`;
 - the final motif repetition fits entirely inside the resolved evidence.
 
-Only after those conditions hold is the landing point defined as:
+Then:
 
 ```ts
 inspectIndex = evidenceEndIndex - periodSteps + 1;
@@ -296,45 +236,31 @@ Execution termination: Step 70
 Inspect → Step 65
 ```
 
-This presents the final complete observed motif rather than landing at the motif tail.
-
-These requirements intentionally make repeated-transition Failure-First selection at least as strict about evidence completeness as Trace Folding, while remaining independent of fold overlap selection and Trace Outline presentation.
+These requirements make transition Failure-First eligibility at least as strict about evidence completeness as Trace Folding, while remaining independent of fold overlap selection.
 
 ### 8.2 `RepeatedStatePattern`
 
-Navigate to the final resolved evidence index:
-
 ```ts
 inspectIndex = evidenceEndIndex;
 ```
 
-Sparse evidence is allowed as long as the common completeness and ordering requirements in Section 5 hold.
+Sparse evidence is allowed if the common completeness and ordering requirements hold.
 
 ### 8.3 `NoProgressPattern`
 
-Navigate to the final resolved evidence index:
-
 ```ts
 inspectIndex = evidenceEndIndex;
 ```
 
-Sparse evidence is allowed as long as the common completeness and ordering requirements in Section 5 hold.
+Sparse evidence is allowed if the common completeness and ordering requirements hold.
 
 ### 8.4 Defensive fallback
 
-If the required landing point cannot be established exactly, the candidate is rejected.
-
-Do not substitute another nearby raw index.
+If the required landing point cannot be established exactly, reject the candidate. Do not substitute another nearby raw index.
 
 ---
 
 ## 9. `Start Here` Component
-
-Recommended component:
-
-```text
-src/sidepanel/components/FailureFirstEntry.ts
-```
 
 Recommended interface:
 
@@ -349,25 +275,13 @@ export function createFailureFirstEntry(
 ): HTMLDivElement;
 ```
 
-The component must not:
-
-- rank candidates;
-- call the behavioral analyzer;
-- resolve evidence;
-- own the raw cursor;
-- own autoplay state;
-- call Pyodide;
-- mutate the selection.
-
-It only renders a validated selection and emits a raw-index navigation intent.
+The component must not rank candidates, call the analyzer, resolve evidence, own the raw cursor/autoplay state, call Pyodide, mutate the selection, or look up the original `BehavioralPattern`. It renders the discriminated selection and emits a raw-index navigation intent.
 
 ---
 
 ## 10. UI Placement
 
-Render `Start Here` immediately below the Trace summary and before the Code panel.
-
-Recommended hierarchy:
+Render `Start Here` immediately below the Trace summary and before the Code panel:
 
 ```text
 Trace
@@ -394,49 +308,24 @@ The component is an entry point, not another inspector panel.
 
 Copy must remain factual and observation-based.
 
-Recommended titles:
-
-### Repeated transition
+Pattern titles:
 
 ```text
-Repeated 4-step behavior × 18
+RepeatedTransition → Repeated {periodSteps}-step behavior × {repeatCount}
+RepeatedState      → Repeated observable state × {repeatCount}
+NoProgress         → No observable progress across {revisitCount} revisits
 ```
 
-### Repeated state
+Supporting text:
 
 ```text
-Repeated observable state × 7
+Observed within {distanceFromTermination} captured steps of execution termination.
+Evidence: Steps {evidenceStartIndex + 1}–{evidenceEndIndex + 1}
 ```
 
-### No progress
+For `distanceFromTermination === 0`, use the same numeric factual wording (`within 0 captured steps`) rather than inventing stronger semantics.
 
-```text
-No observable progress across 6 revisits
-```
-
-Recommended supporting text:
-
-```text
-Observed within 4 captured steps of execution termination.
-Evidence: Steps 181–252
-```
-
-Forbidden wording includes:
-
-```text
-root cause
-bug location
-likely cause
-failure source
-problem detected
-suspicious loop
-infinite loop
-caused timeout
-caused failure
-likely failure
-```
-
-The UI may describe the actual execution status elsewhere using existing Trace summary semantics, but the recommendation itself must not attribute causality.
+Forbidden wording includes `root cause`, `bug location`, `likely cause`, `failure source`, `problem detected`, `suspicious loop`, `infinite loop`, `caused timeout`, `caused failure`, and `likely failure`.
 
 ---
 
@@ -456,29 +345,15 @@ stopPlaying()
 setStep(index)
 ```
 
-Consequences:
+Rendering `Start Here` does not move the current raw step. Clicking `Inspect` stops autoplay. `setStep()` remains the sole owner of synchronized raw-step state across Code, Visual State, What Changed, Behavioral Signals, Locals, Call Stack, Output, Trace Outline, and Behavioral Timeline.
 
-- rendering `Start Here` does not move the current raw step;
-- clicking `Inspect` stops autoplay;
-- `setStep()` remains the sole owner of synchronized raw-step state;
-- Code, Visual State, What Changed, Behavioral Signals, Locals, Call Stack, Output, Trace Outline, and Behavioral Timeline remain synchronized through the existing path.
-
-Do not create a second cursor or a special Failure-First navigation mode.
+Do not create a second cursor or Failure-First navigation mode.
 
 ---
 
 ## 13. TraceVisualizer Integration
 
-`TraceVisualizer` already computes:
-
-```text
-interpretation.behavioralAnalysis.patterns
-traceIndex
-evidenceByPatternId
-traceFoldModel
-```
-
-Add one more pure projection during viewer creation:
+During viewer creation, compute once:
 
 ```ts
 const failureFirstSelection = selectFailureFirstEvidence(
@@ -489,9 +364,7 @@ const failureFirstSelection = selectFailureFirstEvidence(
 );
 ```
 
-Compute this once per viewer.
-
-Do not recompute it on every `setStep()` call.
+Do not recompute it in `setStep()`.
 
 After `navigateDirect` is available:
 
@@ -504,112 +377,48 @@ const failureFirstEntry = failureFirstSelection
   : null;
 ```
 
-Insert it after the Trace summary and before Code.
-
-No changes are required to `setStep()` beyond existing synchronized navigation behavior.
+Insert the element after Trace summary and before Code. No new cursor ownership is introduced.
 
 ---
 
 ## 14. Relationship to Existing Behavioral Features
 
-### Behavioral Signals
+Behavioral Signals continue to list all supported patterns and expose exact evidence navigation. Behavioral Timeline continues to show all resolvable evidence bands. Trace Folding continues to fold only eligible contiguous `RepeatedTransitionPattern` regions.
 
-Continue to list all supported behavioral patterns and expose exact evidence navigation.
-
-Failure-First does not replace or reorder this component.
-
-### Behavioral Timeline
-
-Continue to show all resolvable behavioral evidence bands.
-
-Failure-First does not change timeline lane layout, active membership semantics, or raw scrub behavior.
-
-### Trace Folding / Trace Outline
-
-Continue to fold only eligible contiguous `RepeatedTransitionPattern` regions.
-
-Failure-First selection does not require that the chosen pattern also be selected as a fold segment. Fold overlap resolution and Failure-First ranking are separate policies.
-
-For example, `RepeatedStatePattern` and `NoProgressPattern` may be selected by Failure-First even though they cannot create Trace Outline fold segments.
-
-`Inspect` does not automatically expand a folded Trace Outline segment.
+Failure-First selection does not require the chosen pattern to be selected as a fold segment. Fold overlap resolution and Failure-First ranking are separate policies. `RepeatedStatePattern` and `NoProgressPattern` can be selected despite being non-foldable. `Inspect` does not automatically expand Trace Outline.
 
 ---
 
 ## 15. Empty and Partial States
 
-### Empty trace
-
 ```text
-rawTraceLength === 0
-→ selection = null
-→ no Start Here UI
+empty trace                         → selection = null
+no behavioral patterns             → selection = null
+all evidence farther than 32 steps → selection = null
+partial/stale candidate            → reject that candidate; evaluate others
+unsupported execution status       → selection = null
 ```
 
-### No behavioral patterns
-
-```text
-patterns.length === 0
-→ selection = null
-```
-
-### No pattern in terminal window
-
-```text
-all candidate distances > 32
-→ selection = null
-```
-
-### Partial or stale evidence
-
-```text
-candidate rejected
-→ other candidates may still compete
-→ if none remain, selection = null
-```
-
-### Unsupported execution status
-
-```text
-selection = null
-```
-
-All of these states are silent; existing Trace UI remains unchanged.
+All are silent states; existing Trace UI remains unchanged.
 
 ---
 
 ## 16. Performance
 
-The current behavioral analyzer is already bounded to at most 64 patterns.
+The behavioral analyzer is already bounded to at most 64 patterns. Selection is therefore a small bounded operation, expected `O(P log P)` or simpler for `P <= MAX_PATTERNS_PER_TRACE`.
 
-Failure-First selection therefore operates over a small bounded candidate set.
-
-Expected complexity:
-
-```text
-O(P log P)
-```
-
-or simpler, where `P <= MAX_PATTERNS_PER_TRACE`.
-
-No additional trace replay, state reconstruction, DOM rebuild per step, or Pyodide execution is introduced.
-
-The selection is computed once per TraceVisualizer instance.
+No extra trace replay, state reconstruction, per-step DOM rebuild, or Pyodide execution is introduced. Selection is computed once per `TraceVisualizer` instance.
 
 ---
 
 ## 17. Accessibility
 
-Requirements:
-
-- `Inspect` must be a native `button`;
-- button type must be `button`;
-- accessible name must describe the destination sufficiently to distinguish it from other buttons;
-- recommendation meaning must not depend on color;
-- evidence range and proximity must be available as text;
-- rendering the card must not move keyboard focus automatically.
-
-The component should not use an alert/live-region role; it is not an urgent system notification.
+- `Inspect` is a native `button` with `type="button"`.
+- Its accessible name identifies the raw destination.
+- Recommendation meaning does not depend on color.
+- Evidence range and proximity are visible text.
+- Rendering does not move keyboard focus automatically.
+- Do not use alert/live-region roles.
 
 ---
 
@@ -617,95 +426,46 @@ The component should not use an alert/live-region role; it is not an urgent syst
 
 ### 18.1 Pure selector tests
 
-Recommended file:
+Create `tests/sidepanel/failure-first-selection.test.ts` covering:
 
-```text
-tests/sidepanel/failure-first-selection.test.ts
-```
-
-Required coverage:
-
-- `completed` returns `null`;
-- `running` returns `null`;
-- `parse_error`, `input_error`, and `internal_error` return `null`;
+- unsupported statuses return `null`;
 - `exception`, `trace_limit`, and `timeout` evaluate candidates;
-- invalid `repeatCount` is rejected;
-- distance `32` is eligible;
-- distance `33` is rejected;
-- nearest termination wins;
-- equal distance prefers larger evidence span;
-- equal span prefers larger `repeatCount`;
-- complete tie prefers lexicographically smaller `patternId`;
+- invalid `rawTraceLength` or `repeatCount` rejects selection;
+- distance 32 is eligible and 33 is rejected;
+- ranking: proximity → span → repeat count → pattern ID;
 - ranking is independent of input order;
-- partial evidence is rejected;
-- missing evidence is rejected;
-- duplicate evidence identity is rejected;
-- reordered evidence is rejected;
-- malformed endpoints are rejected;
-- out-of-bounds indexes are rejected;
-- empty trace returns `null`;
-- no patterns returns `null`.
+- partial, missing, duplicate, reordered, malformed-endpoint, or out-of-bounds evidence is rejected;
+- empty trace/no patterns return `null`.
 
-### 18.2 Landing tests
+### 18.2 Landing and metadata tests
 
-Verify independently:
+Verify:
 
 ```text
-RepeatedTransition → last complete motif start
-RepeatedState → last evidence index
-NoProgress → last evidence index
+RepeatedTransition → final complete motif start + periodSteps copied
+RepeatedState      → last evidence index
+NoProgress         → last evidence index + revisitCount copied
 ```
 
-For `RepeatedTransitionPattern`, also verify:
-
-- malformed `periodSteps` rejects the candidate;
-- `evidenceIndexes.length !== periodSteps * repeatCount` rejects the candidate;
-- gapped resolved indexes reject the candidate;
-- incomplete final motif rejects the candidate;
-- exact contiguous evidence lands at the first index of the final motif chunk.
+For repeated transition also verify malformed `periodSteps`, length mismatch, gapped indexes, and incomplete final motif reject the candidate.
 
 ### 18.3 Component tests
 
-Recommended file:
-
-```text
-tests/sidepanel/failure-first-entry.test.ts
-```
-
-Required coverage:
-
-- renders `Start Here`;
-- factual title per pattern kind;
-- renders terminal proximity text;
-- renders evidence range;
-- `Inspect` emits exactly `selection.inspectIndex`;
-- native button and accessible label;
-- component does not navigate on render;
-- forbidden diagnostic wording does not appear.
+Create `tests/sidepanel/failure-first-entry.test.ts` covering all three factual titles, proximity/range copy, exact `Inspect` destination, native/accessibly named button, no navigation on render, and absence of forbidden diagnostic wording.
 
 ### 18.4 TraceVisualizer integration tests
 
-Extend:
+Extend `tests/sidepanel/trace-visualizer.test.ts` covering:
 
-```text
-tests/sidepanel/trace-visualizer.test.ts
-```
-
-Required coverage:
-
-- `timeout` plus eligible evidence renders `Start Here`;
-- `trace_limit` plus eligible evidence renders `Start Here`;
-- `exception` plus eligible evidence renders `Start Here`;
-- identical evidence under `completed` does not render it;
-- evidence outside the terminal window does not render it;
-- initial raw cursor remains unchanged when the card renders;
-- `Inspect` routes through direct navigation and stops autoplay;
-- after `Inspect`, step label, active code line, visual state, mutations, locals, call stack, output, timeline, and Trace Outline active state remain synchronized;
+- timeout/trace_limit/exception + eligible evidence render `Start Here`;
+- same evidence under `completed` does not;
+- out-of-window evidence does not;
+- render leaves initial cursor unchanged;
+- `Inspect` stops autoplay and routes to the exact raw index;
+- after navigation, step label, code line, visual state, mutations, locals, call stack, output, timeline, and Trace Outline remain synchronized;
 - raw Previous/Next/Play semantics remain unchanged.
 
 ### 18.5 Full repository gates
-
-Run:
 
 ```bash
 npm test
@@ -717,30 +477,7 @@ npm run build
 
 ## 19. Explicit Non-Goals
 
-v0.1 does not include:
-
-- automatic initial cursor movement;
-- Start Here for normal `completed` executions;
-- WA detection;
-- LeetCode judge-result integration;
-- pattern-kind severity ranking;
-- confidence or probability scores;
-- multiple recommendations / top-N ranking;
-- recommendation dismissal or pinning;
-- persistent recommendation state;
-- automatic Trace Outline expansion;
-- automatic scrolling to Behavioral Signals;
-- root-cause analysis;
-- causal failure attribution;
-- infinite-loop diagnosis;
-- local timeout → LeetCode TLE inference;
-- correctness prediction;
-- fix suggestions;
-- new behavioral pattern kinds;
-- behavioral analyzer changes;
-- trace schema changes;
-- Tree/Graph/DP visualization;
-- cross-execution behavioral diff.
+v0.1 does not include automatic initial cursor movement, Start Here for `completed`, WA detection, LeetCode judge-result integration, pattern-kind severity ranking, confidence/probability scores, top-N recommendations, dismissal/pinning, persistence, automatic Trace Outline expansion, automatic scrolling to Behavioral Signals, root-cause analysis, causal attribution, infinite-loop diagnosis, local-timeout-to-LeetCode-TLE inference, correctness prediction, fix suggestions, new behavioral pattern kinds, behavioral analyzer changes, trace schema changes, Tree/Graph/DP visualization, or cross-execution behavioral diff.
 
 ---
 
@@ -748,15 +485,15 @@ v0.1 does not include:
 
 The milestone is complete when:
 
-1. abnormal captured executions can deterministically produce at most one validated `FailureFirstSelection`;
-2. only behavioral evidence within the final 32 captured raw steps is eligible;
+1. abnormal captured executions produce at most one deterministic validated selection;
+2. only evidence within the final 32 captured raw steps is eligible;
 3. ranking follows proximity → span → repeat count → pattern ID exactly;
-4. repeated-transition candidates require complete contiguous evidence with exact `periodSteps × repeatCount` length and inspection lands at the final complete motif start;
-5. repeated-state and no-progress inspection lands at their final evidence index;
-6. stale, malformed, duplicate-derived, partial, or gapped evidence fails closed as applicable;
-7. `Start Here` renders only when a selection exists;
-8. rendering does not move the raw cursor;
+4. transition selection requires complete contiguous evidence of exact `periodSteps × repeatCount` length and lands at the final motif start;
+5. repeated-state/no-progress selection lands at the final evidence index;
+6. the discriminated selection carries only factual pattern-specific metadata needed by UI;
+7. malformed/partial/stale evidence fails closed;
+8. `Start Here` renders only when a selection exists and does not auto-navigate;
 9. `Inspect` reuses `navigateDirect → stopPlaying → setStep`;
-10. existing raw navigation semantics remain authoritative;
-11. no diagnosis, causal attribution, correctness claim, or LeetCode TLE claim is introduced;
-12. all focused tests and the complete repository test/typecheck/build gates pass.
+10. existing raw navigation stays authoritative;
+11. no diagnosis, causal claim, correctness claim, or LeetCode TLE claim is introduced;
+12. focused tests and complete repository test/typecheck/build gates pass.

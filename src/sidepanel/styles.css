@@ -263,6 +263,42 @@ button.is-primary:hover:not(:disabled) {
   font-size: 11px;
 }
 
+.trace-viewer__failure-first {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  background: #fff;
+  padding: 11px 13px 12px;
+}
+
+.trace-viewer__failure-first-heading {
+  color: #334155;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.trace-viewer__failure-first-title {
+  color: #172033;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.trace-viewer__failure-first-detail,
+.trace-viewer__failure-first-range {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.trace-viewer__failure-first-inspect {
+  justify-self: start;
+  margin-top: 3px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
 .trace-viewer__panel-body {
   border-top: 1px solid #edf1f6;
   padding: 11px 13px 13px;

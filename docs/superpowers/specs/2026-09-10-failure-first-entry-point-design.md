@@ -169,20 +169,21 @@ For each pattern, a candidate is valid only when all of the following are true:
 
 1. the execution status is one of `exception`, `trace_limit`, or `timeout`;
 2. `rawTraceLength` is a positive integer;
-3. the pattern has an entry in `evidenceByPatternId`;
-4. `evidence.patternId === pattern.patternId`;
-5. `firstIndex` and `lastIndex` are non-null integers;
-6. every original `pattern.evidenceSteps` entry resolves exactly once;
-7. resolved `evidenceSteps` preserve the same identities and order as `pattern.evidenceSteps`;
-8. `evidenceSteps.length === evidenceIndexes.length`;
-9. resolved indexes are integers and strictly increasing;
-10. all resolved indexes are within `0..rawTraceLength - 1`;
-11. `firstIndex === evidenceIndexes[0]`;
-12. `lastIndex === evidenceIndexes[evidenceIndexes.length - 1]`;
-13. `lastIndex <= rawTraceLength - 1`;
-14. `distanceFromTermination <= FAILURE_FIRST_TERMINAL_WINDOW_STEPS`.
+3. `pattern.repeatCount` is an integer greater than or equal to the behavioral analyzer minimum (`3` in v0.1);
+4. the pattern has an entry in `evidenceByPatternId`;
+5. `evidence.patternId === pattern.patternId`;
+6. `firstIndex` and `lastIndex` are non-null integers;
+7. every original `pattern.evidenceSteps` entry resolves exactly once;
+8. resolved `evidenceSteps` preserve the same identities and order as `pattern.evidenceSteps`;
+9. `evidenceSteps.length === evidenceIndexes.length`;
+10. resolved indexes are integers and strictly increasing;
+11. all resolved indexes are within `0..rawTraceLength - 1`;
+12. `firstIndex === evidenceIndexes[0]`;
+13. `lastIndex === evidenceIndexes[evidenceIndexes.length - 1]`;
+14. `lastIndex <= rawTraceLength - 1`;
+15. `distanceFromTermination <= FAILURE_FIRST_TERMINAL_WINDOW_STEPS`.
 
-Duplicate step identities, stale mappings, partial resolution, malformed endpoints, out-of-bounds indexes, or reordered evidence make the candidate ineligible.
+Duplicate step identities, stale mappings, partial resolution, malformed endpoints, invalid repeat counts, out-of-bounds indexes, or reordered evidence make the candidate ineligible.
 
 Failure mode:
 
@@ -269,19 +270,21 @@ The ranking endpoint and inspection landing point are deliberately separate.
 
 Navigate to the beginning of the **last complete motif repetition**.
 
-Validation requirements:
+A repeated-transition candidate has additional fail-closed requirements beyond the common validation in Section 5:
 
 - `periodSteps` is a positive integer;
-- `repeatCount` is a valid positive integer consistent with the pattern;
-- resolved evidence is complete;
-- the final motif repetition fits entirely inside the resolved evidence;
-- the calculated landing index is a member of the resolved evidence interval.
+- `repeatCount` is an integer greater than or equal to `3`;
+- `evidenceIndexes.length === periodSteps * repeatCount`;
+- resolved evidence indexes are contiguous, i.e. for every offset `k`, `evidenceIndexes[k] === firstIndex + k`;
+- the final motif repetition fits entirely inside the resolved evidence.
 
-For complete contiguous transition evidence:
+Only after those conditions hold is the landing point defined as:
 
 ```ts
 inspectIndex = evidenceEndIndex - periodSteps + 1;
 ```
+
+The calculated `inspectIndex` must equal the first raw index of the final `periodSteps`-wide chunk of `evidenceIndexes`.
 
 Example:
 
@@ -295,6 +298,8 @@ Inspect → Step 65
 
 This presents the final complete observed motif rather than landing at the motif tail.
 
+These requirements intentionally make repeated-transition Failure-First selection at least as strict about evidence completeness as Trace Folding, while remaining independent of fold overlap selection and Trace Outline presentation.
+
 ### 8.2 `RepeatedStatePattern`
 
 Navigate to the final resolved evidence index:
@@ -303,6 +308,8 @@ Navigate to the final resolved evidence index:
 inspectIndex = evidenceEndIndex;
 ```
 
+Sparse evidence is allowed as long as the common completeness and ordering requirements in Section 5 hold.
+
 ### 8.3 `NoProgressPattern`
 
 Navigate to the final resolved evidence index:
@@ -310,6 +317,8 @@ Navigate to the final resolved evidence index:
 ```ts
 inspectIndex = evidenceEndIndex;
 ```
+
+Sparse evidence is allowed as long as the common completeness and ordering requirements in Section 5 hold.
 
 ### 8.4 Defensive fallback
 
@@ -519,7 +528,7 @@ Failure-First does not change timeline lane layout, active membership semantics,
 
 Continue to fold only eligible contiguous `RepeatedTransitionPattern` regions.
 
-Failure-First selection does not require that the chosen pattern also be foldable.
+Failure-First selection does not require that the chosen pattern also be selected as a fold segment. Fold overlap resolution and Failure-First ranking are separate policies.
 
 For example, `RepeatedStatePattern` and `NoProgressPattern` may be selected by Failure-First even though they cannot create Trace Outline fold segments.
 
@@ -620,6 +629,7 @@ Required coverage:
 - `running` returns `null`;
 - `parse_error`, `input_error`, and `internal_error` return `null`;
 - `exception`, `trace_limit`, and `timeout` evaluate candidates;
+- invalid `repeatCount` is rejected;
 - distance `32` is eligible;
 - distance `33` is rejected;
 - nearest termination wins;
@@ -646,7 +656,13 @@ RepeatedState → last evidence index
 NoProgress → last evidence index
 ```
 
-Also verify malformed `periodSteps` or incomplete final motif rejects a repeated-transition candidate.
+For `RepeatedTransitionPattern`, also verify:
+
+- malformed `periodSteps` rejects the candidate;
+- `evidenceIndexes.length !== periodSteps * repeatCount` rejects the candidate;
+- gapped resolved indexes reject the candidate;
+- incomplete final motif rejects the candidate;
+- exact contiguous evidence lands at the first index of the final motif chunk.
 
 ### 18.3 Component tests
 
@@ -735,9 +751,9 @@ The milestone is complete when:
 1. abnormal captured executions can deterministically produce at most one validated `FailureFirstSelection`;
 2. only behavioral evidence within the final 32 captured raw steps is eligible;
 3. ranking follows proximity → span → repeat count → pattern ID exactly;
-4. repeated-transition inspection lands at the final complete motif start;
+4. repeated-transition candidates require complete contiguous evidence with exact `periodSteps × repeatCount` length and inspection lands at the final complete motif start;
 5. repeated-state and no-progress inspection lands at their final evidence index;
-6. stale or partial evidence fails closed;
+6. stale, malformed, duplicate-derived, partial, or gapped evidence fails closed as applicable;
 7. `Start Here` renders only when a selection exists;
 8. rendering does not move the raw cursor;
 9. `Inspect` reuses `navigateDirect → stopPlaying → setStep`;

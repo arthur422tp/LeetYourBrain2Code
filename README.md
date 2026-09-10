@@ -59,6 +59,7 @@ The MVP is designed to expose:
 - collision-safe Behavioral Timeline subtracks so overlapping same-kind evidence bands remain independently visible;
 - raw Previous / Next / Play navigation remains authoritative even when folded presentation is available;
 - the trace prefix captured before a runtime error, trace limit, or hard timeout.
+- a Failure-First Entry Point for local `exception`, `trace_limit`, or `timeout` captures: it deterministically surfaces one validated behavioral evidence location near termination as an optional `Start Here` inspection point. It does not move the raw cursor automatically, and `Start Here` is an inspection priority—not a diagnosis.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
 
@@ -66,6 +67,7 @@ Python execution stays off the Side Panel's main thread. Pyodide is bundled with
 
 - `completed` means local execution returned normally. It does **not** mean LeetCode Accepted.
 - `timeout` means the local visualization runtime exceeded its wall-clock limit. It does **not** mean LeetCode TLE.
+- Failure-First v0.1 evaluates only `exception`, `trace_limit`, and `timeout`; `Inspect` is user-triggered and the recommendation does not claim a cause or correctness result.
 - Behavioral Signals describe evidence in the captured trace. They do not diagnose an infinite loop, correctness failure, bug, or fix.
 - Trace folding is a deterministic presentation projection over captured raw steps. It does not delete raw events or diagnose why execution failed.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.

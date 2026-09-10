@@ -56,7 +56,8 @@ MVP 的目標是呈現：
 - 對符合完整、連續 evidence 條件的 `RepeatedTransitionPattern` 提供 folded Trace Outline，可先看摘要，再展開成 motif repetition ranges；
 - Behavioral Timeline 支援 collision-safe subtracks，同 kind 的重疊 evidence bands 不再互相遮蓋；
 - 即使有 folded presentation，原本的 raw Previous／Next／Play 仍維持 authoritative raw-step navigation；
-- Runtime Error、trace limit 或 hard timeout 發生前已取得的 trace prefix。
+- Runtime Error、trace limit 或 hard timeout 發生前已取得的 trace prefix；
+- Failure-First entry point：針對本機的 `exception`、`trace_limit` 或 `timeout` capture，以 deterministic 方式呈現一個靠近 termination、且 evidence 已完整驗證的 behavioral evidence location，作為可選的 `Start Here` 檢視起點；不會自動移動 raw cursor，也不是診斷。
 
 Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功能一起 bundle，並在本機 Web Worker 中運作；MVP 不需要 backend。
 
@@ -64,6 +65,7 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 
 - `completed` 只代表本機執行正常返回，**不代表** LeetCode Accepted。
 - `timeout` 只代表本機視覺化 runtime 超過 wall-clock limit，**不等於** LeetCode TLE。
+- Failure-First v0.1 只評估 `exception`、`trace_limit`、`timeout`；`Inspect` 必須由使用者觸發，推薦結果只是對 validated captured evidence 的檢視優先順序，不宣稱原因、正確性或 LeetCode TLE。
 - Behavioral Signals 只描述 captured trace 中的 runtime evidence，不會自行診斷 infinite loop、correctness failure、bug 或修正方式。
 - Trace folding 只是 captured raw steps 上的 deterministic presentation projection，不會刪除 raw events，也不會診斷 execution failure 的原因。
 - Pyodide 無法完整重現 LeetCode judge environment。

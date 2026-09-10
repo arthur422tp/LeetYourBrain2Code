@@ -29,14 +29,14 @@
 
 ## File Structure
 
-- Create `src/sidepanel/failure-first-selection.ts` — owns validation, candidate construction, deterministic ranking, landing-index derivation, and the public discriminated selection type.
-- Create `tests/sidepanel/failure-first-selection.test.ts` — pure selector contract and defensive-validation tests.
-- Create `src/sidepanel/components/FailureFirstEntry.ts` — presentation-only Start Here card; accepts a validated selection and emits a raw-index navigation intent.
-- Create `tests/sidepanel/failure-first-entry.test.ts` — component copy, accessibility, and click-contract tests.
-- Modify `src/sidepanel/components/TraceVisualizer.ts` — compute selection once, create the component after `navigateDirect` exists, mount it between summary and Code, preserve navigation ownership.
-- Modify `tests/sidepanel/trace-visualizer.test.ts` — abnormal/completed rendering, no-auto-jump, autoplay stop, synchronized raw navigation regression tests.
-- Modify `src/sidepanel/styles.css` — minimal Start Here card layout following existing `trace-viewer__*` conventions; no semantic meaning by color alone.
-- Modify `README.md` and `README.zh-TW.md` — document Failure-First as an inspection-priority projection, not diagnosis.
+- Create `src/sidepanel/failure-first-selection.ts` — validation, candidate construction, deterministic ranking, landing-index derivation, public discriminated selection type.
+- Create `tests/sidepanel/failure-first-selection.test.ts` — pure selector and defensive-validation tests.
+- Create `src/sidepanel/components/FailureFirstEntry.ts` — presentation-only Start Here card.
+- Create `tests/sidepanel/failure-first-entry.test.ts` — copy, accessibility, and click-contract tests.
+- Modify `src/sidepanel/components/TraceVisualizer.ts` — compute selection once and mount it between summary and Code.
+- Modify `tests/sidepanel/trace-visualizer.test.ts` — rendering/no-auto-jump/autoplay/synchronization regressions.
+- Modify `src/sidepanel/styles.css` — minimal card layout following existing `trace-viewer__*` conventions.
+- Modify `README.md` and `README.zh-TW.md` — document Failure-First as inspection priority, not diagnosis.
 
 ---
 
@@ -66,19 +66,16 @@ interface FailureFirstSelectionBase {
   reason: "nearest_terminal_evidence";
 }
 
-export interface RepeatedTransitionFailureFirstSelection
-  extends FailureFirstSelectionBase {
+export interface RepeatedTransitionFailureFirstSelection extends FailureFirstSelectionBase {
   kind: "repeated_transition";
   periodSteps: number;
 }
 
-export interface RepeatedStateFailureFirstSelection
-  extends FailureFirstSelectionBase {
+export interface RepeatedStateFailureFirstSelection extends FailureFirstSelectionBase {
   kind: "repeated_state";
 }
 
-export interface NoProgressFailureFirstSelection
-  extends FailureFirstSelectionBase {
+export interface NoProgressFailureFirstSelection extends FailureFirstSelectionBase {
   kind: "no_progress";
   revisitCount: number;
 }
@@ -96,63 +93,90 @@ export function selectFailureFirstEvidence(
 ): FailureFirstSelection | null;
 ```
 
-- [ ] **Step 1: Write failing status/window/ranking tests**
+- [ ] **Step 1: Write failing status and terminal-window tests**
 
-Create helpers that construct each `BehavioralPattern` kind and exact `ResolvedBehavioralEvidence`, then add tests equivalent to:
+Create concrete helpers in the test file:
+
+```ts
+function repeatedStatePattern(
+  patternId: string,
+  repeatCount: number,
+  evidenceSteps: number[]
+): RepeatedStatePattern {
+  return {
+    kind: "repeated_state",
+    patternId,
+    startStep: evidenceSteps[0]!,
+    endStep: evidenceSteps.at(-1)!,
+    repeatCount,
+    evidenceSteps,
+    location: { frameId: 1, functionName: "solve", line: 3 },
+    stateFingerprintKey: patternId
+  };
+}
+
+function resolvedEvidence(
+  patternId: string,
+  evidenceSteps: number[],
+  evidenceIndexes: number[]
+): ResolvedBehavioralEvidence {
+  return {
+    patternId,
+    evidenceSteps,
+    evidenceIndexes,
+    firstIndex: evidenceIndexes[0] ?? null,
+    lastIndex: evidenceIndexes.at(-1) ?? null
+  };
+}
+```
+
+Then write:
 
 ```ts
 it.each(["running", "completed", "parse_error", "input_error", "internal_error"] as const)(
-  "%s does not produce a Failure-First selection",
+  "%s returns null",
   (status) => {
-    const pattern = repeatedStatePattern({ patternId: "state-a", repeatCount: 3, evidenceSteps: [7, 8, 9] });
-    const evidence = resolvedEvidence(pattern, [6, 7, 8]);
-    expect(selectFailureFirstEvidence(status, 10, [pattern], new Map([[pattern.patternId, evidence]]))).toBeNull();
+    const pattern = repeatedStatePattern("state-a", 3, [7, 8, 9]);
+    const evidence = resolvedEvidence("state-a", [7, 8, 9], [6, 7, 8]);
+    expect(selectFailureFirstEvidence(status, 10, [pattern], new Map([["state-a", evidence]]))).toBeNull();
   }
 );
 
 it.each(["exception", "trace_limit", "timeout"] as const)(
   "%s evaluates eligible candidates",
   (status) => {
-    const pattern = repeatedStatePattern({ patternId: "state-a", repeatCount: 3, evidenceSteps: [7, 8, 9] });
-    const evidence = resolvedEvidence(pattern, [6, 7, 8]);
-    expect(selectFailureFirstEvidence(status, 10, [pattern], new Map([[pattern.patternId, evidence]])))
+    const pattern = repeatedStatePattern("state-a", 3, [7, 8, 9]);
+    const evidence = resolvedEvidence("state-a", [7, 8, 9], [6, 7, 8]);
+    expect(selectFailureFirstEvidence(status, 10, [pattern], new Map([["state-a", evidence]])))
       .toMatchObject({ patternId: "state-a", inspectIndex: 8, distanceFromTermination: 1 });
   }
 );
 
-it("accepts distance 32 and rejects distance 33", () => {
-  const near = repeatedStatePattern({ patternId: "near", repeatCount: 3, evidenceSteps: [67] });
-  const far = repeatedStatePattern({ patternId: "far", repeatCount: 3, evidenceSteps: [66] });
-  expect(selectionFor("timeout", 100, near, [66])).not.toBeNull();
-  expect(selectionFor("timeout", 100, far, [65])).toBeNull();
+it("accepts distance 32", () => {
+  const pattern = repeatedStatePattern("near", 3, [68]);
+  const evidence = resolvedEvidence("near", [68], [67]);
+  expect(selectFailureFirstEvidence("timeout", 100, [pattern], new Map([["near", evidence]])))
+    .toMatchObject({ distanceFromTermination: 32 });
 });
 
-it("ranks proximity then span then repeat count then pattern id", () => {
-  // Build isolated two-candidate cases for each tie-break dimension so a failure identifies exactly one rule.
-});
-
-it("is independent of input pattern order", () => {
-  const forward = selectFailureFirstEvidence("timeout", rawLength, candidates, evidenceMap);
-  const reverse = selectFailureFirstEvidence("timeout", rawLength, [...candidates].reverse(), evidenceMap);
-  expect(reverse).toEqual(forward);
+it("rejects distance 33", () => {
+  const pattern = repeatedStatePattern("far", 3, [67]);
+  const evidence = resolvedEvidence("far", [67], [66]);
+  expect(selectFailureFirstEvidence("timeout", 100, [pattern], new Map([["far", evidence]]))).toBeNull();
 });
 ```
 
-Use raw indexes directly in assertions. Do not infer indexes with `event.step - 1`.
-
 - [ ] **Step 2: Run selector tests and verify RED**
-
-Run:
 
 ```bash
 npx vitest run tests/sidepanel/failure-first-selection.test.ts
 ```
 
-Expected: FAIL because `src/sidepanel/failure-first-selection.ts` and exported selector types/functions do not exist.
+Expected: FAIL because the selector module does not exist.
 
-- [ ] **Step 3: Implement the public types, status gate, common validation, candidate ranking**
+- [ ] **Step 3: Implement public types, status gate, common validation, and terminal window**
 
-Implement the minimal pure module with these internal rules:
+Use:
 
 ```ts
 const ELIGIBLE_STATUSES: ReadonlySet<TraceSessionStatus> = new Set([
@@ -160,7 +184,45 @@ const ELIGIBLE_STATUSES: ReadonlySet<TraceSessionStatus> = new Set([
   "trace_limit",
   "timeout"
 ]);
+```
 
+Reject before candidate construction when `rawTraceLength` is not a positive integer or status is ineligible. Per candidate reject: `repeatCount < 3` or non-integer, missing/mismatched evidence, duplicate original evidence step identities, identity/length mismatch, non-integer indexes/endpoints, non-strictly-increasing indexes, out-of-bounds indexes, endpoint mismatch, negative terminal distance, or distance greater than 32.
+
+- [ ] **Step 4: Run status/window tests and verify GREEN**
+
+```bash
+npx vitest run tests/sidepanel/failure-first-selection.test.ts
+```
+
+Expected: current tests PASS.
+
+- [ ] **Step 5: Add exact deterministic ranking tests**
+
+Add four isolated cases so each tie-break is independently observable:
+
+```ts
+it("prefers smaller terminal distance before every other ranking field", () => {
+  expect(selectTwo(nearCandidate, farButLongerCandidate)?.patternId).toBe("near");
+});
+
+it("prefers larger evidence span when terminal distance ties", () => {
+  expect(selectTwo(longSpanCandidate, shortSpanCandidate)?.patternId).toBe("long-span");
+});
+
+it("prefers larger repeatCount when distance and span tie", () => {
+  expect(selectTwo(highRepeatCandidate, lowRepeatCandidate)?.patternId).toBe("high-repeat");
+});
+
+it("prefers lexicographically smaller patternId on a complete tie", () => {
+  expect(selectTwo(candidateB, candidateA)?.patternId).toBe("a-pattern");
+});
+```
+
+Build the fixtures so only the named ranking field differs in each test. Add a permutation test using `[a,b,c]` and `[c,b,a]` and assert equal selections.
+
+- [ ] **Step 6: Implement deterministic comparator and candidate sorting**
+
+```ts
 function compareSelections(left: FailureFirstSelection, right: FailureFirstSelection): number {
   const distance = left.distanceFromTermination - right.distanceFromTermination;
   if (distance !== 0) return distance;
@@ -174,76 +236,59 @@ function compareSelections(left: FailureFirstSelection, right: FailureFirstSelec
 }
 ```
 
-Common validation must explicitly reject invalid raw length, repeat count `< 3`, missing/mismatched evidence, duplicate original evidence step identities, length mismatches, reordered identity arrays, non-integer indexes/endpoints, non-strictly-increasing indexes, out-of-bounds indexes, endpoint mismatch, and distance outside `0..32`.
+Construct all valid candidates, sort with this comparator, return the first or `null`. Never select by map/pattern iteration order.
 
-Construct all valid candidates first, then sort with `compareSelections` and return the first or `null`. Never select by object iteration order.
+- [ ] **Step 7: Add exact defensive evidence tests**
 
-- [ ] **Step 4: Run status/window/ranking tests and verify GREEN**
-
-Run:
-
-```bash
-npx vitest run tests/sidepanel/failure-first-selection.test.ts
-```
-
-Expected: current tests PASS.
-
-- [ ] **Step 5: Add failing defensive evidence tests**
-
-Add explicit tests for:
+Use explicit objects for each malformed condition:
 
 ```ts
-it("rejects partial resolution", () => { /* evidenceSteps/evidenceIndexes shorter than pattern.evidenceSteps */ });
-it("rejects duplicate pattern evidence step identities", () => { /* [7, 7, 8] */ });
-it("rejects reordered resolved identities", () => { /* pattern [7,8,9], resolved [7,9,8] */ });
-it("rejects malformed endpoints", () => { /* firstIndex/lastIndex disagree with arrays */ });
-it("rejects non-integer or out-of-bounds raw indexes", () => { /* fractional, negative, >= rawTraceLength */ });
-it("returns null for empty trace or no patterns", () => { /* rawTraceLength 0 and [] */ });
+it("rejects partial resolution", () => {
+  const pattern = repeatedStatePattern("p", 3, [7, 8, 9]);
+  const evidence = resolvedEvidence("p", [7, 8], [6, 7]);
+  expect(selectFailureFirstEvidence("timeout", 10, [pattern], new Map([["p", evidence]]))).toBeNull();
+});
+
+it("rejects duplicate pattern evidence step identities", () => {
+  const pattern = repeatedStatePattern("p", 3, [7, 7, 8]);
+  const evidence = resolvedEvidence("p", [7, 8], [6, 7]);
+  expect(selectFailureFirstEvidence("timeout", 10, [pattern], new Map([["p", evidence]]))).toBeNull();
+});
+
+it("rejects reordered resolved identities", () => {
+  const pattern = repeatedStatePattern("p", 3, [7, 8, 9]);
+  const evidence = resolvedEvidence("p", [7, 9, 8], [6, 7, 8]);
+  expect(selectFailureFirstEvidence("timeout", 10, [pattern], new Map([["p", evidence]]))).toBeNull();
+});
+
+it("rejects malformed endpoints", () => {
+  const pattern = repeatedStatePattern("p", 3, [7, 8, 9]);
+  const evidence = { ...resolvedEvidence("p", [7, 8, 9], [6, 7, 8]), firstIndex: 5 };
+  expect(selectFailureFirstEvidence("timeout", 10, [pattern], new Map([["p", evidence]]))).toBeNull();
+});
+
+it.each([[6.5, 7, 8], [-1, 7, 8], [6, 7, 10]])("rejects malformed raw indexes %j", (indexes) => {
+  const pattern = repeatedStatePattern("p", 3, [7, 8, 9]);
+  const evidence = resolvedEvidence("p", [7, 8, 9], indexes);
+  expect(selectFailureFirstEvidence("timeout", 10, [pattern], new Map([["p", evidence]]))).toBeNull();
+});
+
+it("returns null for an empty trace or no patterns", () => {
+  expect(selectFailureFirstEvidence("timeout", 0, [], new Map())).toBeNull();
+  expect(selectFailureFirstEvidence("timeout", 10, [], new Map())).toBeNull();
+});
 ```
 
-- [ ] **Step 6: Run defensive tests and verify RED where validation is still missing**
+- [ ] **Step 8: Add landing tests for every pattern kind**
 
-Run:
-
-```bash
-npx vitest run tests/sidepanel/failure-first-selection.test.ts
-```
-
-Expected: newly added malformed-evidence cases FAIL until each fail-closed condition is implemented.
-
-- [ ] **Step 7: Complete common validation and repeated-transition landing validation**
-
-For `repeated_transition`, require exactly:
-
-```ts
-Number.isInteger(pattern.periodSteps) && pattern.periodSteps > 0
-resolved.evidenceIndexes.length === pattern.periodSteps * pattern.repeatCount
-resolved.evidenceIndexes.every((index, offset) => index === resolved.firstIndex! + offset)
-```
-
-Then compute:
-
-```ts
-const inspectIndex = resolved.lastIndex - pattern.periodSteps + 1;
-const lastChunkStart = resolved.evidenceIndexes.length - pattern.periodSteps;
-if (resolved.evidenceIndexes[lastChunkStart] !== inspectIndex) return null;
-```
-
-For `repeated_state`, use `inspectIndex = resolved.lastIndex`.
-
-For `no_progress`, use `inspectIndex = resolved.lastIndex` and copy `pattern.revisitCount` into the selection.
-
-Copy `pattern.periodSteps` into repeated-transition selections. Do not return the original pattern object.
-
-- [ ] **Step 8: Add and pass landing/metadata tests for all pattern kinds**
-
-Add assertions equivalent to:
+Add concrete constructors for `RepeatedTransitionPattern` and `NoProgressPattern`, then verify:
 
 ```ts
 expect(transitionSelection).toEqual(expect.objectContaining({
   kind: "repeated_transition",
-  periodSteps: 4,
-  inspectIndex: finalEvidenceIndex - 3
+  periodSteps: 2,
+  repeatCount: 3,
+  inspectIndex: 5
 }));
 
 expect(stateSelection).toEqual(expect.objectContaining({
@@ -253,32 +298,43 @@ expect(stateSelection).toEqual(expect.objectContaining({
 
 expect(noProgressSelection).toEqual(expect.objectContaining({
   kind: "no_progress",
-  revisitCount: pattern.revisitCount,
+  revisitCount: 4,
   inspectIndex: noProgressEvidence.lastIndex
 }));
 ```
 
-Also test malformed `periodSteps`, `periodSteps * repeatCount` length mismatch, gapped transition indexes, and an incomplete final motif all return `null`.
+For a transition with indexes `[0,1,2,3,4,5]`, `periodSteps=2`, `repeatCount=3`, assert `inspectIndex === 4` (0-based raw index). Also assert rejection for `periodSteps=0`, length mismatch, gapped indexes `[0,1,3,4,5,6]`, and evidence length not equal to `periodSteps * repeatCount`.
 
-Run:
+- [ ] **Step 9: Implement repeated-transition strict landing and pattern-specific metadata copying**
+
+Require:
+
+```ts
+Number.isInteger(pattern.periodSteps) && pattern.periodSteps > 0
+resolved.evidenceIndexes.length === pattern.periodSteps * pattern.repeatCount
+resolved.evidenceIndexes.every((index, offset) => index === resolved.firstIndex! + offset)
+```
+
+Then:
+
+```ts
+const inspectIndex = resolved.lastIndex - pattern.periodSteps + 1;
+const lastChunkStart = resolved.evidenceIndexes.length - pattern.periodSteps;
+if (resolved.evidenceIndexes[lastChunkStart] !== inspectIndex) return null;
+```
+
+For repeated state and no progress, use `inspectIndex = resolved.lastIndex`. Copy `periodSteps` only for transition and `revisitCount` only for no-progress. Do not return the source pattern object.
+
+- [ ] **Step 10: Run selector tests and typecheck**
 
 ```bash
 npx vitest run tests/sidepanel/failure-first-selection.test.ts
+npm run typecheck
 ```
 
 Expected: PASS.
 
-- [ ] **Step 9: Typecheck the selector contract**
-
-Run:
-
-```bash
-npm run typecheck
-```
-
-Expected: PASS; pattern-specific fields narrow correctly by `selection.kind`.
-
-- [ ] **Step 10: Commit Task 1**
+- [ ] **Step 11: Commit Task 1**
 
 ```bash
 git add src/sidepanel/failure-first-selection.ts tests/sidepanel/failure-first-selection.test.ts
@@ -305,56 +361,55 @@ export interface FailureFirstEntryOptions {
   onNavigate(index: number): void;
 }
 
-export function createFailureFirstEntry(
-  options: FailureFirstEntryOptions
-): HTMLDivElement;
+export function createFailureFirstEntry(options: FailureFirstEntryOptions): HTMLDivElement;
 ```
 
-- [ ] **Step 1: Write failing component tests for copy, accessibility, and navigation intent**
+- [ ] **Step 1: Write failing component tests**
 
-Add tests that construct each discriminated selection directly and assert:
+Construct each selection kind directly and assert:
 
 ```ts
 it("renders repeated-transition factual copy", () => {
-  const entry = createFailureFirstEntry({
-    selection: transitionSelection({ periodSteps: 4, repeatCount: 12 }),
-    onNavigate: vi.fn()
-  });
+  const entry = createFailureFirstEntry({ selection: transitionSelection, onNavigate: vi.fn() });
   expect(entry.textContent).toContain("Start Here");
   expect(entry.textContent).toContain("Repeated 4-step behavior × 12");
 });
 
-it("renders no-progress revisit count without diagnostic wording", () => {
-  const entry = createFailureFirstEntry({ selection: noProgressSelection({ revisitCount: 6 }), onNavigate: vi.fn() });
+it("renders repeated-state factual copy", () => {
+  const entry = createFailureFirstEntry({ selection: stateSelection, onNavigate: vi.fn() });
+  expect(entry.textContent).toContain("Repeated observable state × 7");
+});
+
+it("renders no-progress factual copy", () => {
+  const entry = createFailureFirstEntry({ selection: noProgressSelection, onNavigate: vi.fn() });
   expect(entry.textContent).toContain("No observable progress across 6 revisits");
 });
 
-it("shows raw evidence range and terminal distance as 1-based display text", () => {
+it("renders proximity and 1-based evidence range", () => {
   const entry = createFailureFirstEntry({
-    selection: stateSelection({ evidenceStartIndex: 180, evidenceEndIndex: 251, distanceFromTermination: 4 }),
+    selection: { ...stateSelection, evidenceStartIndex: 180, evidenceEndIndex: 251, distanceFromTermination: 4 },
     onNavigate: vi.fn()
   });
-  expect(entry.textContent).toContain("within 4 captured steps of execution termination");
+  expect(entry.textContent).toContain("Observed within 4 captured steps of execution termination.");
   expect(entry.textContent).toContain("Evidence: Steps 181–252");
 });
 
-it("does not navigate on render and emits inspectIndex only on click", () => {
+it("does not navigate on render and emits only inspectIndex on click", () => {
   const onNavigate = vi.fn();
-  const entry = createFailureFirstEntry({ selection: stateSelection({ inspectIndex: 64 }), onNavigate });
+  const entry = createFailureFirstEntry({ selection: { ...stateSelection, inspectIndex: 64 }, onNavigate });
   expect(onNavigate).not.toHaveBeenCalled();
   const button = entry.querySelector("button")!;
   expect(button.type).toBe("button");
+  expect(button.getAttribute("aria-label")).toContain("Step 65");
   button.click();
   expect(onNavigate).toHaveBeenCalledOnce();
   expect(onNavigate).toHaveBeenCalledWith(64);
 });
 ```
 
-Add a forbidden-copy test that lowercases `textContent` and verifies absence of: `root cause`, `bug location`, `likely cause`, `failure source`, `problem detected`, `suspicious loop`, `infinite loop`, `caused timeout`, `caused failure`, `likely failure`.
+Add a test that lowercases all rendered text and asserts absence of every forbidden phrase from the spec.
 
 - [ ] **Step 2: Run component tests and verify RED**
-
-Run:
 
 ```bash
 npx vitest run tests/sidepanel/failure-first-entry.test.ts
@@ -364,7 +419,7 @@ Expected: FAIL because the component does not exist.
 
 - [ ] **Step 3: Implement presentation-only `FailureFirstEntry`**
 
-Use the existing DOM style of `BehavioralSignals.ts`: a small local `createElement` helper is acceptable. Keep title formatting exhaustive on `selection.kind`:
+Use exhaustive title formatting:
 
 ```ts
 function title(selection: FailureFirstSelection): string {
@@ -379,26 +434,24 @@ function title(selection: FailureFirstSelection): string {
 }
 ```
 
-Render a root such as:
+Render:
 
 ```text
 .trace-viewer__failure-first
-  .trace-viewer__failure-first-heading  "Start Here"
+  .trace-viewer__failure-first-heading  Start Here
   .trace-viewer__failure-first-title
-  .trace-viewer__failure-first-detail   "Observed within N captured steps of execution termination."
-  .trace-viewer__failure-first-range    "Evidence: Steps A–B"
+  .trace-viewer__failure-first-detail   Observed within N captured steps of execution termination.
+  .trace-viewer__failure-first-range    Evidence: Steps A–B
   button.trace-viewer__failure-first-inspect
 ```
 
-Set `button.type = "button"`. Give it an accessible label including the 1-based destination, e.g. `Inspect recommended evidence at Step ${inspectIndex + 1}`. Do not focus the button during construction.
+Set `button.type = "button"` and `aria-label = "Inspect recommended evidence at Step ${inspectIndex + 1}"`. The constructor must not call `focus()` or `onNavigate()`.
 
-- [ ] **Step 4: Add minimal CSS without semantic color dependence**
+- [ ] **Step 4: Add minimal CSS**
 
-In `src/sidepanel/styles.css`, add only layout/spacing/border/typography rules needed to distinguish the card. Follow existing `trace-viewer__*` naming and existing design tokens/properties already used in the file. Do not add animation, severity coloring, warning icons, or alert styling.
+Add only spacing, border, typography, and button alignment under `trace-viewer__failure-first*`, using existing properties/tokens already present in `styles.css`. Do not add severity colors, warning icons, animation, or meaning that depends on color.
 
 - [ ] **Step 5: Run component tests and typecheck**
-
-Run:
 
 ```bash
 npx vitest run tests/sidepanel/failure-first-entry.test.ts
@@ -421,22 +474,18 @@ git commit -m "feat: render failure-first start here entry"
 **Files:**
 - Modify: `src/sidepanel/components/TraceVisualizer.ts`
 - Modify: `tests/sidepanel/trace-visualizer.test.ts`
-- Reference: `src/sidepanel/failure-first-selection.ts`
-- Reference: `src/sidepanel/components/FailureFirstEntry.ts`
 
 **Interfaces:**
 - Consumes: `selectFailureFirstEvidence(...)`, `createFailureFirstEntry(...)`.
-- Preserves: `navigateDirect(index)`, `stopPlaying()`, `setStep(index)`, raw Previous/Next/Play semantics, `TraceOutlineHandle`, and `BehavioralTimelineHandle` synchronization.
-- Produces: conditional Start Here DOM mounted between summary and Code.
+- Preserves: `navigateDirect(index)`, `stopPlaying()`, `setStep(index)`, raw Previous/Next/Play, Trace Outline and Behavioral Timeline synchronization.
+- Produces: optional Start Here DOM mounted between summary and Code.
 
-- [ ] **Step 1: Add failing integration fixtures for abnormal execution with eligible repeated behavior**
+- [ ] **Step 1: Add failing abnormal/completed rendering tests**
 
-Extend the existing `repeatedTransitionFoldSession()` fixture pattern rather than building an unrelated mock viewer. Add a helper that clones it into abnormal statuses with matching termination reasons:
+Reuse the existing repeated-transition fixture. Add:
 
 ```ts
-function failureFirstSession(
-  status: "timeout" | "trace_limit" | "exception"
-): TraceSession {
+function failureFirstSession(status: "timeout" | "trace_limit" | "exception"): TraceSession {
   const base = repeatedTransitionFoldSession();
   return {
     ...base,
@@ -445,39 +494,37 @@ function failureFirstSession(
       status === "timeout" ? "hard_timeout" :
       status === "trace_limit" ? "step_limit" :
       "runtime_exception",
-    ...(status === "exception" ? {
-      exception: { type: "RuntimeError", message: "boom", line: 5, stack: [], frameId: 1 }
-    } : {})
+    ...(status === "exception"
+      ? { exception: { type: "RuntimeError", message: "boom", line: 5, stack: [], frameId: 1 } }
+      : {})
   };
 }
 ```
 
-Add tests asserting timeout, trace-limit, and exception sessions render exactly one `.trace-viewer__failure-first`, while the same repeated behavior under `completed` renders none.
+For each abnormal status, create the viewer and assert exactly one `.trace-viewer__failure-first`. For `repeatedTransitionFoldSession()` unchanged as `completed`, assert none.
 
-- [ ] **Step 2: Add failing no-auto-jump and Inspect-navigation tests**
+- [ ] **Step 2: Add failing no-auto-jump and exact landing tests**
 
-Assert immediately after `createTraceVisualizer(...)`:
+Immediately after viewer creation:
 
 ```ts
 expect(viewer.element.dataset.stepIndex).toBe("0");
 expect(viewer.element.querySelector(".trace-viewer__step-label")?.textContent).toContain("Step 1");
 ```
 
-Then click the Failure-First Inspect button and assert the viewer's `dataset.stepIndex` equals the selector's expected raw landing index, not the first pattern index or final evidence index.
+For the existing six-event 2-step repeated motif fixture, calculate the expected final motif start from the analyzer output/selector contract and assert clicking Start Here `Inspect` lands on that exact raw index, not on the first pattern index or final evidence index.
 
-- [ ] **Step 3: Run focused TraceVisualizer tests and verify RED**
-
-Run:
+- [ ] **Step 3: Run focused integration tests and verify RED**
 
 ```bash
 npx vitest run tests/sidepanel/trace-visualizer.test.ts
 ```
 
-Expected: new Start Here assertions FAIL because `TraceVisualizer` does not yet compute or mount Failure-First selection.
+Expected: new Start Here assertions FAIL.
 
-- [ ] **Step 4: Compute the selection once during viewer creation**
+- [ ] **Step 4: Compute Failure-First selection once**
 
-Add imports for the selector and component. Immediately after `evidenceByPatternId` / `traceFoldModel` construction, compute:
+After `evidenceByPatternId` is constructed, add:
 
 ```ts
 const failureFirstSelection = selectFailureFirstEvidence(
@@ -488,11 +535,11 @@ const failureFirstSelection = selectFailureFirstEvidence(
 );
 ```
 
-Do not place this inside `setStep()`.
+Do not compute it in `setStep()`.
 
-- [ ] **Step 5: Create the component only after `navigateDirect` is initialized**
+- [ ] **Step 5: Create component after `navigateDirect` exists**
 
-After:
+Immediately after:
 
 ```ts
 navigateDirect = (index: number): void => {
@@ -501,22 +548,19 @@ navigateDirect = (index: number): void => {
 };
 ```
 
-create:
+add:
 
 ```ts
 const failureFirstEntry = failureFirstSelection
-  ? createFailureFirstEntry({
-      selection: failureFirstSelection,
-      onNavigate: navigateDirect
-    })
+  ? createFailureFirstEntry({ selection: failureFirstSelection, onNavigate: navigateDirect })
   : null;
 ```
 
-Keep the component stateless after creation; no `setCurrentIndex` API is needed.
+No `setCurrentIndex` API is needed.
 
-- [ ] **Step 6: Mount Start Here between summary and Code without changing initial cursor order**
+- [ ] **Step 6: Mount Start Here without changing initialization semantics**
 
-Replace the fixed append sequence with an explicit conditional sequence that preserves `setStep(0)` at the end:
+Use:
 
 ```ts
 root.append(summary);
@@ -537,22 +581,15 @@ root.append(
 setStep(0);
 ```
 
-Do not call `navigateDirect` or `setStep(selection.inspectIndex)` while mounting.
+Do not call `navigateDirect` or `setStep(failureFirstSelection.inspectIndex)` during construction.
 
-- [ ] **Step 7: Add autoplay-stop regression test for Failure-First Inspect**
+- [ ] **Step 7: Add autoplay-stop regression test**
 
-Use fake timers consistent with existing autoplay tests. Start Play, confirm `root.dataset.playing === "true"`, click Failure-First Inspect, then assert:
+Use the existing fake-timer pattern in `trace-visualizer.test.ts`: start Play, assert `root.dataset.playing === "true"`, click Failure-First Inspect, assert `root.dataset.playing === "false"` and Play text is `▶ Play`, advance timers, and assert the raw cursor remains at the inspected index.
 
-```ts
-expect(root.dataset.playing).toBe("false");
-expect(play.textContent).toBe("▶ Play");
-```
+- [ ] **Step 8: Add synchronized-view assertions after Inspect**
 
-Advance timers after the click and assert the raw cursor does not continue moving.
-
-- [ ] **Step 8: Add synchronization assertions after Failure-First navigation**
-
-Reuse existing TraceVisualizer assertions rather than inventing new state ownership. After Inspect, verify the target raw step updates:
+Reuse existing selectors/assertions in this test file to verify the inspected raw step updates all current-owner views:
 
 ```text
 step label
@@ -567,15 +604,13 @@ Trace Outline active owner
 Behavioral Timeline current/raw scrub state
 ```
 
-The exact assertions should use the existing fixture DOM selectors already used elsewhere in `trace-visualizer.test.ts`.
+Do not introduce a special Failure-First state field to make these tests pass; synchronization must come from existing `setStep()`.
 
-- [ ] **Step 9: Add out-of-window rendering regression**
+- [ ] **Step 9: Add out-of-window regression**
 
-Create an abnormal trace where a valid behavioral pattern ends 33 raw indexes before the terminal raw index. Assert `.trace-viewer__failure-first` is absent while existing Behavioral Signals remain present. This confirms Failure-First filtering does not delete analyzer output.
+Create an abnormal session with at least 40 trailing unique raw events after the last repeated behavior. Assert `.trace-viewer__failure-first` is absent while the existing Behavioral Signals panel still contains the repeated signal. This proves Failure-First filtering does not delete analyzer output.
 
-- [ ] **Step 10: Run focused integration tests, selector/component tests, and typecheck**
-
-Run:
+- [ ] **Step 10: Run focused tests and typecheck**
 
 ```bash
 npx vitest run tests/sidepanel/failure-first-selection.test.ts tests/sidepanel/failure-first-entry.test.ts tests/sidepanel/trace-visualizer.test.ts
@@ -598,15 +633,14 @@ git commit -m "feat: integrate failure-first trace entry"
 **Files:**
 - Modify: `README.md`
 - Modify: `README.zh-TW.md`
-- Reference: `docs/superpowers/specs/2026-09-10-failure-first-entry-point-design.md`
 
 **Interfaces:**
-- Consumes: completed selector/component/integration behavior from Tasks 1–3.
-- Produces: user-facing description consistent with product boundaries.
+- Consumes: completed behavior from Tasks 1–3.
+- Produces: user-facing documentation consistent with product boundaries.
 
-- [ ] **Step 1: Update the English README pipeline and feature description**
+- [ ] **Step 1: Update English README**
 
-Add Failure-First after resolved behavioral evidence / behavioral projections, using factual wording equivalent to:
+Add wording equivalent to:
 
 ```text
 Failure-First Entry Point — for local exception, trace-limit, or timeout captures, deterministically surfaces one validated behavioral evidence location near termination as an optional Start Here inspection point. It does not move the trace cursor automatically and does not identify a root cause.
@@ -614,46 +648,37 @@ Failure-First Entry Point — for local exception, trace-limit, or timeout captu
 
 State explicitly that local timeout is not LeetCode TLE and Start Here is inspection priority, not diagnosis.
 
-- [ ] **Step 2: Update the Traditional Chinese README with the same semantic boundary**
+- [ ] **Step 2: Update Traditional Chinese README**
 
-Use equivalent wording, preserving English feature names where the README already does so. Include that only `exception / trace_limit / timeout` are eligible in v0.1 and that `Inspect` is user-triggered.
+Document the same contract: only `exception / trace_limit / timeout` are eligible in v0.1, `Inspect` is user-triggered, and the recommendation does not claim cause/correctness/TLE.
 
-- [ ] **Step 3: Run targeted forbidden-word review in the new UI source and README copy**
-
-Run:
+- [ ] **Step 3: Review forbidden diagnostic phrases**
 
 ```bash
 grep -RniE "root cause|bug location|likely cause|failure source|problem detected|suspicious loop|infinite loop|caused timeout|caused failure|likely failure" \
-  src/sidepanel/components/FailureFirstEntry.ts \
-  README.md README.zh-TW.md
+  src/sidepanel/components/FailureFirstEntry.ts README.md README.zh-TW.md
 ```
 
-Expected: no forbidden wording inside the `FailureFirstEntry` UI implementation. README may contain explicit negations such as “does not identify a root cause”; manually confirm every match is a boundary statement, not a diagnostic claim.
+Expected: no forbidden wording in the UI source. README matches are allowed only when explicitly negating a diagnostic claim.
 
-- [ ] **Step 4: Run the full repository test suite**
-
-Run:
+- [ ] **Step 4: Run full repository tests**
 
 ```bash
 npm test
 ```
 
-Expected: all Vitest files/tests PASS, including existing live sync, visualizers, behavioral navigation, timeline, folding, and new Failure-First tests.
+Expected: all test files PASS, including existing live sync, visualizers, behavioral navigation, timeline, folding, and Failure-First tests.
 
-- [ ] **Step 5: Run full typecheck and production build**
-
-Run:
+- [ ] **Step 5: Run typecheck and production build**
 
 ```bash
 npm run typecheck
 npm run build
 ```
 
-Expected: both PASS. Existing dependency or Vite/Pyodide warnings may remain, but no new errors or Failure-First-specific warnings are acceptable.
+Expected: PASS. Existing dependency or Pyodide/Vite warnings may remain; no new Failure-First error/warning is acceptable.
 
-- [ ] **Step 6: Review the final diff against architectural boundaries**
-
-Run:
+- [ ] **Step 6: Review final architectural diff**
 
 ```bash
 git diff --check
@@ -661,18 +686,13 @@ git status --short
 git diff -- src/core src/shared
 ```
 
-Expected:
+Expected: no whitespace errors; no Failure-First modifications under `src/core` or `src/shared`.
+
+Inspect the complete diff and confirm exactly:
 
 ```text
-git diff --check → no whitespace errors
-src/core / src/shared → no Failure-First analyzer or trace-schema modifications
-```
-
-Then inspect the complete diff and verify:
-
-```text
-one selector projection only
-one optional Start Here card only
+one selector projection
+one optional Start Here card
 no automatic cursor movement
 no second navigation owner
 no pattern-kind severity ranking
@@ -680,16 +700,16 @@ no analyzer/schema changes
 no folding/timeline policy changes
 ```
 
-- [ ] **Step 7: Commit documentation and final milestone state**
+- [ ] **Step 7: Commit documentation**
 
 ```bash
 git add README.md README.zh-TW.md
 git commit -m "docs: document failure-first trace entry"
 ```
 
-- [ ] **Step 8: Record final verification evidence before claiming completion**
+- [ ] **Step 8: Record final verification evidence before completion claim**
 
-Capture the exact outputs/summary for:
+Run again from the final commit state:
 
 ```bash
 npm test
@@ -698,4 +718,4 @@ npm run build
 git status --short
 ```
 
-Completion claim requires all three gates to succeed and the working tree to contain no unintended changes.
+Completion requires all three gates to succeed and no unintended working-tree changes.

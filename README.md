@@ -53,6 +53,7 @@ The MVP is designed to expose:
 - stdout and return values;
 - list state with index/pointer bindings;
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
+- dedicated binary-tree visualization for standard LeetCode `TreeNode` objects, including active pointers, `left` / `right` edge mutation, detached components, and deterministic cycle/shared-child fallback presentation;
 - factual behavioral signals for repeated observable state, no observable progress at a repeated execution anchor, and repeated execution/mutation motifs, with direct first/previous/next/last evidence navigation;
 - a behavioral trace timeline with raw scrubbing and compact evidence-span bands while preserving raw Previous/Next/Play navigation;
 - a folded Trace Outline for eligible contiguous `RepeatedTransitionPattern` regions, with collapsed summaries and expandable motif-repetition ranges;
@@ -71,7 +72,7 @@ Python execution stays off the Side Panel's main thread. Pyodide is bundled with
 - Behavioral Signals describe evidence in the captured trace. They do not diagnose an infinite loop, correctness failure, bug, or fix.
 - Trace folding is a deterministic presentation projection over captured raw steps. It does not delete raw events or diagnose why execution failed.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
-- Dedicated linked-list visualization supports Python runtime objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display. Dedicated visualizers for trees, node-edge graphs, and DP tables are outside the current scope.
+- Dedicated TreeNode visualization supports the standard LeetCode binary-tree shape only. Generic node-edge graphs, custom/N-ary tree inference, and DP tables remain outside the current scope.
 - Web Worker and Pyodide isolation should not be treated as a hardened sandbox for hostile code.
 
 ## Development
@@ -97,6 +98,8 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 - [Active Tab Ownership Implementation Plan](docs/superpowers/plans/2026-09-06-active-tab-ownership-implementation-plan.md)
 - [Linked List Visualization Design Spec](docs/superpowers/specs/2026-09-07-visualization-coverage-linked-list-design.md)
 - [Linked List Visualization Implementation Plan](docs/superpowers/plans/2026-09-07-linked-list-visualization-implementation-plan.md)
+- [Tree Visualization Design Spec](docs/superpowers/specs/2026-09-11-tree-visualization-design.md)
+- [Tree Visualization Implementation Plan](docs/superpowers/plans/2026-09-11-tree-visualization-implementation-plan.md)
 - [Runtime Mutation Semantics Design Spec](docs/superpowers/specs/2026-09-08-runtime-mutation-semantics-design.md)
 - [Runtime Mutation Semantics Implementation Plan](docs/superpowers/plans/2026-09-08-runtime-mutation-semantics-implementation-plan.md)
 - [Behavioral Debugging Foundation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-debugging-foundation-design.md)

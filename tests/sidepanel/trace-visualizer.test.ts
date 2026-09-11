@@ -296,6 +296,83 @@ function cyclicLinkedListSession(): TraceSession {
   };
 }
 
+const treeReference = (objectId: string) => ({
+  type: "reference" as const,
+  objectId,
+  className: "TreeNode"
+});
+
+const treeObject = (
+  objectId: string,
+  value: number,
+  left: string | null = null,
+  right: string | null = null
+) => ({
+  objectId,
+  className: "TreeNode",
+  attributes: {
+    val: int(value),
+    left: left === null ? { type: "none" as const, value: null } : treeReference(left),
+    right: right === null ? { type: "none" as const, value: null } : treeReference(right)
+  }
+});
+
+function treeSession(): TraceSession {
+  const base = session();
+  return {
+    ...base,
+    sourceCode: "class Solution:\n    def solve(self, root):\n        child = TreeNode(2)\n        root.left = child\n        return root\n",
+    rawTestcase: "[4]",
+    subscriptRelations: [],
+    events: [
+      {
+        ...base.events[0]!,
+        step: 1,
+        function: "solve",
+        line: 2,
+        locals: { root: treeReference("obj-1") },
+        objects: [treeObject("obj-1", 4)],
+        objectsTruncated: false
+      },
+      {
+        ...base.events[0]!,
+        step: 2,
+        function: "solve",
+        line: 4,
+        locals: { root: treeReference("obj-1"), child: treeReference("obj-2") },
+        objects: [treeObject("obj-1", 4, "obj-2"), treeObject("obj-2", 2)],
+        objectsTruncated: false
+      }
+    ]
+  };
+}
+
+function treeBehaviorSession(): TraceSession {
+  const base = alternatingRepeatedStateSession();
+  return {
+    ...base,
+    events: base.events.map((event) => ({
+      ...event,
+      locals: { ...event.locals, root: treeReference("obj-1") },
+      objects: [treeObject("obj-1", 4, "obj-2"), treeObject("obj-2", 2)],
+      objectsTruncated: false
+    }))
+  };
+}
+
+function treeFailureFirstSession(): TraceSession {
+  const base = failureFirstSession("timeout");
+  return {
+    ...base,
+    events: base.events.map((event) => ({
+      ...event,
+      locals: { ...event.locals, root: treeReference("obj-1") },
+      objects: [treeObject("obj-1", 4, "obj-2"), treeObject("obj-2", 2)],
+      objectsTruncated: false
+    }))
+  };
+}
+
 describe("createTraceVisualizer", () => {
   it.each(["timeout", "trace_limit", "exception"] as const)(
     "%s renders exactly one Failure-First entry",
@@ -938,5 +1015,58 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector(".trace-viewer__summary-detail")?.textContent)
       .toContain("hard timeout");
     view.dispose();
+  });
+
+  it("keeps Tree state synchronized with direct raw-step navigation", () => {
+    const view = createTraceVisualizer(treeSession());
+    expect(view.element.querySelector('[data-node-id="obj-2"]')).toBeNull();
+
+    view.setStep(1);
+
+    expect(view.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
+    expect(view.element.querySelector(
+      '[data-edge-from="obj-1"][data-edge-to="obj-2"][data-edge-field="left"]'
+    )).not.toBeNull();
+    expect(view.element.querySelector('[data-pointer-name="child"]')).not.toBeNull();
+  });
+
+  it("updates Tree through the existing autoplay cursor", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createTraceVisualizer(treeSession());
+      view.element.querySelector<HTMLButtonElement>("#trace-play")!.click();
+      vi.advanceTimersByTime(700);
+      expect(view.element.dataset.stepIndex).toBe("1");
+      expect(view.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
+      view.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("updates Tree when a behavioral timeline band navigates the raw cursor", () => {
+    const view = createTraceVisualizer(treeBehaviorSession());
+    view.setStep(4);
+    const band = view.element.querySelector<HTMLButtonElement>(
+      '.trace-viewer__timeline-band[data-pattern-kind="repeated_state"]'
+    )!;
+    band.click();
+
+    expect(view.element.dataset.stepIndex).toBe("0");
+    expect(view.element.querySelector('[data-node-id="obj-1"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-edge-from="obj-1"][data-edge-to="obj-2"]')).not.toBeNull();
+  });
+
+  it("updates Tree when Failure-First Inspect navigates through the existing owner", () => {
+    const view = createTraceVisualizer(treeFailureFirstSession());
+    view.element.querySelector<HTMLButtonElement>(
+      ".trace-viewer__failure-first-inspect"
+    )!.click();
+
+    expect(view.element.dataset.stepIndex).toBe("5");
+    expect(view.element.querySelector('[data-node-id="obj-1"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-edge-from="obj-1"][data-edge-to="obj-2"]')).not.toBeNull();
   });
 });

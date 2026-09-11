@@ -51,6 +51,7 @@ MVP 的目標是呈現：
 - stdout 與 return value；
 - 帶有 index／pointer bindings 的 list state；
 - 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
+- 標準 LeetCode `TreeNode` 的專用二元樹視覺化，包含 active pointer、`left` / `right` 邊變更、斷開 component，以及 cycle / shared-child 的 deterministic fallback 呈現；
 - 基於事實的 behavioral signals：重複可觀察狀態、同一 execution anchor 沒有可觀察進展，以及重複 execution / mutation motif，並可直接在 first／previous／next／last evidence 之間導航；
 - behavioral trace timeline，支援 raw trace scrub 與 compact evidence-span bands，同時保留原本的 Previous／Next／Play raw navigation；
 - 對符合完整、連續 evidence 條件的 `RepeatedTransitionPattern` 提供 folded Trace Outline，可先看摘要，再展開成 motif repetition ranges；
@@ -69,7 +70,7 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - Behavioral Signals 只描述 captured trace 中的 runtime evidence，不會自行診斷 infinite loop、correctness failure、bug 或修正方式。
 - Trace folding 只是 captured raw steps 上的 deterministic presentation projection，不會刪除 raw events，也不會診斷 execution failure 的原因。
 - Pyodide 無法完整重現 LeetCode judge environment。
-- 目前已支援具有 `next` topology 的 Python runtime object 的 linked-list 專用 visualizer，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；tree、node-edge graph 和 DP table 的專用 visualizer 仍不在目前範圍內。
+- 專用 TreeNode 視覺化目前只支援標準 LeetCode binary-tree 結構；generic node-edge graph、自訂／N-ary tree inference 與 DP table 仍不在目前範圍內。
 - Web Worker 與 Pyodide 的隔離不應被視為可執行惡意程式碼的 hardened sandbox。
 
 ## 開發
@@ -95,6 +96,8 @@ Build 完成後，前往 `chrome://extensions`，以「載入未封裝項目」�
 - [Active Tab Ownership Implementation Plan](docs/superpowers/plans/2026-09-06-active-tab-ownership-implementation-plan.md)
 - [Linked List Visualization Design Spec](docs/superpowers/specs/2026-09-07-visualization-coverage-linked-list-design.md)
 - [Linked List Visualization Implementation Plan](docs/superpowers/plans/2026-09-07-linked-list-visualization-implementation-plan.md)
+- [Tree Visualization Design Spec](docs/superpowers/specs/2026-09-11-tree-visualization-design.md)
+- [Tree Visualization Implementation Plan](docs/superpowers/plans/2026-09-11-tree-visualization-implementation-plan.md)
 - [Runtime Mutation Semantics Design Spec](docs/superpowers/specs/2026-09-08-runtime-mutation-semantics-design.md)
 - [Runtime Mutation Semantics Implementation Plan](docs/superpowers/plans/2026-09-08-runtime-mutation-semantics-implementation-plan.md)
 - [Behavioral Debugging Foundation Design Spec](docs/superpowers/specs/2026-09-08-behavioral-debugging-foundation-design.md)

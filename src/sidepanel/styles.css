@@ -1432,6 +1432,266 @@ button.is-primary:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+.tree-visualizer {
+  min-width: 0;
+}
+
+.tree-visualizer__title {
+  margin: 0 0 7px;
+  color: #475569;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tree-visualizer__viewport {
+  position: relative;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #dfe5ee;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 8px;
+  scrollbar-width: thin;
+}
+
+.tree-visualizer__component {
+  min-width: max-content;
+  padding: 2px 0 10px;
+}
+
+.tree-visualizer__component + .tree-visualizer__component {
+  border-top: 1px solid #e4e9f0;
+  padding-top: 10px;
+}
+
+.tree-visualizer__component-title {
+  margin: 0 0 5px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tree-visualizer__canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.tree-visualizer__edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.tree-visualizer__edge {
+  fill: none;
+  stroke: #94a3b8;
+  stroke-width: 2;
+}
+
+.tree-visualizer__edge.is-added,
+.tree-visualizer__edge.is-changed,
+.tree-visualizer__edge.is-removed {
+  stroke: #ef4444;
+  stroke-dasharray: 5 3;
+}
+
+.tree-visualizer__nodes {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.tree-visualizer__node {
+  position: absolute;
+  display: flex;
+  min-height: 72px;
+  flex-direction: column;
+  overflow: visible;
+  border: 1px solid #b8c4d4;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.06);
+}
+
+.tree-visualizer__node[data-node-status="added"] {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.tree-visualizer__node[data-node-status="changed"] {
+  border-color: #f59e8b;
+  background: #fff3f1;
+}
+
+.tree-visualizer__node[data-node-status="detached"] {
+  border-style: dashed;
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.tree-visualizer__pointers {
+  display: flex;
+  min-height: 18px;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 4px 4px 0;
+}
+
+.tree-visualizer__pointer {
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+}
+
+.tree-visualizer__pointer.is-moved {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.tree-visualizer__pointer.is-added {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tree-visualizer__pointer.is-removed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tree-visualizer__identity,
+.tree-visualizer__value,
+.tree-visualizer__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 4px 6px;
+}
+
+.tree-visualizer__value {
+  min-height: 24px;
+  color: #0f172a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.tree-visualizer__value.is-changed {
+  background: #fff7ed;
+  color: #c2412d;
+}
+
+.tree-visualizer__value-code,
+.tree-visualizer__field-value,
+.tree-visualizer__object-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-visualizer__field-label {
+  color: #64748b;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+  text-transform: lowercase;
+}
+
+.tree-visualizer__identity {
+  border-bottom: 1px solid #edf1f6;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.tree-visualizer__identity-label {
+  letter-spacing: 0.02em;
+}
+
+.tree-visualizer__object-id {
+  max-width: 68px;
+  color: #94a3b8;
+  font-size: 8px;
+}
+
+.tree-visualizer__field {
+  border-top: 1px solid #edf1f6;
+  color: #0f172a;
+  font-size: 9px;
+}
+
+.tree-visualizer__field.is-added,
+.tree-visualizer__field.is-changed,
+.tree-visualizer__field.is-removed {
+  background: #fff7ed;
+  color: #c2412d;
+}
+
+.tree-visualizer__field-value {
+  max-width: 74px;
+  color: #64748b;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.tree-visualizer__terminal {
+  margin: 2px 4px 4px;
+  border: 1px dotted #f59e0b;
+  border-radius: 4px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 8px;
+  line-height: 1.25;
+  padding: 3px 4px;
+  white-space: normal;
+}
+
+.tree-visualizer__terminal.is-removed {
+  border-color: #ef4444;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.tree-visualizer__removed-pointers,
+.tree-visualizer__notices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.tree-visualizer__removed-pointers {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.tree-visualizer__notice {
+  border-radius: 5px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  padding: 5px 7px;
+}
+
+.tree-visualizer__notice.is-cycle {
+  border: 1px solid #c4b5fd;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.tree-visualizer__notice.is-shared,
+.tree-visualizer__notice.is-truncated {
+  border: 1px solid #fdba74;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 @keyframes list-pointer-focus {
   0% {
     background: rgba(147, 197, 253, 0.65);

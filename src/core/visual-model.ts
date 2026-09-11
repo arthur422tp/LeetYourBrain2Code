@@ -4,6 +4,7 @@ import { resolvePointerBindings, type PointerBinding } from "./binding-resolver"
 import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations";
 import type { ObjectDiff } from "./object-diff";
 import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
+import { buildTreeVisuals, type TreeVisualModel } from "./tree-interpreter";
 import type { FrameDiff } from "./state-diff";
 import type { RuntimeState } from "./runtime-state";
 import type {
@@ -49,7 +50,7 @@ export interface DictVisualModel {
 
 export type ContainerVisualModel = ListVisualModel | DictVisualModel;
 
-export type StructureVisualModel = ContainerVisualModel | LinkedListVisualModel;
+export type StructureVisualModel = ContainerVisualModel | LinkedListVisualModel | TreeVisualModel;
 
 export interface CallStackEntry {
   frameId: number;
@@ -289,6 +290,29 @@ function linkedListWasMutated(
   });
 }
 
+function treeWasMutated(
+  visual: TreeVisualModel,
+  frameId: number,
+  mutations: RuntimeMutation[]
+): boolean {
+  const objectIds = new Set(visual.nodes.map((node) => node.objectId));
+  const pointerNames = new Set(visual.pointers.map((pointer) => pointer.variableName));
+
+  return mutations.some((mutation) => {
+    if (mutation.kind === "reference") {
+      if (mutation.owner.scope === "local") {
+        return mutation.owner.frameId === frameId &&
+          pointerNames.has(mutation.owner.variableName);
+      }
+      return objectIds.has(mutation.owner.objectId);
+    }
+    if (mutation.kind === "object_attribute" || mutation.kind === "object_visibility") {
+      return objectIds.has(mutation.objectId);
+    }
+    return false;
+  });
+}
+
 export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
@@ -309,7 +333,12 @@ export function buildVisualState(
     .map((container) => buildContainerVisual(runtime, bindings, container, relations, mutations))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
   const linkedListVisuals = buildLinkedListVisuals(runtime, mutations);
-  const allVisuals: StructureVisualModel[] = [...containerVisuals, ...linkedListVisuals];
+  const treeVisuals = buildTreeVisuals(runtime, mutations);
+  const allVisuals: StructureVisualModel[] = [
+    ...containerVisuals,
+    ...linkedListVisuals,
+    ...treeVisuals
+  ];
   const candidateVisuals = allVisuals.filter(isSpecializedListCandidate);
   const activeFrameId = frame?.frameId ?? -1;
   const activeLineContainers = new Set(
@@ -326,6 +355,15 @@ export function buildVisualState(
     if (visual.kind === "linked_list") {
       const pointerRelevant = visual.pointers.length > 0;
       const mutated = linkedListWasMutated(visual, activeFrameId, mutations);
+      return {
+        visualId: visual.visualId,
+        kind: visual.kind,
+        priority: [false, mutated, pointerRelevant, visual.pointers.length] as const
+      };
+    }
+    if (visual.kind === "tree") {
+      const pointerRelevant = visual.pointers.length > 0;
+      const mutated = treeWasMutated(visual, activeFrameId, mutations);
       return {
         visualId: visual.visualId,
         kind: visual.kind,

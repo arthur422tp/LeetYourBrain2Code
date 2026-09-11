@@ -13,6 +13,11 @@ const ref = (objectId: string): ValueSnapshot => ({
   objectId,
   className: "ListNode"
 });
+const treeRef = (objectId: string): ValueSnapshot => ({
+  type: "reference",
+  objectId,
+  className: "TreeNode"
+});
 
 function list(values: number[]): ValueSnapshot {
   return {
@@ -51,6 +56,24 @@ function runtime(locals: Record<string, ValueSnapshot>, exception?: RuntimeState
     stdout: "trace\n",
     objectTopology: { objects: new Map(), truncated: false },
     ...(exception ? { exception } : {})
+  };
+}
+
+function treeRuntime(extraLocals: Record<string, ValueSnapshot> = {}): RuntimeState {
+  return {
+    ...runtime({ root: treeRef("tree-1"), ...extraLocals }),
+    objectTopology: {
+      objects: new Map([["tree-1", {
+        objectId: "tree-1",
+        className: "TreeNode",
+        attributes: {
+          val: int(1),
+          left: { type: "none", value: null },
+          right: { type: "none", value: null }
+        }
+      }]]),
+      truncated: false
+    }
   };
 }
 
@@ -398,5 +421,52 @@ describe("buildVisualState", () => {
 
     expect(state.visuals).toHaveLength(3);
     expect(new Set(state.visuals.map((visual) => visual.visualId)).size).toBe(3);
+  });
+
+  it("builds Tree through the existing visual state path", () => {
+    const state = buildVisualState(treeRuntime(), null, [], null, []);
+    expect(state.visuals.find((visual) => visual.kind === "tree")).toMatchObject({
+      kind: "tree",
+      visualId: "tree:TreeNode"
+    });
+    expect(state.primaryVisualId).toBe("tree:TreeNode");
+  });
+
+  it("prioritizes a mutated Tree over a pointer-relevant non-mutated list", () => {
+    const state = buildVisualState(
+      treeRuntime({ nums: list([1, 2, 3]), i: int(1) }),
+      null,
+      [{ ...relation("i"), line: 99 }],
+      null,
+      [{
+        kind: "object_attribute",
+        origin: "transition",
+        objectId: "tree-1",
+        attribute: "val",
+        action: "changed",
+        before: int(0),
+        after: int(1)
+      }]
+    );
+    expect(state.primaryVisualId).toBe("tree:TreeNode");
+  });
+
+  it("does not hard-code Tree primary over a mutated dict", () => {
+    const state = buildVisualState(
+      treeRuntime({ seen: dict([[1, 10]]) }),
+      null,
+      [],
+      null,
+      [{
+        kind: "mapping_entry",
+        origin: "transition",
+        frameId: 4,
+        containerName: "seen",
+        key: int(2),
+        action: "added",
+        after: int(11)
+      }]
+    );
+    expect(state.primaryVisualId).toBe("dict:seen");
   });
 });

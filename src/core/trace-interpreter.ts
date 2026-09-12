@@ -15,6 +15,12 @@ import {
   buildBehavioralObservations
 } from "./behavioral-observation";
 import type { BehavioralAnalysis } from "./behavioral-pattern";
+import { buildExpressionEvidence } from "./expression-interpreter";
+import type {
+  ExpressionBatch,
+  ExpressionEvidenceByStep,
+  ExpressionPlan
+} from "../shared/expression-types";
 
 export interface TraceInterpretation {
   runtimeStates: RuntimeState[];
@@ -22,6 +28,7 @@ export interface TraceInterpretation {
   objectDiffs: ObjectDiff[];
   mutationBatches: RuntimeMutationBatch[];
   behavioralAnalysis: BehavioralAnalysis;
+  expressionEvidence: ExpressionEvidenceByStep;
   visualStates: VisualState[];
 }
 
@@ -38,9 +45,16 @@ function activeFrame(state: RuntimeState): FrameState | undefined {
 
 export function interpretTrace(
   events: TraceEvent[],
-  relations: StaticRelation[] = []
+  relations: StaticRelation[] = [],
+  expressionPlan?: ExpressionPlan,
+  expressionBatches: ExpressionBatch[] = []
 ): TraceInterpretation {
   const runtimeStates = reconstructStates(events);
+  const expressionEvidence = buildExpressionEvidence(
+    expressionPlan,
+    expressionBatches,
+    runtimeStates
+  );
   const previousFrameStates = new Map<number, FrameState>();
   const frameResults = runtimeStates.map((runtime) => {
     const currentFrame = activeFrame(runtime);
@@ -92,6 +106,7 @@ export function interpretTrace(
     objectDiffs,
     mutationBatches,
     behavioralAnalysis,
+    expressionEvidence,
     visualStates
   };
 }

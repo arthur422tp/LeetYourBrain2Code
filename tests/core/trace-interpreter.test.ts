@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SubscriptRelation } from "../../src/core/ast-relations";
 import type { MatrixSubscriptRelation, TraceEvent, ValueSnapshot } from "../../src/shared/trace-types";
+import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import { interpretTrace } from "../../src/core/trace-interpreter";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
@@ -81,6 +82,56 @@ function matrixRelation(): MatrixSubscriptRelation {
 }
 
 describe("interpretTrace", () => {
+  it("keeps the two-argument caller compatible with an empty expression-evidence map", () => {
+    const result = interpretTrace([event(1, "solve", { value: int(1) })], []);
+
+    expect(result.expressionEvidence).toEqual(new Map());
+  });
+
+  it("attaches expression evidence when optional expression inputs are supplied", () => {
+    const expressionPlan: ExpressionPlan = {
+      version: 1,
+      roots: [{
+        rootId: "r1",
+        kind: "return",
+        expressionExprId: "r1.0",
+        span: { line: 7, column: 7, endLine: 7, endColumn: 12 }
+      }],
+      expressions: [{
+        exprId: "r1.0",
+        rootId: "r1",
+        parentExprId: null,
+        kind: "name",
+        span: { line: 7, column: 7, endLine: 7, endColumn: 12 },
+        source: "value",
+        childExprIds: []
+      }]
+    };
+    const expressionBatches: ExpressionBatch[] = [{
+      batchId: 1,
+      anchorStep: 1,
+      frameId: 4,
+      line: 7,
+      roots: [{
+        rootId: "r1",
+        status: "completed",
+        evaluations: [{ evaluationId: 1, exprId: "r1.0", order: 1, value: int(1) }]
+      }]
+    }];
+
+    const result = interpretTrace(
+      [event(1, "solve", { value: int(1) })],
+      [],
+      expressionPlan,
+      expressionBatches
+    );
+
+    expect(result.expressionEvidence.get(1)?.roots[0]).toMatchObject({
+      rootId: "r1",
+      tree: { source: "value", value: int(1) }
+    });
+  });
+
   it("aligns one mutation batch with every reconstructed runtime state", () => {
     const result = interpretTrace([
       event(1, "solve", { left: int(0) }),

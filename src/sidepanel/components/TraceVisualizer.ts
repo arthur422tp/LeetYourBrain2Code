@@ -108,6 +108,10 @@ function createVisualStateRenderer(): {
   body.append(stateMeta, visualsHost);
 
   const handles = new Map<string, VisualizerHandle>();
+  // Runtime ranking controls visibility, but a visible visual should not jump
+  // to a different vertical slot just because another visual became relevant.
+  const visualOrder = new Map<string, number>();
+  let nextVisualOrder = 0;
 
   const disposeHandles = (): void => {
     for (const handle of handles.values()) {
@@ -137,9 +141,19 @@ function createVisualStateRenderer(): {
       return;
     }
 
+    for (const visual of visuals) {
+      if (!visualOrder.has(visual.visualId)) {
+        visualOrder.set(visual.visualId, nextVisualOrder);
+        nextVisualOrder += 1;
+      }
+    }
+    const orderedVisuals = [...visuals].sort((left, right) =>
+      visualOrder.get(left.visualId)! - visualOrder.get(right.visualId)!
+    );
+
     const nextKeys = new Set<string>();
     const elements: HTMLElement[] = [];
-    for (const visual of visuals) {
+    for (const visual of orderedVisuals) {
       const key = visual.visualId;
       nextKeys.add(key);
       const existing = handles.get(key);

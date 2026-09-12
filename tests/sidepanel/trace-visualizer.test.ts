@@ -436,6 +436,54 @@ function graphSession(): TraceSession {
   };
 }
 
+function graphWithMappingSession(): TraceSession {
+  const base = session();
+  const copies = (objectIds: string[]) => ({
+    type: "dict" as const,
+    length: objectIds.length,
+    entries: objectIds.map((objectId) => ({
+      key: graphReference(objectId),
+      value: graphReference(objectId)
+    })),
+    truncated: false
+  });
+  const firstEvent = {
+    ...base.events[0]!,
+    step: 1,
+    function: "cloneGraph",
+    line: 20,
+    locals: {
+      copies: copies(["obj-1"]),
+      cur: graphReference("obj-1")
+    },
+    objects: graphObjects(false),
+    objectsTruncated: false
+  };
+  const secondEvent = {
+    ...firstEvent,
+    step: 2,
+    line: 23,
+    locals: {
+      ...firstEvent.locals,
+      copies: copies(["obj-1", "obj-2"])
+    },
+    objects: graphObjects(false)
+  };
+  return {
+    ...base,
+    sourceCode: "class Solution:\n    def cloneGraph(self, node):\n        copy = Node(node.val)\n        for neighbor in node.neighbors:\n            copy.neighbors.append(neighbor)\n        return copy\n",
+    rawTestcase: "[[2], []]\n",
+    entrypoint: {
+      className: "Solution",
+      methodName: "cloneGraph",
+      parameterCount: 1,
+      parameterKinds: ["graph_node"]
+    },
+    subscriptRelations: [],
+    events: [firstEvent, secondEvent]
+  };
+}
+
 function graphPatternSession(
   status: TraceSession["status"] = "completed"
 ): TraceSession {
@@ -1186,6 +1234,20 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector<HTMLElement>(".graph-visualizer")).toBe(graph);
     expect(graphConnection(view.element).dataset.reciprocal).toBe("true");
     expect(graphConnection(view.element).dataset.edgeReverse).toBe("obj-2→obj-1");
+    view.dispose();
+  });
+
+  it("keeps visualizer positions stable when runtime ranking changes", () => {
+    const view = createTraceVisualizer(graphWithMappingSession());
+    const initialOrder = [...view.element.querySelectorAll<HTMLElement>("[data-visual-id]")]
+      .map((element) => element.dataset.visualId);
+    expect(initialOrder).toEqual(["graph:Node", "dict:copies"]);
+
+    view.setStep(1);
+
+    const updatedOrder = [...view.element.querySelectorAll<HTMLElement>("[data-visual-id]")]
+      .map((element) => element.dataset.visualId);
+    expect(updatedOrder).toEqual(initialOrder);
     view.dispose();
   });
 

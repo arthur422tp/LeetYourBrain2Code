@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "worker" / "python"))
 
 from runner import run_request
+import runtime_prelude
 from runtime_prelude import TreeNode
 
 
@@ -360,6 +361,56 @@ class Solution:
     assert [
         item["objectId"] for item in root["attributes"]["neighbors"]["items"]
     ] == [object_id_by_value["2"], object_id_by_value["4"]]
+
+
+def test_graph_template_uses_the_runtime_node_definition_when_it_is_documented_only():
+    source = '''"""
+# Definition for a Node.
+class Node:
+    def __init__(self, val = 0, neighbors = None):
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+"""
+class Solution:
+    def cloneGraph(self, node: 'Node') -> 'Node':
+        if not node:
+            return None
+
+        copies = {}
+
+        def dfs(cur):
+            if cur in copies:
+                return copies[cur]
+
+            copy = Node(cur.val)
+            copies[cur] = copy
+
+            for neighbor in cur.neighbors:
+                copy.neighbors.append(dfs(neighbor))
+
+            return copy
+
+        return dfs(node)
+'''
+
+    assert hasattr(runtime_prelude, "Node")
+    result = run_request(
+        source,
+        "[[2,4],[1,3],[2,4],[1,3]]",
+        {
+            "class_name": "Solution",
+            "method_name": "cloneGraph",
+            "parameter_count": 1,
+            "parameter_kinds": ["graph_node"],
+        },
+        {**LIMITS, "max_session_bytes": 2_000_000},
+        runtime_globals={"Node": runtime_prelude.Node},
+    )
+
+    assert result["status"] == "completed"
+    assert result["termination_reason"] == "normal_return"
+    assert result["return_value"]["type"] == "reference"
+    assert result["return_value"]["className"] == "Node"
 
 
 def test_graph_empty_adjacency_input_reaches_solution_as_none():

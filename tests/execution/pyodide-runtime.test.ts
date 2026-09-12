@@ -408,6 +408,49 @@ describe("Pyodide runtime", () => {
     );
   });
 
+  it("captures Matrix relations while executing a nested-loop grid fixture in real Pyodide", async () => {
+    const finished: ExecutionTerminalResult[] = [];
+    const runtime = createPyodideRuntime({
+      indexURL: `${process.cwd()}/node_modules/pyodide/`,
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute({
+      ...request,
+      sessionId: "matrix-min-path-session",
+      sourceCode: `class Solution:
+    def minPathSum(self, grid):
+        m, n = len(grid), len(grid[0])
+        dp = [[0] * n for _ in range(m)]
+        for i in range(m):
+            for j in range(n):
+                dp[i][j] = grid[i][j]
+        return dp[-1][-1]
+`,
+      rawTestcase: "[[1, 3, 1], [1, 5, 1], [4, 2, 1]]",
+      entrypoint: {
+        className: "Solution",
+        methodName: "minPathSum",
+        parameterCount: 1,
+        parameterKinds: ["value"]
+      }
+    });
+
+    expect(finished[0]).toEqual(expect.objectContaining({
+      status: "completed",
+      returnValue: { type: "int", value: "1" },
+      subscriptRelations: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "matrix_subscript",
+          scope: "Solution.minPathSum",
+          container: "dp",
+          rowIndex: { kind: "variable", name: "i" },
+          columnIndex: { kind: "variable", name: "j" }
+        })
+      ])
+    }));
+  });
+
   it("loads Pyodide once while rebuilding a fresh runtime namespace for every request", async () => {
     let loadCount = 0;
     const scripts: string[] = [];

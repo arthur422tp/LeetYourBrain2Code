@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SubscriptRelation } from "../../src/core/ast-relations";
-import type { TraceEvent, ValueSnapshot } from "../../src/shared/trace-types";
+import type { MatrixSubscriptRelation, TraceEvent, ValueSnapshot } from "../../src/shared/trace-types";
 import { interpretTrace } from "../../src/core/trace-interpreter";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
@@ -11,6 +11,20 @@ function list(values: number[]): ValueSnapshot {
     type: "list",
     length: values.length,
     items: values.map(int),
+    truncated: false
+  };
+}
+
+function matrix(values: number[][]): ValueSnapshot {
+  return {
+    type: "list",
+    length: values.length,
+    items: values.map((rowValues) => ({
+      type: "list",
+      length: rowValues.length,
+      items: rowValues.map(int),
+      truncated: false
+    })),
     truncated: false
   };
 }
@@ -53,6 +67,17 @@ function objectNode(
 
 function relation(container: string, index: string, scope = "Solution.solve"): SubscriptRelation {
   return { scope, line: 7, container, index };
+}
+
+function matrixRelation(): MatrixSubscriptRelation {
+  return {
+    kind: "matrix_subscript",
+    scope: "Solution.solve",
+    line: 7,
+    container: "dp",
+    rowIndex: { kind: "variable", name: "i" },
+    columnIndex: { kind: "variable", name: "j" }
+  };
 }
 
 describe("interpretTrace", () => {
@@ -302,8 +327,22 @@ describe("interpretTrace", () => {
     });
   });
 
-  it("keeps 2D DP as generic nested locals instead of claiming a matrix renderer", () => {
-    const matrix: ValueSnapshot = {
+  it("projects raw matrix trace events into focused and changed Matrix visual state", () => {
+    const result = interpretTrace([
+      event(1, "solve", { dp: matrix([[0, 0], [0, 0]]), i: int(1), j: int(0) }),
+      event(2, "solve", { dp: matrix([[0, 0], [7, 0]]), i: int(1), j: int(0) })
+    ], [matrixRelation()]);
+
+    expect(result.visualStates[1]?.visuals).toContainEqual(expect.objectContaining({
+      kind: "matrix",
+      visualId: "matrix:dp",
+      focuses: [expect.objectContaining({ effectiveRow: 1, effectiveColumn: 0 })],
+      changedCells: [expect.objectContaining({ row: 1, column: 0, action: "changed" })]
+    }));
+  });
+
+  it("renders a complete 2D local as a Matrix visual", () => {
+    const matrixSnapshot: ValueSnapshot = {
       type: "list",
       length: 2,
       items: [list([0, 1]), list([1, 2])],
@@ -311,12 +350,24 @@ describe("interpretTrace", () => {
     };
 
     const result = interpretTrace(
-      [event(1, "solve", { matrix })],
+      [event(1, "solve", { matrix: matrixSnapshot })],
       []
     );
 
-    expect(result.visualStates[0]?.visuals).toEqual([]);
-    expect(result.visualStates[0]?.locals).toEqual({ matrix });
+    expect(result.visualStates[0]?.visuals).toEqual([{
+      kind: "matrix",
+      visualId: "matrix:matrix",
+      variableName: "matrix",
+      cells: [
+        [int(0), int(1)],
+        [int(1), int(2)]
+      ],
+      rowCount: 2,
+      columnCount: 2,
+      focuses: [],
+      changedCells: []
+    }]);
+    expect(result.visualStates[0]?.locals).toEqual({ matrix: matrixSnapshot });
   });
 
   it("keeps hash-map and graph state generic while preserving structural locals", () => {

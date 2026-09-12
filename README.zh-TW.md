@@ -50,6 +50,7 @@ MVP 的目標是呈現：
 - locals、scalar changes 與 container mutations；
 - stdout 與 return value；
 - 帶有 index／pointer bindings 的 list state；
+- 完整矩形 2D `list`／`tuple` scalar state 的專用 Matrix / Grid 視覺化，包含直接 `matrix[i][j]` focus、負索引正規化、越界 requested-cell evidence、由 runtime mutation evidence 推導的實際 cell 變更、受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection；
 - 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
 - 標準 LeetCode `TreeNode` 的專用二元樹視覺化，包含 active pointer、`left` / `right` 邊變更、斷開 component，以及 cycle / shared-child 的 deterministic fallback 呈現；
 - 標準 LeetCode `Node(val, neighbors)` 的專用 graph 視覺化，包含直接 adjacency-list testcase 執行、directed 與 reciprocal runtime reference、多個 component、isolated node、edge add/remove 狀態，以及 node／connection inspection；
@@ -82,6 +83,23 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - custom graph class；
 - BFS/DFS/shortest-path semantic interpretation。
 
+## Matrix / Grid 支援 v0.1
+
+已支援：
+
+- 完整、矩形的 2D `list`／`tuple` snapshot，cell 僅接受 `int`、`float`、`bool`、`str` 或 `None`；
+- 對 variable 與 integer-literal operand 的直接 `matrix[row][column]` focus；
+- Python 負索引正規化，以及明確呈現越界 requested-cell evidence；
+- 由 runtime mutation evidence 推導的實際 cell 變更；
+- 受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection。
+
+尚未支援：
+
+- ragged、3D、sparse 或 NumPy matrix 視覺化；
+- 同一 runtime matrix 透過其他名稱存取時的 alias recovery；
+- 對 `i + 1`、`j - 1` 或其他任意 index expression 的 focus 推導；
+- DP recurrence 或演算法意圖推導，也不進行 expected-vs-actual correctness diagnosis。
+
 ## 重要邊界
 
 - `completed` 只代表本機執行正常返回，**不代表** LeetCode Accepted。
@@ -91,7 +109,7 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - Trace folding 只是 captured raw steps 上的 deterministic presentation projection，不會刪除 raw events，也不會診斷 execution failure 的原因。
 - Pyodide 無法完整重現 LeetCode judge environment。
 - Testcase synchronization 會讀取 LeetCode 畫面上可見的 testcase controls；如果 testcase editor 尚未 mount，Side Panel 仍會同步 code，並等待 testcase 出現。
-- 專用 TreeNode 視覺化目前只支援標準 LeetCode binary-tree 結構；generic dict/list adjacency inference、weighted graph、custom graph class、BFS/DFS/shortest-path semantic interpretation、自訂／N-ary tree inference 與 DP table 仍不在目前範圍內。
+- 專用 TreeNode 視覺化目前只支援標準 LeetCode binary-tree 結構；generic dict/list adjacency inference、weighted graph、custom graph class、BFS/DFS/shortest-path semantic interpretation、自訂／N-ary tree inference 與演算法特定的 DP recurrence inference 仍不在目前範圍內。
 - Web Worker 與 Pyodide 的隔離不應被視為可執行惡意程式碼的 hardened sandbox。
 
 ## 開發

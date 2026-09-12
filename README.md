@@ -52,6 +52,7 @@ The MVP is designed to expose:
 - locals, scalar changes, and container mutations;
 - stdout and return values;
 - list state with index/pointer bindings;
+- dedicated Matrix / Grid visualization for complete rectangular 2D `list` / `tuple` scalar state, including direct `matrix[i][j]` focus, negative-index normalization, out-of-bounds requested-cell evidence, runtime-backed cell changes, a bounded focus-aware viewport, and persistent cell inspection;
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
 - dedicated binary-tree visualization for standard LeetCode `TreeNode` objects, including active pointers, `left` / `right` edge mutation, detached components, and deterministic cycle/shared-child fallback presentation;
 - dedicated graph visualization for standard LeetCode `Node(val, neighbors)` objects, including direct adjacency-list testcase execution, directed and reciprocal runtime references, multiple components, isolated nodes, edge add/remove states, and node/connection inspection;
@@ -84,6 +85,23 @@ Not yet supported:
 - custom graph classes;
 - BFS/DFS/shortest-path semantic interpretation.
 
+## Matrix / Grid support v0.1
+
+Supported:
+
+- complete rectangular 2D `list` / `tuple` snapshots with scalar cells (`int`, `float`, `bool`, `str`, or `None`);
+- direct `matrix[row][column]` focus for variable and integer-literal operands;
+- Python negative-index normalization and explicit out-of-bounds requested-cell evidence;
+- actual cell changes derived from runtime mutation evidence;
+- a bounded focus-aware viewport and persistent cell inspection.
+
+Not yet supported:
+
+- ragged, 3D, sparse, or NumPy matrix visualization;
+- alias recovery when the same runtime matrix is reached through another name;
+- focus inference for `i + 1`, `j - 1`, or other arbitrary index expressions;
+- DP recurrence or algorithm inference, or expected-vs-actual correctness diagnosis.
+
 ## Important boundaries
 
 - `completed` means local execution returned normally. It does **not** mean LeetCode Accepted.
@@ -93,7 +111,7 @@ Not yet supported:
 - Trace folding is a deterministic presentation projection over captured raw steps. It does not delete raw events or diagnose why execution failed.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
 - Testcase synchronization observes LeetCode's visible testcase controls; if the testcase editor has not mounted yet, the Side Panel keeps code synchronized and waits for the testcase.
-- Dedicated TreeNode visualization supports the standard LeetCode binary-tree shape only. Generic dict/list adjacency inference, weighted graphs, custom graph classes, BFS/DFS/shortest-path semantic interpretation, custom/N-ary tree inference, and DP tables remain outside the current scope.
+- Dedicated TreeNode visualization supports the standard LeetCode binary-tree shape only. Generic dict/list adjacency inference, weighted graphs, custom graph classes, BFS/DFS/shortest-path semantic interpretation, custom/N-ary tree inference, and algorithm-specific DP recurrence inference remain outside the current scope.
 - Web Worker and Pyodide isolation should not be treated as a hardened sandbox for hostile code.
 
 ## Development

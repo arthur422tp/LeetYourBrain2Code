@@ -6,6 +6,7 @@ import type { ObjectDiff } from "./object-diff";
 import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
 import { buildTreeVisuals, type TreeVisualModel } from "./tree-interpreter";
 import { buildGraphVisuals, type GraphVisualModel } from "./graph-interpreter";
+import { buildMatrixVisuals, type MatrixVisualModel } from "./matrix-interpreter";
 import type { FrameDiff } from "./state-diff";
 import type { RuntimeState } from "./runtime-state";
 import type {
@@ -55,7 +56,8 @@ export type StructureVisualModel =
   | ContainerVisualModel
   | LinkedListVisualModel
   | TreeVisualModel
-  | GraphVisualModel;
+  | GraphVisualModel
+  | MatrixVisualModel;
 
 export interface CallStackEntry {
   frameId: number;
@@ -357,9 +359,12 @@ export function buildVisualState(
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const bindings = resolvePointerBindings(relations, runtime);
+  const matrixVisuals = buildMatrixVisuals(runtime, relations, mutations);
+  const matrixVariables = new Set(matrixVisuals.map((visual) => visual.variableName));
   const containerNames = frame
     ? Object.entries(frame.locals)
       .filter(([, snapshot]) => isContainerSnapshot(snapshot))
+      .filter(([name]) => !matrixVariables.has(name))
       .map(([name]) => name)
     : [];
   const containerVisuals = containerNames
@@ -369,6 +374,7 @@ export function buildVisualState(
   const treeVisuals = buildTreeVisuals(runtime, mutations);
   const graphVisuals = buildGraphVisuals(runtime, mutations);
   const allVisuals: StructureVisualModel[] = [
+    ...matrixVisuals,
     ...containerVisuals,
     ...linkedListVisuals,
     ...treeVisuals,
@@ -380,6 +386,17 @@ export function buildVisualState(
     relations
       .filter((relation) =>
         relation.kind !== "membership" &&
+        relation.kind !== "matrix_subscript" &&
+        relation.line === runtime.currentLine &&
+        frame !== undefined &&
+        relationMatchesFrameScope(relation, frame.functionName)
+      )
+      .map((relation) => relation.container)
+  );
+  const activeLineMatrices = new Set(
+    relations
+      .filter((relation) =>
+        relation.kind === "matrix_subscript" &&
         relation.line === runtime.currentLine &&
         frame !== undefined &&
         relationMatchesFrameScope(relation, frame.functionName)
@@ -412,6 +429,18 @@ export function buildVisualState(
         visualId: visual.visualId,
         kind: visual.kind,
         priority: [false, mutated, pointerRelevant, visual.pointers.length] as const
+      };
+    }
+    if (visual.kind === "matrix") {
+      return {
+        visualId: visual.visualId,
+        kind: visual.kind,
+        priority: [
+          activeLineMatrices.has(visual.variableName),
+          visual.changedCells.length > 0,
+          visual.focuses.some((focus) => !focus.rowOutOfBounds && !focus.columnOutOfBounds),
+          visual.focuses.length
+        ] as const
       };
     }
     const pointerRelevant = visual.kind === "list"

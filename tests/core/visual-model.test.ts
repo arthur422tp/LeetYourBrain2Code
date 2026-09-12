@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { FrameDiff } from "../../src/core/state-diff";
 import type { RuntimeState } from "../../src/core/runtime-state";
 import type { SubscriptRelation } from "../../src/core/ast-relations";
-import type { ObjectSnapshot, ValueSnapshot } from "../../src/shared/trace-types";
+import type { MatrixSubscriptRelation, ObjectSnapshot, ValueSnapshot } from "../../src/shared/trace-types";
 import type { RuntimeMutation } from "../../src/core/runtime-mutation";
 import { buildVisualState } from "../../src/core/visual-model";
 
@@ -29,6 +29,20 @@ function list(values: number[]): ValueSnapshot {
     type: "list",
     length: values.length,
     items: values.map(int),
+    truncated: false
+  };
+}
+
+function matrix(values: number[][]): ValueSnapshot {
+  return {
+    type: "list",
+    length: values.length,
+    items: values.map((rowValues) => ({
+      type: "list",
+      length: rowValues.length,
+      items: rowValues.map(int),
+      truncated: false
+    })),
     truncated: false
   };
 }
@@ -122,6 +136,15 @@ const relation = (index: string): SubscriptRelation => ({
   index
 });
 
+const matrixRelation = (line = 7): MatrixSubscriptRelation => ({
+  kind: "matrix_subscript",
+  scope: "Solution.twoSum",
+  line,
+  container: "dp",
+  rowIndex: { kind: "variable", name: "i" },
+  columnIndex: { kind: "variable", name: "j" }
+});
+
 const listDiff: FrameDiff = {
   frameId: 4,
   variables: [
@@ -148,6 +171,86 @@ const listMutations: RuntimeMutation[] = [{
 }];
 
 describe("buildVisualState", () => {
+  it("gives a valid Matrix exclusive ownership of its variable and ranks it above a list", () => {
+    const state = buildVisualState(
+      runtime({
+        dp: matrix([[0, 0], [0, 0]]),
+        nums: list([4, 2, 7]),
+        i: int(1),
+        j: int(0)
+      }),
+      null,
+      [matrixRelation()]
+    );
+
+    expect(state.visuals.map((visual) => visual.visualId)).toEqual(
+      expect.arrayContaining(["matrix:dp", "list:nums"])
+    );
+    expect(state.visuals.map((visual) => visual.visualId)).not.toContain("list:dp");
+    expect(state.primaryVisualId).toBe("matrix:dp");
+  });
+
+  it("keeps unsupported ragged matrices out of both Matrix and nested-list visuals", () => {
+    const state = buildVisualState(
+      runtime({
+        dp: {
+          type: "list",
+          length: 2,
+          items: [
+            { type: "list", length: 2, items: [int(0), int(0)], truncated: false },
+            { type: "list", length: 1, items: [int(0)], truncated: false }
+          ],
+          truncated: false
+        },
+        nums: list([4, 2, 7])
+      }),
+      null,
+      [matrixRelation()]
+    );
+
+    expect(state.visuals.map((visual) => visual.visualId)).not.toEqual(
+      expect.arrayContaining(["matrix:dp", "list:dp"])
+    );
+  });
+
+  it("ranks a changed Matrix even when there is no current-line focus", () => {
+    const state = buildVisualState(
+      runtime({
+        dp: matrix([[0, 0], [7, 0]]),
+        nums: list([4, 2, 7])
+      }),
+      null,
+      [],
+      null,
+      [{
+        kind: "sequence_element",
+        origin: "transition",
+        frameId: 4,
+        containerName: "dp",
+        containerKind: "list",
+        index: 1,
+        action: "changed",
+        before: {
+          type: "list",
+          length: 2,
+          items: [int(0), int(0)],
+          truncated: false
+        },
+        after: {
+          type: "list",
+          length: 2,
+          items: [int(7), int(0)],
+          truncated: false
+        }
+      }]
+    );
+
+    expect(state.visuals.find((visual) => visual.visualId === "matrix:dp")).toMatchObject({
+      changedCells: [{ row: 1, column: 0, action: "changed" }]
+    });
+    expect(state.primaryVisualId).toBe("matrix:dp");
+  });
+
   it("highlights list indexes from sequence mutations without a frame diff", () => {
     const mutations: RuntimeMutation[] = [{
       kind: "sequence_element",

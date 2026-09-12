@@ -42,7 +42,8 @@ export function buildExpressionEvidence(
   };
 
   for (const batch of batches) {
-    if (!runtimeByStep.has(batch.anchorStep)) {
+    const runtime = runtimeByStep.get(batch.anchorStep);
+    if (!runtime || runtime.activeFrameId !== batch.frameId) {
       continue;
     }
 

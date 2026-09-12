@@ -170,4 +170,17 @@ describe("buildExpressionEvidence", () => {
     expect(evidence.get(1)?.roots[0]?.tree.value).toEqual(int(8));
     expect(evidence.has(2)).toBe(false);
   });
+
+  it("ignores a batch whose frame does not match its runtime anchor", () => {
+    const evidence = buildExpressionEvidence(plan, [{
+      ...batch(1, [{
+        rootId: "r1",
+        status: "completed",
+        evaluations: [{ evaluationId: 1, exprId: "r1.0", order: 1, value: int(8) }]
+      }]),
+      frameId: 5
+    }], [runtimeState(1)]);
+
+    expect(evidence).toEqual(new Map());
+  });
 });

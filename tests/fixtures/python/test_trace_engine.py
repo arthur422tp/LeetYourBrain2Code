@@ -1,6 +1,7 @@
 import sys
 import json
 import time
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "worker" / "python"))
@@ -637,3 +638,122 @@ class Solution:
     ]
     assert bounded_events
     assert all(len(event["objects"]) <= 5 for event in bounded_events)
+
+
+def test_expression_recording_preserves_pop_side_effect_order_and_count():
+    result = request(
+        """class Solution:
+    def solve(self, arr):
+        x = arr.pop() + arr.pop()
+        return [x, arr]
+""",
+        "solve",
+        1,
+        "[1,2,3]",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {
+        "type": "list",
+        "length": 2,
+        "items": [
+            {"type": "int", "value": "5"},
+            {
+                "type": "list",
+                "length": 1,
+                "items": [{"type": "int", "value": "1"}],
+                "truncated": False,
+            },
+        ],
+        "truncated": False,
+    }
+    assignment = next(
+        root
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        if root["root_id"] == "r1"
+    )
+    assert assignment["status"] == "completed"
+
+
+def test_expression_recording_resolves_first_duplicate_min_candidate():
+    result = request(
+        """class Solution:
+    def solve(self):
+        x = min(3, 3, 5)
+        return x
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    selection = next(
+        evidence
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        for evidence in root.get("selection_evidence", [])
+    )
+    assert selection["status"] == "resolved"
+    assert selection["selected_candidate_index"] == 0
+
+
+def test_expression_recording_keeps_user_exception_and_flushes_partial_root():
+    result = request(
+        """class Solution:
+    def solve(self):
+        x = 10 / 0
+        return x
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "exception"
+    assert result["exception"]["type"] == "ZeroDivisionError"
+    partial = next(
+        root
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        if root["root_id"] == "r1"
+    )
+    assert partial["status"] == "partial"
+
+
+def test_expression_recording_does_not_resolve_shadowed_min():
+    result = request(
+        """class Solution:
+    def solve(self):
+        min = lambda a, b: a
+        x = min(7, 2)
+        return x
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    selections = [
+        evidence
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        for evidence in root.get("selection_evidence", [])
+    ]
+    assert all(evidence["status"] != "resolved" for evidence in selections)
+
+
+class ExpressionTracingRunnerTests(unittest.TestCase):
+    def test_pop_side_effect_order_and_count(self):
+        test_expression_recording_preserves_pop_side_effect_order_and_count()
+
+    def test_first_duplicate_min_candidate(self):
+        test_expression_recording_resolves_first_duplicate_min_candidate()
+
+    def test_user_exception_and_partial_root(self):
+        test_expression_recording_keeps_user_exception_and_flushes_partial_root()
+
+    def test_shadowed_min_is_not_resolved(self):
+        test_expression_recording_does_not_resolve_shadowed_min()

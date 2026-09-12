@@ -58,6 +58,8 @@ describe("Pyodide runtime", () => {
     expect(script).toContain('sys.modules["ast_analyzer"]');
     expect(script).toContain("leetcode-expression-instrumenter");
     expect(script).toContain('sys.modules["expression_instrumenter"]');
+    expect(script).toContain("leetcode-expression-recorder");
+    expect(script).toContain('sys.modules["expression_recorder"]');
     expect(script).toContain("leetcode-runner");
     expect(script).toContain("run_request");
     expect(script).toContain("parameter_kinds");
@@ -251,6 +253,104 @@ describe("Pyodide runtime", () => {
     expect(finished[0]).toEqual(
       expect.objectContaining({ status: "completed", returnValue: { type: "int", value: "5" } })
     );
+  });
+
+  it("normalizes terminal expression evidence from Python snake_case fields", async () => {
+    const finished: ExecutionTerminalResult[] = [];
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => ({
+          status: "completed",
+          termination_reason: "normal_return",
+          stdout: "",
+          events: [],
+          expression_plan: {
+            version: 1,
+            roots: [{
+              rootId: "r1",
+              kind: "assignment",
+              expressionExprId: "r1.0",
+              target: {
+                source: "x",
+                span: { line: 3, column: 8, endLine: 3, endColumn: 21 }
+              },
+              span: { line: 3, column: 8, endLine: 3, endColumn: 21 }
+            }],
+            expressions: [{
+              exprId: "r1.0",
+              rootId: "r1",
+              parentExprId: null,
+              kind: "call",
+              span: { line: 3, column: 8, endLine: 3, endColumn: 21 },
+              source: "min(3, 3, 5)",
+              childExprIds: ["r1.0.0", "r1.0.1", "r1.0.2"]
+            }]
+          },
+          expression_batches: [{
+            batch_id: 1,
+            anchor_step: 4,
+            frame_id: 2,
+            line: 3,
+            roots: [{
+              root_id: "r1",
+              status: "completed",
+              evaluations: [{
+                evaluation_id: 1,
+                expr_id: "r1.0",
+                order: 1,
+                value: { type: "int", value: "3" }
+              }],
+              result_expr_id: "r1.0",
+              selection_evidence: [{
+                call_expr_id: "r1.0",
+                function: "min",
+                candidate_expr_ids: ["r1.0.0", "r1.0.1", "r1.0.2"],
+                result: { type: "int", value: "3" },
+                selected_candidate_index: 0,
+                status: "resolved"
+              }]
+            }]
+          }, {
+            batch_id: 2,
+            anchor_step: 5,
+            frame_id: 2,
+            line: 4,
+            roots: [{ root_id: "r2", status: "partial", evaluations: [] }]
+          }],
+          expression_tracing: { status: "truncated", reason: "expression_event_limit" }
+        })
+      }),
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute(request);
+
+    expect(finished[0]?.expressionPlan).toEqual(expect.objectContaining({ version: 1 }));
+    expect(finished[0]?.expressionBatches).toEqual([
+      expect.objectContaining({
+        batchId: 1,
+        anchorStep: 4,
+        frameId: 2,
+        roots: [expect.objectContaining({
+          rootId: "r1",
+          resultExprId: "r1.0",
+          selectionEvidence: [expect.objectContaining({
+            callExprId: "r1.0",
+            candidateExprIds: ["r1.0.0", "r1.0.1", "r1.0.2"],
+            selectedCandidateIndex: 0
+          })]
+        })]
+      }),
+      expect.objectContaining({
+        batchId: 2,
+        anchorStep: 5,
+        roots: [expect.objectContaining({ rootId: "r2", status: "partial" })]
+      })
+    ]);
+    expect(finished[0]?.expressionTracing).toEqual({
+      status: "truncated",
+      reason: "expression_event_limit"
+    });
   });
 
   it("installs a JSON trace callback while Python is still running", async () => {

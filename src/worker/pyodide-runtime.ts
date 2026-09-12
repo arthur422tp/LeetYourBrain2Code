@@ -7,9 +7,15 @@ import type {
   ExecutionTerminalResult
 } from "../shared/execution-types";
 import type { ObjectSnapshot, TraceEvent, ValueSnapshot } from "../shared/trace-types";
+import type {
+  ExpressionBatch,
+  ExpressionPlan,
+  ExpressionTracingState
+} from "../shared/expression-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
 import astAnalyzerSource from "./python/ast_analyzer.py?raw";
 import expressionInstrumenterSource from "./python/expression_instrumenter.py?raw";
+import expressionRecorderSource from "./python/expression_recorder.py?raw";
 import runnerSource from "./python/runner.py?raw";
 import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
@@ -88,6 +94,10 @@ sys.modules["serializer"] = __lc_serializer_module
 __lc_tracer_module = types.ModuleType("tracer")
 exec(compile(${quotePython(tracerSource)}, "<leetcode-tracer>", "exec"), vars(__lc_tracer_module), vars(__lc_tracer_module))
 sys.modules["tracer"] = __lc_tracer_module
+
+__lc_expression_recorder_module = types.ModuleType("expression_recorder")
+sys.modules["expression_recorder"] = __lc_expression_recorder_module
+exec(compile(${quotePython(expressionRecorderSource)}, "<leetcode-expression-recorder>", "exec"), vars(__lc_expression_recorder_module), vars(__lc_expression_recorder_module))
 
 __lc_runner_module = types.ModuleType("runner")
 exec(compile(${quotePython(runnerSource)}, "<leetcode-runner>", "exec"), vars(__lc_runner_module), vars(__lc_runner_module))
@@ -344,6 +354,105 @@ function normalizeException(value: unknown): ExceptionInfo | undefined {
   };
 }
 
+function normalizeExpressionPlan(value: unknown): ExpressionPlan | undefined {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.roots) || !Array.isArray(value.expressions)) {
+    return undefined;
+  }
+  if (!value.roots.every((root) => isRecord(root) && typeof root.rootId === "string" &&
+    (root.kind === "assignment" || root.kind === "return") && typeof root.expressionExprId === "string" &&
+    isRecord(root.span) && typeof root.span.line === "number" && typeof root.span.column === "number" &&
+    typeof root.span.endLine === "number" && typeof root.span.endColumn === "number" &&
+    (root.kind === "return" || (isRecord(root.target) && typeof root.target.source === "string")))) {
+    return undefined;
+  }
+  if (!value.expressions.every((expression) => isRecord(expression) && typeof expression.exprId === "string" &&
+    typeof expression.rootId === "string" && (typeof expression.parentExprId === "string" || expression.parentExprId === null) &&
+    ["name", "literal", "subscript", "attribute", "unary", "binary", "call"].includes(String(expression.kind)) &&
+    isRecord(expression.span) && typeof expression.span.line === "number" && typeof expression.span.column === "number" &&
+    typeof expression.span.endLine === "number" && typeof expression.span.endColumn === "number" &&
+    typeof expression.source === "string" && Array.isArray(expression.childExprIds) &&
+    expression.childExprIds.every((id) => typeof id === "string"))) {
+    return undefined;
+  }
+  return value as unknown as ExpressionPlan;
+}
+
+function normalizeExpressionBatch(value: unknown): ExpressionBatch | null {
+  if (!isRecord(value) || !Array.isArray(value.roots)) {
+    return null;
+  }
+  const batchId = value.batch_id ?? value.batchId;
+  const anchorStep = value.anchor_step ?? value.anchorStep;
+  const frameId = value.frame_id ?? value.frameId;
+  if (!Number.isInteger(batchId) || !Number.isInteger(anchorStep) || !Number.isInteger(frameId) ||
+    typeof value.line !== "number") {
+    return null;
+  }
+  const roots = value.roots.map((rawRoot) => {
+    if (!isRecord(rawRoot)) return null;
+    const rootId = rawRoot.root_id ?? rawRoot.rootId;
+    const resultExprId = rawRoot.result_expr_id ?? rawRoot.resultExprId;
+    const rawEvaluations = rawRoot.evaluations;
+    const rawSelections = rawRoot.selection_evidence ?? rawRoot.selectionEvidence;
+    if (typeof rootId !== "string" || (rawRoot.status !== "completed" && rawRoot.status !== "partial") ||
+      !Array.isArray(rawEvaluations) || (rawSelections !== undefined && !Array.isArray(rawSelections))) return null;
+    const evaluations = rawEvaluations.map((rawEvaluation) => {
+      if (!isRecord(rawEvaluation)) return null;
+      const evaluationId = rawEvaluation.evaluation_id ?? rawEvaluation.evaluationId;
+      const exprId = rawEvaluation.expr_id ?? rawEvaluation.exprId;
+      if (!Number.isInteger(evaluationId) || typeof exprId !== "string" || !Number.isInteger(rawEvaluation.order) ||
+        !isValueSnapshot(rawEvaluation.value)) return null;
+      return {
+        evaluationId: evaluationId as number,
+        exprId,
+        order: rawEvaluation.order as number,
+        value: rawEvaluation.value
+      };
+    });
+    const selectionEvidence = (rawSelections ?? []).map((rawSelection) => {
+      if (!isRecord(rawSelection)) return null;
+      const callExprId = rawSelection.call_expr_id ?? rawSelection.callExprId;
+      const candidateExprIds = rawSelection.candidate_expr_ids ?? rawSelection.candidateExprIds;
+      const selectedCandidateIndex = rawSelection.selected_candidate_index ?? rawSelection.selectedCandidateIndex;
+      if (typeof callExprId !== "string" || (rawSelection.function !== "min" && rawSelection.function !== "max") ||
+        !Array.isArray(candidateExprIds) || !candidateExprIds.every((id) => typeof id === "string") ||
+        !(Number.isInteger(selectedCandidateIndex) || selectedCandidateIndex === null) || !isValueSnapshot(rawSelection.result) ||
+        !["resolved", "unsupported_call_shape", "unsupported_value", "ambiguous"].includes(String(rawSelection.status))) return null;
+      return {
+        callExprId,
+        function: rawSelection.function as "min" | "max",
+        candidateExprIds,
+        result: rawSelection.result,
+        selectedCandidateIndex: selectedCandidateIndex as number | null,
+        status: rawSelection.status as "resolved" | "unsupported_call_shape" | "unsupported_value" | "ambiguous"
+      };
+    });
+    if (evaluations.some((evaluation) => evaluation === null) || selectionEvidence.some((selection) => selection === null)) return null;
+    return { rootId, status: rawRoot.status as "completed" | "partial", evaluations,
+      ...(typeof resultExprId === "string" ? { resultExprId } : {}),
+      ...(selectionEvidence.length > 0 ? { selectionEvidence } : {}) };
+  });
+  if (roots.some((root) => root === null)) return null;
+  return {
+    batchId: batchId as number,
+    anchorStep: anchorStep as number,
+    frameId: frameId as number,
+    line: value.line,
+    roots: roots as ExpressionBatch["roots"]
+  };
+}
+
+function normalizeExpressionTracingState(value: unknown): ExpressionTracingState | undefined {
+  if (!isRecord(value) || !["complete", "truncated", "unavailable"].includes(String(value.status)) ||
+    (value.reason !== undefined && typeof value.reason !== "string")) {
+    return undefined;
+  }
+  return {
+    status: value.status as ExpressionTracingState["status"],
+    ...(typeof value.reason === "string" ? { reason: value.reason } : {})
+  };
+}
+
 export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
   if (!isRecord(value)) {
     return null;
@@ -486,6 +595,16 @@ function normalizePythonExecutionResult(
         .map((relation) => normalizeSubscriptRelation(relation))
         .filter((relation): relation is NonNullable<typeof relation> => relation !== null)
     : [];
+  const expressionPlan = normalizeExpressionPlan(value.expression_plan ?? value.expressionPlan);
+  const rawExpressionBatches = value.expression_batches ?? value.expressionBatches;
+  const expressionBatches = Array.isArray(rawExpressionBatches)
+    ? rawExpressionBatches
+        .map((batch) => normalizeExpressionBatch(batch))
+        .filter((batch): batch is ExpressionBatch => batch !== null)
+    : [];
+  const expressionTracing = normalizeExpressionTracingState(
+    value.expression_tracing ?? value.expressionTracing
+  );
 
   return {
     events,
@@ -495,6 +614,9 @@ function normalizePythonExecutionResult(
       stdout: typeof value.stdout === "string" ? value.stdout : "",
       durationMs: typeof value.duration_ms === "number" ? value.duration_ms : durationMs,
       ...(subscriptRelations.length > 0 ? { subscriptRelations } : {}),
+      ...(expressionPlan ? { expressionPlan } : {}),
+      ...(expressionBatches.length > 0 ? { expressionBatches } : {}),
+      ...(expressionTracing ? { expressionTracing } : {}),
       ...(isValueSnapshot(returnValue) ? { returnValue } : {}),
       ...(exception ? { exception } : {})
     }

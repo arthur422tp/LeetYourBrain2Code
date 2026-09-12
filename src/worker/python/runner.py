@@ -6,6 +6,8 @@ import traceback
 
 from tracer import TraceCollector, TraceLimitExceeded, USER_CODE_FILENAME, _limit
 from ast_analyzer import analyze_subscript_relations, relations_as_dicts
+from expression_instrumenter import instrument_expression_roots
+from expression_recorder import ExpressionRecorder
 
 
 class UnsupportedTestcaseFormat(Exception):
@@ -36,6 +38,26 @@ class _LeetCodeNullTransformer(ast.NodeTransformer):
         if node.id == "null":
             return ast.copy_location(ast.Constant(value=None), node)
         return node
+
+
+class _ExpressionHelperLookupTransformer(ast.NodeTransformer):
+    _HELPER_NAMES = {"__lc_expr_record", "__lc_minmax_call"}
+
+    def visit_Name(self, node):
+        if not isinstance(node.ctx, ast.Load) or node.id not in self._HELPER_NAMES:
+            return node
+        return ast.copy_location(
+            ast.Subscript(
+                value=ast.Call(
+                    func=ast.Name(id="globals", ctx=ast.Load()),
+                    args=[],
+                    keywords=[],
+                ),
+                slice=ast.Constant(value=node.id),
+                ctx=ast.Load(),
+            ),
+            node,
+        )
 
 
 def _literal_eval_argument(line, parameter_kind):
@@ -238,8 +260,18 @@ def run_request(
     if len(arguments) != parameter_count:
         return _empty_result("input_error", "unsupported_testcase_format")
 
+    instrumentation = instrument_expression_roots(source_code)
+    expression_plan = instrumentation.plan_dict
     try:
-        user_code = compile(source_code, USER_CODE_FILENAME, "exec")
+        instrumented_tree = instrumentation.instrumented_tree
+        if instrumentation.available:
+            instrumented_tree = _ExpressionHelperLookupTransformer().visit(instrumented_tree)
+            ast.fix_missing_locations(instrumented_tree)
+        user_code = compile(
+            instrumented_tree if instrumentation.available else source_code,
+            USER_CODE_FILENAME,
+            "exec",
+        )
     except SyntaxError as error:
         return _empty_result(
             "parse_error",
@@ -252,13 +284,26 @@ def run_request(
     namespace = runtime_globals if runtime_globals is not None else {}
     baseline_global_names = set(namespace)
     stdout_buffer = io.StringIO()
+    recorder = ExpressionRecorder(limits, lambda: None, session_id=session_id)
+    if not instrumentation.available:
+        recorder.status = "unavailable"
+        recorder.reason = instrumentation.reason
     collector = TraceCollector(
         limits,
         stdout_buffer,
         baseline_global_names,
         session_id=session_id,
         emit_batch=emit_batch,
+        expression_recorder=recorder,
     )
+    recorder.serializer_factory = lambda: collector.serialize_value
+    recorder.frame_id_for = collector.expression_frame_id
+    recorder.root_expression_ids = {
+        root["rootId"]: root["expressionExprId"]
+        for root in expression_plan["roots"]
+    }
+    namespace["__lc_expr_record"] = recorder.record_value
+    namespace["__lc_minmax_call"] = recorder.record_minmax_call
     return_value = None
 
     collector.start()
@@ -292,14 +337,18 @@ def run_request(
             method = getattr(instance(), entrypoint["method_name"])
             return_value = method(*converted_arguments)
     except TraceLimitExceeded as error:
+        recorder.flush_all()
         return _empty_result(
             "trace_limit",
             error.reason,
             stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
             events=collector.events,
             subscript_relations=subscript_relations,
+            expression_plan=expression_plan,
+            **recorder.result_dict(),
         )
     except UnsupportedTestcaseFormat as error:
+        recorder.flush_all()
         return _empty_result(
             "input_error",
             "unsupported_testcase_format",
@@ -307,8 +356,11 @@ def run_request(
             events=collector.events,
             subscript_relations=subscript_relations,
             exception=_exception_info(error),
+            expression_plan=expression_plan,
+            **recorder.result_dict(),
         )
     except Exception as error:
+        recorder.flush_all()
         exception = collector.last_exception or _exception_info(error)
         return _empty_result(
             "exception",
@@ -317,10 +369,13 @@ def run_request(
             events=collector.events,
             subscript_relations=subscript_relations,
             exception=exception,
+            expression_plan=expression_plan,
+            **recorder.result_dict(),
         )
     finally:
         collector.stop()
         collector.flush()
+        recorder.flush_all()
 
     return _empty_result(
         "completed",
@@ -328,6 +383,8 @@ def run_request(
         stdout=_truncate_stdout(stdout_buffer.getvalue(), limits),
         events=collector.events,
         subscript_relations=subscript_relations,
+        expression_plan=expression_plan,
+        **recorder.result_dict(),
         return_value=collector.serialize_value(return_value),
         duration_ms=(time.monotonic() - started_at) * 1000,
     )

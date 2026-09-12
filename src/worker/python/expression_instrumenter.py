@@ -43,22 +43,26 @@ def _kind(node):
 def _expression_children(node):
     children = []
     for child in ast.iter_child_nodes(node):
-        if isinstance(child, ast.expr):
-            children.append(child)
-        elif isinstance(child, ast.Slice):
+        if isinstance(child, ast.Slice):
             children.extend(_expression_children(child))
         elif isinstance(child, ast.keyword):
             children.extend(_expression_children(child))
+        elif isinstance(child, ast.expr):
+            children.append(child)
     return children
 
 
 def _supports_fragment(node):
-    if isinstance(node, ast.expr):
-        return _supports_expression(node)
     if isinstance(node, ast.Slice):
         return all(_supports_fragment(child) for child in ast.iter_child_nodes(node))
     if isinstance(node, ast.keyword):
-        return node.value is not None and _supports_expression(node.value)
+        return (
+            node.arg is not None
+            and node.value is not None
+            and _supports_expression(node.value)
+        )
+    if isinstance(node, ast.expr):
+        return _supports_expression(node)
     return False
 
 
@@ -97,7 +101,11 @@ def _target_descriptor(target, source_code):
     if not isinstance(target, ast.Subscript):
         return descriptor
 
-    if isinstance(target.value, ast.Name) and isinstance(target.slice, ast.expr):
+    if (
+        isinstance(target.value, ast.Name)
+        and isinstance(target.slice, ast.expr)
+        and not isinstance(target.slice, ast.Slice)
+    ):
         descriptor["structureHint"] = {
             "kind": "list_index",
             "variableName": target.value.id,
@@ -110,7 +118,9 @@ def _target_descriptor(target, source_code):
         isinstance(inner, ast.Subscript)
         and isinstance(inner.value, ast.Name)
         and isinstance(inner.slice, ast.expr)
+        and not isinstance(inner.slice, ast.Slice)
         and isinstance(target.slice, ast.expr)
+        and not isinstance(target.slice, ast.Slice)
     ):
         descriptor["structureHint"] = {
             "kind": "matrix_cell",
@@ -130,11 +140,11 @@ class _Planner(ast.NodeVisitor):
         self.root_ordinal = 0
 
     def visit_Assign(self, node):
-        self._add_assignment_root(node)
+        self._add_assignment_root(node.value, node.targets)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node):
-        self._add_assignment_root(node)
+        self._add_assignment_root(node.value, [node.target])
         self.generic_visit(node)
 
     def visit_Return(self, node):
@@ -152,23 +162,23 @@ class _Planner(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
-    def _add_assignment_root(self, node):
+    def _add_assignment_root(self, value, targets):
         self.root_ordinal += 1
         if (
-            len(node.targets) != 1
-            or node.value is None
-            or not _supports_expression(node.value)
+            len(targets) != 1
+            or value is None
+            or not _supports_expression(value)
         ):
             return
         root_id = f"r{self.root_ordinal}"
-        expression_id = self._add_expression(root_id, node.value, None, (0,))
+        expression_id = self._add_expression(root_id, value, None, (0,))
         self.plan["roots"].append(
             {
                 "rootId": root_id,
                 "kind": "assignment",
                 "expressionExprId": expression_id,
-                "target": _target_descriptor(node.targets[0], self.source_code),
-                "span": _span(node.value),
+                "target": _target_descriptor(targets[0], self.source_code),
+                "span": _span(value),
             }
         )
 
@@ -200,7 +210,11 @@ class _Planner(ast.NodeVisitor):
         return expression_id
 
     def _add_structure_hint(self, node, descriptor):
-        if isinstance(node.value, ast.Name) and isinstance(node.slice, ast.expr):
+        if (
+            isinstance(node.value, ast.Name)
+            and isinstance(node.slice, ast.expr)
+            and not isinstance(node.slice, ast.Slice)
+        ):
             descriptor["structureHint"] = {
                 "kind": "list_index",
                 "variableName": node.value.id,
@@ -212,7 +226,9 @@ class _Planner(ast.NodeVisitor):
             isinstance(inner, ast.Subscript)
             and isinstance(inner.value, ast.Name)
             and isinstance(inner.slice, ast.expr)
+            and not isinstance(inner.slice, ast.Slice)
             and isinstance(node.slice, ast.expr)
+            and not isinstance(node.slice, ast.Slice)
         ):
             descriptor["structureHint"] = {
                 "kind": "matrix_cell",

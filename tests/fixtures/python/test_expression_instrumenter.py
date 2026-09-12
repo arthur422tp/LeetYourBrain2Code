@@ -56,6 +56,56 @@ class ExpressionInstrumenterTests(unittest.TestCase):
         self.assertTrue(result.available)
         self.assertEqual(result.plan_dict, {"version": 1, "roots": [], "expressions": []})
 
+    def test_plans_annotated_assignment_without_marking_instrumentation_unavailable(self):
+        source = """def solve(a, b):
+    total: int = a + b
+    return total
+"""
+
+        result = instrument_expression_roots(source)
+
+        self.assertTrue(result.available)
+        self.assertEqual([root["kind"] for root in result.plan_dict["roots"]], ["assignment", "return"])
+        self.assertEqual(result.plan_dict["roots"][0]["target"]["source"], "total")
+        compile(result.instrumented_tree, "<leetcode-user-code>", "exec")
+
+    def test_plans_slice_subscripts_without_a_coordinate_hint(self):
+        source = """def solve(values):
+    window = values[1:3]
+    return window
+"""
+
+        result = instrument_expression_roots(source)
+        slice_descriptor = next(
+            expression
+            for expression in result.plan_dict["expressions"]
+            if expression["source"] == "values[1:3]"
+        )
+        namespace = {
+            "__lc_expr_record": lambda root_id, expr_id, value: value,
+            "__lc_minmax_call": lambda root_id, expr_id, function, candidate_ids, values: function(*values),
+        }
+
+        self.assertTrue(result.available)
+        self.assertNotIn("structureHint", slice_descriptor)
+        exec(compile(result.instrumented_tree, "<leetcode-user-code>", "exec"), namespace, namespace)
+        self.assertEqual(namespace["solve"]([0, 1, 2, 3]), [1, 2])
+
+    def test_omits_keyword_expansion_calls_but_keeps_other_supported_roots(self):
+        source = """def solve(function, kwargs):
+    result = function(**kwargs)
+    return result
+"""
+
+        result = instrument_expression_roots(source)
+
+        self.assertTrue(result.available)
+        self.assertEqual([root["kind"] for root in result.plan_dict["roots"]], ["return"])
+        self.assertNotIn(
+            "function(**kwargs)",
+            [expression["source"] for expression in result.plan_dict["expressions"]],
+        )
+
     def test_records_original_metadata_and_direct_matrix_target_hints(self):
         source = """def solve(dp, grid, i, j):
     dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]

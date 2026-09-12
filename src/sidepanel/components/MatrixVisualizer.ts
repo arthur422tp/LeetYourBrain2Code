@@ -69,6 +69,41 @@ function changeAt(
   return model.changedCells.find((change) => change.row === row && change.column === column);
 }
 
+function expressionReferencesAt(
+  model: MatrixVisualModel,
+  row: number,
+  column: number
+): MatrixVisualModel["expressionReferences"] {
+  return model.expressionReferences.filter((reference) =>
+    reference.kind === "matrix_cell" &&
+    reference.row === row &&
+    reference.column === column
+  );
+}
+
+function applyExpressionOverlays(
+  cell: HTMLElement,
+  references: MatrixVisualModel["expressionReferences"]
+): void {
+  const hasOperand = references.some((reference) =>
+    reference.role === "operand" || reference.role === "selected_operand"
+  );
+  const hasSelected = references.some((reference) => reference.role === "selected_operand");
+  const hasTarget = references.some((reference) => reference.role === "assignment_target");
+  cell.classList.toggle("is-expression-operand", hasOperand);
+  cell.classList.toggle("is-expression-selected", hasSelected);
+  cell.classList.toggle("is-expression-target", hasTarget);
+  if (hasOperand) {
+    cell.dataset.expressionOperand = "true";
+  }
+  if (hasSelected) {
+    cell.dataset.expressionSelected = "true";
+  }
+  if (hasTarget) {
+    cell.dataset.expressionTarget = "true";
+  }
+}
+
 function focusBinding(
   focuses: MatrixFocus[],
   axis: "row" | "column"
@@ -221,6 +256,7 @@ function renderGrid(model: MatrixVisualModel, viewport: MatrixViewport): HTMLEle
       if (focuses.length > 0 && change) {
         target.classList.add("is-focus-and-changed");
       }
+      applyExpressionOverlays(target, expressionReferencesAt(model, row, column));
       grid.append(target);
     }
   }

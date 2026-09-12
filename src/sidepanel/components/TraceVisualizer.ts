@@ -13,6 +13,7 @@ import {
   type BehavioralTimelineHandle
 } from "./BehavioralTimeline";
 import { createFailureFirstEntry } from "./FailureFirstEntry";
+import { createExpressionEvidence } from "./ExpressionEvidence";
 import { createMutationList } from "./MutationList";
 import {
   createTraceOutline,
@@ -260,7 +261,12 @@ function renderOutput(state: VisualState | undefined, session: TraceSession): HT
 }
 
 export function createTraceVisualizer(session: TraceSession): TraceVisualizerHandle {
-  const interpretation = interpretTrace(session.events, session.subscriptRelations ?? []);
+  const interpretation = interpretTrace(
+    session.events,
+    session.subscriptRelations ?? [],
+    session.expressionPlan,
+    session.expressionBatches ?? []
+  );
   const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
   const evidenceByPatternId = resolveBehavioralEvidenceMap(
     interpretation.behavioralAnalysis.patterns,
@@ -297,6 +303,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const visualPanel = createPanel("Visual State", "trace-viewer__visual-panel");
   const visualStateRenderer = createVisualStateRenderer();
   visualPanel.body.append(visualStateRenderer.body);
+  const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel");
   const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel");
   const behavioralPanel = createPanel(
     "Behavioral Signals",
@@ -352,6 +359,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
       visualStateRenderer.setState(undefined);
+      expressionPanel.body.replaceChildren(createExpressionEvidence(undefined, session.expressionTracing));
       changesPanel.body.replaceChildren(createMutationList([]));
       behavioralPanel.body.replaceChildren(createBehavioralSignals(
         {
@@ -395,6 +403,10 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       : `Line ${state.currentLine}`;
 
     visualStateRenderer.setState(state);
+    expressionPanel.body.replaceChildren(createExpressionEvidence(
+      event ? interpretation.expressionEvidence.get(event.step) : undefined,
+      session.expressionTracing
+    ));
     changesPanel.body.replaceChildren(createMutationList(state?.mutations ?? []));
     behavioralPanel.body.replaceChildren(createBehavioralSignals(
       {
@@ -478,6 +490,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   root.append(
     codePanel.panel,
     visualPanel.panel,
+    expressionPanel.panel,
     inspectorGrid,
     callStackPanel,
     outputPanel.panel,

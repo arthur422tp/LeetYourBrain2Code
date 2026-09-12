@@ -10,6 +10,44 @@ export interface ListVisualizerHandle {
 
 type ListPointer = ListVisualModel["pointers"][number];
 
+function expressionReferencesAt(
+  model: ListVisualModel,
+  index: number
+): ListVisualModel["expressionReferences"] {
+  return model.expressionReferences.filter((reference) =>
+    reference.kind === "list_index" && reference.index === index
+  );
+}
+
+function applyExpressionOverlays(
+  item: HTMLElement,
+  references: ListVisualModel["expressionReferences"]
+): void {
+  const hasOperand = references.some((reference) =>
+    reference.role === "operand" || reference.role === "selected_operand"
+  );
+  const hasSelected = references.some((reference) => reference.role === "selected_operand");
+  const hasTarget = references.some((reference) => reference.role === "assignment_target");
+  item.classList.toggle("is-expression-operand", hasOperand);
+  item.classList.toggle("is-expression-selected", hasSelected);
+  item.classList.toggle("is-expression-target", hasTarget);
+  if (hasOperand) {
+    item.dataset.expressionOperand = "true";
+  } else {
+    delete item.dataset.expressionOperand;
+  }
+  if (hasSelected) {
+    item.dataset.expressionSelected = "true";
+  } else {
+    delete item.dataset.expressionSelected;
+  }
+  if (hasTarget) {
+    item.dataset.expressionTarget = "true";
+  } else {
+    delete item.dataset.expressionTarget;
+  }
+}
+
 function createPointerMarker(
   pointer: ListPointer,
   pointedValue?: ListVisualModel["items"][number]
@@ -107,6 +145,7 @@ function createListItem(
   if (pointers.length > 0) {
     item.classList.add("is-pointer-target");
   }
+  applyExpressionOverlays(item, expressionReferencesAt(model, index));
 
   item.append(pointerRow, value, itemIndex);
   return item;
@@ -229,6 +268,7 @@ function updateListItems(list: HTMLElement, model: ListVisualModel): void {
       void item.offsetWidth;
       item.classList.add("is-pointer-focus");
     }
+    applyExpressionOverlays(item, expressionReferencesAt(model, index));
     item.querySelector<HTMLElement>(".list-visualizer__value")!.textContent =
       `[${formatValue(model.items[index]!)}]`;
   }

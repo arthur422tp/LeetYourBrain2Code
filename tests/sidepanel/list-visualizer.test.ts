@@ -56,6 +56,43 @@ describe("renderListVisualizer", () => {
       .toBe(false);
   });
 
+  it("renders expression operand, selected, and assignment-target overlays orthogonally", () => {
+    const view = renderListVisualizer(model({
+      pointers: [{ name: "i", index: 1, outOfBounds: false }],
+      changedIndexes: [1],
+      expressionReferences: [
+        {
+          exprId: "r1.value",
+          variableName: "nums",
+          kind: "list_index",
+          index: 1,
+          rawIndex: 1,
+          role: "selected_operand"
+        },
+        {
+          exprId: "r1:target",
+          variableName: "nums",
+          kind: "list_index",
+          index: 2,
+          rawIndex: 2,
+          role: "assignment_target"
+        }
+      ]
+    }));
+
+    const selected = view.querySelector<HTMLElement>('[data-list-item-index="1"]');
+    expect(selected?.classList.contains("is-expression-operand")).toBe(true);
+    expect(selected?.classList.contains("is-expression-selected")).toBe(true);
+    expect(selected?.dataset.expressionOperand).toBe("true");
+    expect(selected?.dataset.expressionSelected).toBe("true");
+    expect(selected?.classList.contains("is-changed")).toBe(true);
+    expect(selected?.classList.contains("is-pointer-target")).toBe(true);
+
+    const target = view.querySelector<HTMLElement>('[data-list-item-index="2"]');
+    expect(target?.classList.contains("is-expression-target")).toBe(true);
+    expect(target?.dataset.expressionTarget).toBe("true");
+  });
+
   it("keeps an out-of-bounds pointer visible as a requested index", () => {
     const view = renderListVisualizer(model({
       pointers: [{ name: "left", index: 5, outOfBounds: true }]

@@ -99,6 +99,85 @@ describe("MatrixVisualizer", () => {
     handle.dispose();
   });
 
+  it("renders expression roles without changing focus, change, or viewport behavior", () => {
+    const view = createMatrixVisualizer(model({
+      rowCount: 3,
+      columnCount: 4,
+      expressionReferences: [
+        {
+          exprId: "r1.operand",
+          variableName: "dp",
+          kind: "matrix_cell",
+          row: 1,
+          column: 3,
+          rawRow: 1,
+          rawColumn: 3,
+          role: "operand"
+        },
+        {
+          exprId: "r1.selected",
+          variableName: "dp",
+          kind: "matrix_cell",
+          row: 2,
+          column: 2,
+          rawRow: 2,
+          rawColumn: 2,
+          role: "selected_operand"
+        },
+        {
+          exprId: "r1:target",
+          variableName: "dp",
+          kind: "matrix_cell",
+          row: 2,
+          column: 3,
+          rawRow: 2,
+          rawColumn: 3,
+          role: "assignment_target"
+        }
+      ]
+    }));
+
+    const operand = view.element.querySelector<HTMLElement>('[data-cell-row="1"][data-cell-column="3"]');
+    expect(operand?.classList.contains("is-expression-operand")).toBe(true);
+    expect(operand?.dataset.expressionOperand).toBe("true");
+
+    const selected = view.element.querySelector<HTMLElement>('[data-cell-row="2"][data-cell-column="2"]');
+    expect(selected?.classList.contains("is-expression-operand")).toBe(true);
+    expect(selected?.classList.contains("is-expression-selected")).toBe(true);
+    expect(selected?.dataset.expressionSelected).toBe("true");
+
+    const target = view.element.querySelector<HTMLElement>('[data-cell-row="2"][data-cell-column="3"]');
+    expect(target?.classList.contains("is-expression-target")).toBe(true);
+    expect(target?.dataset.expressionTarget).toBe("true");
+    expect(view.element.querySelector('[data-matrix-action="follow-current"]')?.getAttribute("aria-pressed"))
+      .toBe("true");
+    view.dispose();
+  });
+
+  it("does not auto-pan for expression references outside the current viewport", () => {
+    const view = createMatrixVisualizer(model({
+      rowCount: 20,
+      columnCount: 20,
+      expressionReferences: [{
+        exprId: "r1.outside",
+        variableName: "dp",
+        kind: "matrix_cell",
+        row: 19,
+        column: 19,
+        rawRow: 19,
+        rawColumn: 19,
+        role: "operand"
+      }]
+    }));
+
+    const viewport = view.element.querySelector<HTMLElement>("[data-matrix-viewport]")!;
+    expect(viewport.dataset.rowStart).toBe("0");
+    expect(viewport.dataset.columnStart).toBe("0");
+    expect(view.element.querySelector('[data-expression-operand="true"]')).toBeNull();
+    expect(view.element.textContent).not.toContain("outside");
+    view.dispose();
+  });
+
   it("shows out-of-bounds requested coordinates without inventing cells", () => {
     const handle = createMatrixVisualizer(model({
       focuses: [focus(8, 3, {

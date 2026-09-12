@@ -105,6 +105,53 @@ function session(): TraceSession {
   };
 }
 
+function expressionSession(): TraceSession {
+  const base = session();
+  return {
+    ...base,
+    schemaVersion: 3,
+    expressionPlan: {
+      version: 1,
+      roots: [{
+        rootId: "r-expression",
+        kind: "assignment",
+        expressionExprId: "r-expression.0",
+        target: {
+          source: "total",
+          span: { line: 5, column: 8, endLine: 5, endColumn: 13 }
+        },
+        span: { line: 5, column: 8, endLine: 5, endColumn: 21 }
+      }],
+      expressions: [{
+        exprId: "r-expression.0",
+        rootId: "r-expression",
+        parentExprId: null,
+        kind: "binary",
+        span: { line: 5, column: 16, endLine: 5, endColumn: 21 },
+        source: "a + b",
+        childExprIds: []
+      }]
+    },
+    expressionBatches: [{
+      batchId: 1,
+      anchorStep: 1,
+      frameId: 1,
+      line: 5,
+      roots: [{
+        rootId: "r-expression",
+        status: "completed",
+        evaluations: [{
+          evaluationId: 1,
+          exprId: "r-expression.0",
+          order: 1,
+          value: int(9)
+        }]
+      }]
+    }],
+    expressionTracing: { status: "complete" }
+  };
+}
+
 function matrixSession(): TraceSession {
   const base = session();
   return {
@@ -619,6 +666,25 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("keeps the expression panel mounted while showing evidence only on matching steps", () => {
+    const view = createTraceVisualizer(expressionSession());
+    const panel = view.element.querySelector<HTMLDetailsElement>(".trace-viewer__expression-panel");
+
+    expect(panel).not.toBeNull();
+    expect(panel?.querySelector('[data-expression-root="r-expression"]')).not.toBeNull();
+    expect(panel?.textContent).toContain("a + b");
+    expect(view.element.querySelector(".trace-viewer__visual-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__changes-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__behavioral-panel")).not.toBeNull();
+
+    view.element.querySelector<HTMLButtonElement>("#trace-next")!.click();
+
+    expect(view.element.querySelector(".trace-viewer__expression-panel")).toBe(panel);
+    expect(panel?.textContent).toContain("No expression evidence for this step.");
+    expect(panel?.querySelector('[data-expression-root="r-expression"]')).toBeNull();
+    view.dispose();
+  });
+
   it.each(["timeout", "trace_limit", "exception"] as const)(
     "%s renders exactly one Failure-First entry",
     (status) => {

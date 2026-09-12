@@ -381,6 +381,112 @@ button.is-primary:hover:not(:disabled) {
   text-align: center;
 }
 
+.trace-viewer__expression-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.expression-evidence__meta,
+.expression-evidence__tracing-status {
+  color: #64748b;
+  font: 10px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.expression-evidence__tracing-status {
+  border: 1px dashed #94a3b8;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.expression-evidence__root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.expression-evidence__root-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-size: 11px;
+}
+
+.expression-evidence__status,
+.expression-evidence__selection-status {
+  color: #64748b;
+  font: 10px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  text-transform: lowercase;
+}
+
+.expression-evidence__node {
+  min-width: 0;
+  border-left: 2px solid #e2e8f0;
+  padding-left: 7px;
+}
+
+.expression-evidence__node-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 0;
+}
+
+.expression-evidence__source,
+.expression-evidence__value,
+.expression-evidence__selection-call {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expression-evidence__source {
+  color: #172033;
+}
+
+.expression-evidence__value {
+  color: #475569;
+}
+
+.expression-evidence__children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 7px;
+}
+
+.expression-evidence__node.is-expression-selected {
+  border-left-color: #334155;
+  background: #f8fafc;
+}
+
+.expression-evidence__selections {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid #edf1f6;
+  padding-top: 5px;
+}
+
+.expression-evidence__selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: #475569;
+  font-size: 10px;
+}
+
+.expression-evidence__empty {
+  margin: 0;
+}
+
 .trace-viewer__inspector-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -851,6 +957,7 @@ button.is-primary:hover:not(:disabled) {
 }
 
 .matrix-visualizer__cell {
+  position: relative;
   min-width: 46px;
   min-height: 38px;
   overflow: hidden;
@@ -884,6 +991,31 @@ button.is-primary:hover:not(:disabled) {
 .matrix-visualizer__cell[aria-pressed="true"] {
   outline: 2px solid #1d67ed;
   outline-offset: 1px;
+}
+
+.matrix-visualizer__cell.is-expression-operand::after,
+.matrix-visualizer__cell.is-expression-target::before {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.matrix-visualizer__cell.is-expression-operand::after {
+  inset: 2px;
+  border: 1px dashed #64748b;
+  border-radius: 3px;
+}
+
+.matrix-visualizer__cell.is-expression-selected::after {
+  inset: 1px;
+  border: 2px solid #334155;
+  border-radius: 3px;
+}
+
+.matrix-visualizer__cell.is-expression-target::before {
+  inset: -3px;
+  border: 1px dotted #475569;
+  border-radius: 6px;
 }
 
 .matrix-visualizer__notices {
@@ -929,6 +1061,7 @@ button.is-primary:hover:not(:disabled) {
 
 .list-visualizer__item,
 .list-visualizer__requested-item {
+  position: relative;
   display: flex;
   width: 64px;
   min-width: 64px;
@@ -947,6 +1080,28 @@ button.is-primary:hover:not(:disabled) {
 .list-visualizer__item.is-pointer-target {
   border-color: #7aa7ef;
   box-shadow: inset 0 0 0 1px rgba(29, 103, 237, 0.16);
+}
+
+.list-visualizer__item.is-expression-operand::after,
+.list-visualizer__item.is-expression-target::before {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.list-visualizer__item.is-expression-operand::after {
+  inset: 2px;
+  border: 1px dashed #64748b;
+}
+
+.list-visualizer__item.is-expression-selected::after {
+  inset: 1px;
+  border: 2px solid #334155;
+}
+
+.list-visualizer__item.is-expression-target::before {
+  inset: -3px;
+  border: 1px dotted #475569;
 }
 
 .list-visualizer__item.is-pointer-focus {

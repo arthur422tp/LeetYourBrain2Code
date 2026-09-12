@@ -875,6 +875,30 @@ def test_expression_recording_preserves_shadowed_max_function_label():
     assert all(selection["status"] != "resolved" for selection in selections)
 
 
+def test_expression_recording_resolves_builtin_alias_using_callable_identity():
+    result = request(
+        """class Solution:
+    def solve(self):
+        min = max
+        return min(1, 2)
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    selection = next(
+        selection
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        for selection in root.get("selection_evidence", [])
+    )
+    assert selection["function"] == "min"
+    assert selection["status"] == "resolved"
+    assert selection["selected_candidate_index"] == 1
+
+
 def test_expression_recording_does_not_rewrite_user_helper_identifiers():
     result = request(
         """class Solution:
@@ -1042,6 +1066,9 @@ class ExpressionTracingRunnerTests(unittest.TestCase):
 
     def test_shadowed_max_label_is_preserved(self):
         test_expression_recording_preserves_shadowed_max_function_label()
+
+    def test_builtin_alias_uses_callable_identity(self):
+        test_expression_recording_resolves_builtin_alias_using_callable_identity()
 
     def test_user_helper_identifiers_are_preserved(self):
         test_expression_recording_does_not_rewrite_user_helper_identifiers()

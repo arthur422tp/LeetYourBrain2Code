@@ -186,13 +186,7 @@ class ExpressionRecorder:
     ):
         status = "unsupported_call_shape"
         selected_index = None
-        function = None
-        if function_name == "min" and function_obj is _ORIGINAL_MIN:
-            function = "min"
-        elif function_name == "max" and function_obj is _ORIGINAL_MAX:
-            function = "max"
-        elif function_name not in {"min", "max"}:
-            function = "min" if function_obj is _ORIGINAL_MIN else "max" if function_obj is _ORIGINAL_MAX else None
+        function = "min" if function_obj is _ORIGINAL_MIN else "max" if function_obj is _ORIGINAL_MAX else None
         if function is not None and len(candidate_expr_ids) >= 2 and len(candidate_expr_ids) == len(candidate_snapshots):
             if all(self._is_safe_snapshot(snapshot) for snapshot in candidate_snapshots) and self._is_safe_snapshot(result_snapshot):
                 status = "resolved"

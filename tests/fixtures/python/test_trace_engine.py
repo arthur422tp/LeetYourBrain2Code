@@ -311,6 +311,97 @@ class Solution:
     )
 
 
+def test_graph_parameter_builds_a_user_defined_adjacency_graph_and_captures_neighbors():
+    result = run_request(
+        """from typing import Optional
+
+class Node:
+    def __init__(self, val=0, neighbors=None):
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+
+class Solution:
+    def cloneGraph(self, node: Optional['Node']) -> Optional['Node']:
+        if node is None:
+            return None
+        print(node.val, [neighbor.val for neighbor in node.neighbors])
+        return node
+""",
+        "[[2,4],[1,3],[2,4],[1,3]]",
+        {
+            "class_name": "Solution",
+            "method_name": "cloneGraph",
+            "parameter_count": 1,
+            "parameter_kinds": ["graph_node"],
+        },
+        LIMITS,
+    )
+
+    assert result["status"] == "completed"
+    assert "1 [2, 4]" in result["stdout"]
+    graph_objects = [
+        object_snapshot
+        for event in result["events"]
+        for object_snapshot in event.get("objects", [])
+        if object_snapshot["className"] == "Node"
+    ]
+    assert graph_objects
+    root = next(
+        object_snapshot
+        for object_snapshot in graph_objects
+        if object_snapshot["attributes"].get("val") == {"type": "int", "value": "1"}
+        and object_snapshot["attributes"].get("neighbors", {}).get("length") == 2
+    )
+    object_id_by_value = {
+        object_snapshot["attributes"]["val"]["value"]: object_snapshot["objectId"]
+        for object_snapshot in graph_objects
+        if "val" in object_snapshot["attributes"]
+    }
+    assert [
+        item["objectId"] for item in root["attributes"]["neighbors"]["items"]
+    ] == [object_id_by_value["2"], object_id_by_value["4"]]
+
+
+def test_graph_empty_adjacency_input_reaches_solution_as_none():
+    result = run_request(
+        """from typing import Optional
+
+class Solution:
+    def cloneGraph(self, node: Optional['Node']) -> Optional['Node']:
+        return node
+""",
+        "[]",
+        {
+            "class_name": "Solution",
+            "method_name": "cloneGraph",
+            "parameter_count": 1,
+            "parameter_kinds": ["graph_node"],
+        },
+        LIMITS,
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "none", "value": None}
+
+
+def test_graph_malformed_adjacency_input_fails_closed():
+    source = """class Solution:
+    def cloneGraph(self, node):
+        return node
+"""
+    request_data = {
+        "class_name": "Solution",
+        "method_name": "cloneGraph",
+        "parameter_count": 1,
+        "parameter_kinds": ["graph_node"],
+    }
+
+    for testcase in ("[[2],[3]]", '[["2"],[1]]'):
+        result = run_request(source, testcase, request_data, LIMITS)
+        assert result["status"] == "input_error"
+        assert result["termination_reason"] == "unsupported_testcase_format"
+
+
 def test_binary_tree_parameter_builds_level_order_tree_and_captures_topology():
     result = run_request(
         """from typing import Optional

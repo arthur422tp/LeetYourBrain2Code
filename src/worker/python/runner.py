@@ -25,6 +25,12 @@ class _FallbackTreeNode:
         self.right = right
 
 
+class _FallbackGraphNode:
+    def __init__(self, val=0, neighbors=None):
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+
+
 class _LeetCodeNullTransformer(ast.NodeTransformer):
     def visit_Name(self, node):
         if node.id == "null":
@@ -114,6 +120,44 @@ def _build_binary_tree(values, node_class):
             "binary-tree input contains unreachable level-order values"
         )
     return root
+
+
+def _build_graph(adjacency, node_class):
+    if adjacency is None:
+        return None
+    if not isinstance(adjacency, list):
+        raise UnsupportedTestcaseFormat(
+            "graph parameters require an adjacency-list literal"
+        )
+    if len(adjacency) == 0:
+        return None
+    if any(not isinstance(row, list) for row in adjacency):
+        raise UnsupportedTestcaseFormat("graph adjacency entries must be lists")
+
+    nodes = []
+    try:
+        for index in range(len(adjacency)):
+            nodes.append(node_class(index + 1))
+    except Exception as error:
+        raise UnsupportedTestcaseFormat(
+            "graph values could not construct a Node"
+        ) from error
+
+    for source_index, row in enumerate(adjacency):
+        neighbors = []
+        for neighbor in row:
+            if isinstance(neighbor, bool) or not isinstance(neighbor, int):
+                raise UnsupportedTestcaseFormat(
+                    "graph neighbor indexes must be integers"
+                )
+            if neighbor < 1 or neighbor > len(nodes):
+                raise UnsupportedTestcaseFormat(
+                    "graph neighbor index is out of range"
+                )
+            neighbors.append(nodes[neighbor - 1])
+        nodes[source_index].neighbors = neighbors
+
+    return nodes[0]
 
 
 def _exception_info(error):
@@ -223,11 +267,15 @@ def run_request(
             exec(user_code, namespace, namespace)
             node_class = namespace.get("ListNode", _FallbackListNode)
             tree_node_class = namespace.get("TreeNode", _FallbackTreeNode)
+            graph_node_class = namespace.get("Node", _FallbackGraphNode)
             converted_arguments = []
             for index, argument in enumerate(arguments):
                 parameter_kind = parameter_kinds[index] if index < len(parameter_kinds) else "value"
                 if parameter_kind == "binary_tree":
                     converted_arguments.append(_build_binary_tree(argument, tree_node_class))
+                    continue
+                if parameter_kind == "graph_node":
+                    converted_arguments.append(_build_graph(argument, graph_node_class))
                     continue
                 if parameter_kind != "linked_list":
                     converted_arguments.append(argument)

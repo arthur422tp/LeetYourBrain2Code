@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveEntrypoint } from "../../src/execution/entrypoint-resolver";
+import {
+  resolveEntrypoint,
+  resolveEntrypointForTestcase
+} from "../../src/execution/entrypoint-resolver";
 
 describe("resolveEntrypoint", () => {
   it("resolves a unique Solution method and excludes self", () => {
@@ -114,6 +117,50 @@ describe("resolveEntrypoint", () => {
         methodName: "reverseList",
         parameterCount: 1,
         parameterKinds: ["linked_list"]
+      }
+    });
+  });
+
+  it.each([
+    "Node",
+    "Optional[Node]",
+    "Optional['Node']",
+    "'Node'",
+    "Node | None",
+    "None | Node"
+  ])("classifies %s as graph_node", (annotation) => {
+    const result = resolveEntrypoint(`class Solution:
+    def cloneGraph(self, node: ${annotation}):
+        return node
+`);
+
+    expect(result).toEqual({
+      ok: true,
+      entrypoint: {
+        className: "Solution",
+        methodName: "cloneGraph",
+        parameterCount: 1,
+        parameterKinds: ["graph_node"]
+      }
+    });
+  });
+
+  it("prefers a public typed Graph entrypoint over an equally arity helper", () => {
+    const result = resolveEntrypointForTestcase(`class Solution:
+    def helper(self, value):
+        return value
+
+    def cloneGraph(self, node: Optional['Node']):
+        return node
+`, "[[2],[1]]");
+
+    expect(result).toEqual({
+      ok: true,
+      entrypoint: {
+        className: "Solution",
+        methodName: "cloneGraph",
+        parameterCount: 1,
+        parameterKinds: ["graph_node"]
       }
     });
   });

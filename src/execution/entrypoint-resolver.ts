@@ -184,12 +184,21 @@ function parameterKind(annotation: string | null): ParameterKind {
   if (annotation === null) {
     return "value";
   }
-  const normalized = annotation.replace(/\s+/g, "");
+  const trimmed = annotation.trim();
+  const withoutOuterQuotes =
+    ((trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+      (trimmed.startsWith('"') && trimmed.endsWith('"')))
+      ? trimmed.slice(1, -1)
+      : trimmed;
+  const normalized = withoutOuterQuotes.replace(/\s+/g, "");
   if (/^(?:ListNode|Optional\[ListNode\]|ListNode\|None|None\|ListNode)$/.test(normalized)) {
     return "linked_list";
   }
   if (/^(?:TreeNode|Optional\[TreeNode\]|TreeNode\|None|None\|TreeNode)$/.test(normalized)) {
     return "binary_tree";
+  }
+  if (/^(?:Node|Optional\[(?:'Node'|"Node"|Node)\]|Node\|None|None\|Node)$/.test(normalized)) {
+    return "graph_node";
   }
   return "value";
 }

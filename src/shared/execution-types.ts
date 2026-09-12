@@ -30,7 +30,7 @@ export const TERMINATION_REASONS = [
 
 export type TerminationReason = (typeof TERMINATION_REASONS)[number];
 
-export type ParameterKind = "value" | "linked_list" | "binary_tree";
+export type ParameterKind = "value" | "linked_list" | "binary_tree" | "graph_node";
 
 export interface EntryPoint {
   className: string;

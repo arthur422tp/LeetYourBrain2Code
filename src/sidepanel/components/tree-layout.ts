@@ -1,7 +1,10 @@
 import type { TreeVisualModel } from "../../core/tree-interpreter";
 
 export const TREE_NODE_WIDTH = 104;
-export const TREE_NODE_HEIGHT = 72;
+// A TreeNode card contains pointer, value, identity, left, and right rows.
+// Keep the layout height in sync with that rendered card so descendants are
+// not painted into the card or clipped by the canvas bounds.
+export const TREE_NODE_HEIGHT = 104;
 export const TREE_HORIZONTAL_GAP = 32;
 export const TREE_VERTICAL_GAP = 72;
 export const TREE_FALLBACK_COLUMNS = 3;

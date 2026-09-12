@@ -103,6 +103,13 @@ const selfCycleModel: TreeVisualModel = {
 };
 
 describe("layoutTree", () => {
+  it("reserves enough vertical space for a TreeNode card", () => {
+    const layout = layoutTree(strictModel)[0]!;
+
+    expect(TREE_NODE_HEIGHT).toBeGreaterThanOrEqual(104);
+    expect(layout.nodes.every((node) => node.height >= 104)).toBe(true);
+  });
+
   it("produces identical geometry for identical strict-tree models", () => {
     expect(layoutTree(strictModel)).toEqual(layoutTree(structuredClone(strictModel)));
   });

@@ -42,6 +42,15 @@ describe("testcase selection", () => {
     ]);
   });
 
+  it("groups multiple one-argument tree cases around a public two-argument helper", () => {
+    expect(
+      getTestcaseCases(
+        treeSourceWithPublicHelper,
+        "[1,2,2,3,4,4,3]\n[1,2,2,null,3,null,3]"
+      )
+    ).toEqual(["[1,2,2,3,4,4,3]", "[1,2,2,null,3,null,3]"]);
+  });
+
   it("returns no cases while the Solution entrypoint is incomplete", () => {
     expect(getTestcaseCases("class Solution:\n    pass", "7")).toEqual([]);
     expect(getSelectedTestcase("class Solution:\n    pass", "7", 0)).toBeNull();

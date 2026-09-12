@@ -354,6 +354,53 @@ class Solution:
     assert root["attributes"]["right"]["type"] == "reference"
 
 
+def test_recursive_binary_tree_frames_keep_ancestor_topology_visible():
+    result = run_request(
+        """from typing import Optional
+
+class Solution:
+    def mirror(self, left, right):
+        if not left and not right:
+            return True
+        if not left or not right:
+            return False
+        return self.mirror(left.left, right.right)
+
+    def isSymmetric(self, root: Optional[TreeNode]) -> bool:
+        if not root:
+            return True
+        return self.mirror(root.left, root.right)
+""",
+        "[1,2,2,3,4,4,3]",
+        {
+            "class_name": "Solution",
+            "method_name": "isSymmetric",
+            "parameter_count": 1,
+            "parameter_kinds": ["binary_tree"],
+        },
+        LIMITS,
+        runtime_globals={"TreeNode": TreeNode},
+    )
+
+    assert result["status"] == "completed"
+    recursive_base_events = [
+        event
+        for event in result["events"]
+        if event["function"] == "mirror"
+        and event["locals"].get("left", {}).get("type") == "none"
+        and event["locals"].get("right", {}).get("type") == "none"
+    ]
+    assert recursive_base_events
+    assert all(
+        len([
+            object_snapshot
+            for object_snapshot in event.get("objects", [])
+            if object_snapshot["className"] == "TreeNode"
+        ]) == 7
+        for event in recursive_base_events
+    )
+
+
 def test_binary_tree_builder_uses_queue_order_after_a_missing_child():
     result = run_request(
         """from typing import Optional

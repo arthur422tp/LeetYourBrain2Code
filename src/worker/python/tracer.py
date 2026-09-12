@@ -49,6 +49,7 @@ class TraceCollector:
         self.session_bytes = 0
         self.frame_ids = {}
         self.frame_info = {}
+        self.frame_objects = {}
         self.frame_stack = []
         self.next_frame_id = 1
         self.previous_trace = None
@@ -102,6 +103,17 @@ class TraceCollector:
             self.next_frame_id += 1
         return self.frame_ids[object_id]
 
+    def _visible_locals(self, frame):
+        return {
+            name: value
+            for name, value in frame.f_locals.items()
+            if not name.startswith("__lc_")
+            and not (
+                frame.f_code.co_name == "<module>"
+                and (name == "__builtins__" or name in self.baseline_global_names)
+            )
+        }
+
     def _record(self, frame, event_name, argument, info):
         self.step_count += 1
         if self.step_count > self._max_trace_steps():
@@ -111,15 +123,7 @@ class TraceCollector:
             self.limits,
             identity_registry=self.identity_registry,
         )
-        visible_locals = {
-            name: value
-            for name, value in frame.f_locals.items()
-            if not name.startswith("__lc_")
-            and not (
-                frame.f_code.co_name == "<module>"
-                and (name == "__builtins__" or name in self.baseline_global_names)
-            )
-        }
+        visible_locals = self._visible_locals(frame)
         try:
             locals_snapshot = {
                 name: serializer.serialize(value)
@@ -128,7 +132,11 @@ class TraceCollector:
         except Exception as error:
             raise TraceLimitExceeded("trace_byte_limit") from error
 
-        roots = list(visible_locals.values())
+        roots = []
+        for live_frame_id in self.frame_stack:
+            live_frame = self.frame_objects.get(live_frame_id)
+            if live_frame is not None:
+                roots.extend(self._visible_locals(live_frame).values())
         if event_name == "return":
             roots.append(argument)
         try:
@@ -217,6 +225,7 @@ class TraceCollector:
                 "call_depth": call_depth,
             }
             self.frame_info[object_id] = info
+            self.frame_objects[frame_id] = frame
             self.frame_stack.append(frame_id)
         else:
             info = self.frame_info.get(object_id)
@@ -229,6 +238,7 @@ class TraceCollector:
         if event_name == "return":
             if self.frame_stack and self.frame_stack[-1] == info["frame_id"]:
                 self.frame_stack.pop()
+            self.frame_objects.pop(info["frame_id"], None)
             self.frame_info.pop(object_id, None)
         return self.trace
 

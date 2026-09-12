@@ -1446,7 +1446,7 @@ button.is-primary:hover:not(:disabled) {
 
 .tree-visualizer__viewport {
   position: relative;
-  max-height: 360px;
+  max-height: 480px;
   overflow: auto;
   border: 1px solid #dfe5ee;
   border-radius: 7px;
@@ -1508,7 +1508,7 @@ button.is-primary:hover:not(:disabled) {
 .tree-visualizer__node {
   position: absolute;
   display: flex;
-  min-height: 72px;
+  min-height: 104px;
   flex-direction: column;
   overflow: visible;
   border: 1px solid #b8c4d4;

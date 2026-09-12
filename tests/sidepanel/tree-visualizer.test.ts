@@ -174,4 +174,28 @@ describe("createTreeVisualizer", () => {
     expect(handle.element).toBe(element);
     expect(handle.element.querySelector('[data-node-id="obj-9"]')).not.toBeNull();
   });
+
+  it("centers the main entry node in a horizontally scrollable viewport", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth");
+    Object.defineProperty(Element.prototype, "clientWidth", {
+      configurable: true,
+      get() {
+        return this.classList.contains("tree-visualizer__viewport")
+          ? 240
+          : descriptor?.get?.call(this) ?? descriptor?.value ?? 0;
+      }
+    });
+
+    try {
+      const handle = createTreeVisualizer(model);
+      const viewport = handle.element.querySelector<HTMLElement>(".tree-visualizer__viewport")!;
+      expect(viewport.scrollLeft).toBe(68);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(Element.prototype, "clientWidth", descriptor);
+      } else {
+        delete (Element.prototype as { clientWidth?: number }).clientWidth;
+      }
+    }
+  });
 });

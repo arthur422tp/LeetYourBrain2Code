@@ -16,6 +16,16 @@ const source = `class Solution:
         return value
 `;
 
+const treeSourceWithPublicHelper = `from typing import Optional
+
+class Solution:
+    def mirror(self, left, right):
+        return True
+
+    def isSymmetric(self, root: Optional[TreeNode]) -> bool:
+        return True
+`;
+
 function reasonFor(status: TraceSessionStatus): TerminationReason {
   switch (status) {
     case "completed": return "normal_return";
@@ -210,6 +220,34 @@ describe("LiveExecutionScheduler", () => {
     scheduler.schedule(input({ rawTestcase: "7\n8\n9", selectedCaseIndex: 1 }));
     await vi.runAllTimersAsync();
     expect(requests[0]?.rawTestcase).toBe("8");
+  });
+
+  it("executes each tree testcase case through the typed public entrypoint", async () => {
+    const requests: ExecutionRequest[] = [];
+    const scheduler = new LiveExecutionScheduler({
+      runner: {
+        execute: async (request) => {
+          requests.push(request);
+          return makeSession(request);
+        }
+      },
+      createSessionId: () => "tree-case-run",
+      debounceMs: 0
+    });
+
+    scheduler.schedule(input({
+      sourceCode: treeSourceWithPublicHelper,
+      rawTestcase: "[1,2,2,3,4,4,3]\n[1,2,2,null,3,null,3]"
+    }));
+    await vi.runAllTimersAsync();
+
+    expect(requests[0]?.rawTestcase).toBe("[1,2,2,3,4,4,3]");
+    expect(requests[0]?.entrypoint).toEqual({
+      className: "Solution",
+      methodName: "isSymmetric",
+      parameterCount: 1,
+      parameterKinds: ["binary_tree"]
+    });
   });
 
   it("suppresses identical inputs but allows a forced immediate retry", async () => {

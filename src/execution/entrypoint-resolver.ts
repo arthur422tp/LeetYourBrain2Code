@@ -317,6 +317,15 @@ export function resolveEntrypointForTestcase(
       : argumentLineCount > 0 && argumentLineCount % parameterCount === 0
   );
 
+  if (compatible.length > 1) {
+    const typedCompatible = compatible.filter(({ parameterKinds }) =>
+      parameterKinds.some((kind) => kind !== "value")
+    );
+    if (typedCompatible.length === 1) {
+      return { ok: true, entrypoint: typedCompatible[0] };
+    }
+  }
+
   return compatible.length === 1
     ? { ok: true, entrypoint: compatible[0] }
     : failedEntrypointResolution();

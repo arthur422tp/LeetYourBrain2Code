@@ -154,6 +154,27 @@ function renderTerminal(
   return marker;
 }
 
+function centerMainEntry(
+  viewport: HTMLElement,
+  model: TreeVisualModel,
+  layouts: TreeComponentLayout[]
+): void {
+  const mainComponent = model.components.find((component) => component.role === "main");
+  if (!mainComponent || viewport.clientWidth <= 0) {
+    return;
+  }
+
+  const layout = layouts.find((candidate) => candidate.componentId === mainComponent.componentId);
+  const entryObjectId = mainComponent.entryNodeIds[0] ?? mainComponent.nodeIds[0];
+  const entry = layout?.nodes.find((node) => node.objectId === entryObjectId);
+  if (!entry) {
+    return;
+  }
+
+  const target = entry.x + entry.width / 2 - viewport.clientWidth / 2;
+  viewport.scrollLeft = Math.max(0, target);
+}
+
 function renderComponent(
   component: TreeVisualModel["components"][number],
   layout: TreeComponentLayout,
@@ -306,6 +327,7 @@ function render(model: TreeVisualModel): HTMLElement {
   }
 
   section.append(title, viewport);
+  centerMainEntry(viewport, model, layouts);
   const notices = renderNotices(model);
   if (notices) {
     section.append(notices);
@@ -313,18 +335,52 @@ function render(model: TreeVisualModel): HTMLElement {
   return section;
 }
 
+function centerRenderedMainEntry(section: HTMLElement, model: TreeVisualModel): void {
+  const viewport = section.querySelector<HTMLElement>(".tree-visualizer__viewport");
+  if (viewport) {
+    centerMainEntry(viewport, model, layoutTree(model));
+  }
+}
+
 export function createTreeVisualizer(initialModel: TreeVisualModel): TreeVisualizerHandle {
   const section = render(initialModel);
+  let currentModel = initialModel;
+  let centeringFrame: number | null = null;
+
+  const centerAfterMount = (): void => {
+    centeringFrame = null;
+    centerRenderedMainEntry(section, currentModel);
+  };
+
+  const scheduleCenterAfterMount = (): void => {
+    if (centeringFrame !== null) {
+      window.cancelAnimationFrame(centeringFrame);
+    }
+    if (typeof window.requestAnimationFrame === "function") {
+      centeringFrame = window.requestAnimationFrame(centerAfterMount);
+    } else {
+      queueMicrotask(centerAfterMount);
+    }
+  };
+
+  scheduleCenterAfterMount();
+
   return {
     element: section,
     update(model) {
+      currentModel = model;
       const replacement = render(model);
       section.dataset.visualId = model.visualId;
       section.setAttribute("aria-label", "TreeNode visualization");
       section.replaceChildren(...Array.from(replacement.children));
+      centerRenderedMainEntry(section, model);
+      scheduleCenterAfterMount();
     },
     dispose() {
-      // This renderer owns no external resources.
+      if (centeringFrame !== null) {
+        window.cancelAnimationFrame(centeringFrame);
+        centeringFrame = null;
+      }
     }
   };
 }

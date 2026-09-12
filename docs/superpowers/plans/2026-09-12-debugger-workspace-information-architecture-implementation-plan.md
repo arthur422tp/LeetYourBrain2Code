@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the current vertically stacked trace-inspector UI with a focused Debug / Evidence / Advanced workspace that keeps Code and Runtime State visually dominant, makes step navigation persistent, compresses failure messaging, and preserves one authoritative raw execution cursor.
+**Goal:** Replace the current vertically stacked trace-inspector UI with a focused Debug / Evidence / Advanced workspace that keeps Code and Runtime State visually dominant, makes raw-step navigation persistent, compresses failure messaging, and preserves one authoritative execution cursor.
 
-**Architecture:** `TraceVisualizer` remains the orchestration boundary for interpretation, Failure-First selection, `currentIndex`, autoplay, `navigateDirect()`, and `setStep()`. Presentation is split into focused components: compact execution header, sticky step navigator, Code workspace, Runtime State workspace, Change Inspector, Evidence workspace, Advanced workspace, and a tab shell. Existing behavioral analysis, Failure-First ranking, trace folding, runtime mutations, visualizer registry, and expression evidence remain authoritative data sources and are only reorganized for presentation.
+**Architecture:** `TraceVisualizer` remains the orchestration boundary for trace interpretation, Failure-First selection, `currentIndex`, autoplay, `navigateDirect()`, and `setStep()`. Presentation is split into focused components for tabs, execution status, step navigation, Code, Runtime State, Evidence, Change Inspector, and Advanced details. Existing behavioral analysis, Failure-First ranking, Trace Folding, runtime mutations, visualizer registry, and expression evidence remain authoritative and are reorganized only at the presentation layer.
 
 **Tech Stack:** TypeScript 5.8, Vitest 3.2, JSDOM, Chrome MV3 Side Panel, existing DOM/CSS component architecture.
 
@@ -14,60 +14,60 @@
 
 ## Global Constraints
 
-- Preserve the project rule: **visualize what the program actually did**.
-- Do not change behavioral-analysis semantics, Failure-First ranking, Trace Folding semantics, runtime mutation semantics, expression semantics, or visualizer interpretation semantics.
+- Preserve the product rule: **visualize what the program actually did**.
+- Do not change behavioral-analysis semantics, Failure-First ranking, Trace Folding semantics, runtime mutation semantics, expression semantics, or structure-visualizer semantics.
 - `setStep()` remains the sole authoritative raw-cursor update path.
 - `navigateDirect(index)` continues to stop autoplay before calling `setStep(index)`.
-- Debug is the default workspace mode for every new `TraceVisualizer` instance.
-- Switching Debug / Evidence / Advanced must not change the raw cursor or autoplay state.
-- Failure-First remains at most one deterministic evidence-backed recommendation and must not auto-navigate.
-- Failure-First `Inspect` must navigate to the exact existing `selection.inspectIndex` and return the visible workspace to Debug.
+- Debug is the default mode for every new `TraceVisualizer` instance.
+- Switching Debug / Evidence / Advanced must not change raw cursor or autoplay state.
+- Failure-First remains at most one deterministic evidence-backed recommendation and never auto-navigates.
+- Failure-First `Inspect` must navigate to the existing exact `selection.inspectIndex` and switch visible mode to Debug.
 - Product copy must not say `root cause`, `bug location`, `likely cause`, `failure source`, `problem detected`, `infinite loop`, `caused timeout`, `caused failure`, `wrong algorithm`, or imply LeetCode Accepted/TLE.
-- The visible concept `Visual State` becomes **Runtime State**; internal `VisualState` type names do not need renaming.
-- The default Debug surface order is: compact execution header → compact Start Here when eligible → sticky Step Navigator → Code → Runtime State → What Changed / computation.
-- Behavioral Timeline, Trace Outline / folds, and full pattern evidence live under Evidence.
-- Locals, Call Stack, stdout/output, exception details, and raw trace live under Advanced.
+- Visible product copy `Visual State` becomes **Runtime State**; internal `VisualState` naming does not need to change.
+- Default Debug order is: compact execution header → compact Start Here when eligible → workspace tabs → sticky Step Navigator → Code → Runtime State → What Changed / computation.
+- Full Behavioral Signals, Behavioral Timeline, and Trace Outline / folds live under Evidence.
+- Locals, Call Stack, stdout/output, exception details, and raw events live under Advanced.
 - Side Panel design target begins at 360 CSS px width; ordinary workspace UI must not require page-level horizontal scrolling.
-- Avoid large red failure hero banners. Code and Runtime State must receive more visual space than execution-status messaging.
+- Avoid large red failure hero banners. Code and Runtime State receive more visual space than status/evidence messaging.
 - Full regression gates remain `npm test`, `npm run typecheck`, and `npm run build`.
 
 ---
 
 ## File Structure
 
-Create focused units rather than expanding `TraceVisualizer.ts` further:
+Create focused units:
 
 ```text
 src/sidepanel/components/WorkspaceTabs.ts
-    Debug / Evidence / Advanced tab semantics and presentation-only mode state.
+    Debug / Evidence / Advanced presentation-only mode state.
 
 src/sidepanel/components/ExecutionHeader.ts
-    Compact session status line and host for the compact Failure-First entry.
+    Compact session status and compact Failure-First host.
 
 src/sidepanel/components/StepNavigator.ts
-    Previous / Next / Play / Pause / raw-index scrubber presentation.
+    Previous / Next / Play / Pause / raw-index scrubber.
 
 src/sidepanel/components/CodeWorkspace.ts
-    Persistent original-source view, current-line marker, exception marker,
+    Persistent original-source view, current-line/exception markers,
     and nearest-only active-line scrolling.
 
 src/sidepanel/components/RuntimeStateWorkspace.ts
-    Persistent larger host for existing specialized visualizers.
+    Persistent enlarged host for the existing visualizer registry.
+
+src/sidepanel/components/EvidenceWorkspace.ts
+    Full Behavioral Signals, Behavioral Timeline, and Trace Outline.
 
 src/sidepanel/contextual-behavioral-evidence.ts
-    Pure current-index -> relevant resolved behavioral-evidence selection.
+    Pure current-index -> matching resolved behavioral evidence.
 
 src/sidepanel/components/ChangeInspector.ts
     Runtime mutations + contextual behavioral clues + expression computation.
 
-src/sidepanel/components/EvidenceWorkspace.ts
-    Full behavioral signals, BehavioralTimeline, and TraceOutline composition.
-
 src/sidepanel/components/AdvancedWorkspace.ts
-    Locals, Call Stack, Output / exception details, and raw trace composition.
+    Locals, Call Stack, stdout, exception details, and raw trace.
 ```
 
-Modify existing seams only where needed:
+Modify established seams:
 
 ```text
 src/sidepanel/components/TraceVisualizer.ts
@@ -87,9 +87,9 @@ tests/sidepanel/workspace-tabs.test.ts
 tests/sidepanel/step-navigator.test.ts
 tests/sidepanel/code-workspace.test.ts
 tests/sidepanel/runtime-state-workspace.test.ts
+tests/sidepanel/evidence-workspace.test.ts
 tests/sidepanel/contextual-behavioral-evidence.test.ts
 tests/sidepanel/change-inspector.test.ts
-tests/sidepanel/evidence-workspace.test.ts
 tests/sidepanel/advanced-workspace.test.ts
 ```
 
@@ -121,9 +121,9 @@ export function createWorkspaceTabs(
 ): WorkspaceTabsHandle;
 ```
 
-`setMode()` changes presentation only. It never owns or receives `currentIndex`.
+`setMode()` owns presentation only and never receives `currentIndex`.
 
-- [ ] **Step 1: Write failing tab-semantic tests**
+- [ ] **Step 1: Write the failing tab tests**
 
 Create `tests/sidepanel/workspace-tabs.test.ts`:
 
@@ -132,7 +132,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createWorkspaceTabs } from "../../src/sidepanel/components/WorkspaceTabs";
 
 describe("WorkspaceTabs", () => {
-  it("starts in Debug and exposes accessible tabs", () => {
+  it("starts in Debug with accessible tab state", () => {
     const handle = createWorkspaceTabs();
     const tabs = [...handle.element.querySelectorAll<HTMLButtonElement>("[role=tab]")];
 
@@ -144,12 +144,10 @@ describe("WorkspaceTabs", () => {
     expect(handle.panels.advanced.hidden).toBe(true);
   });
 
-  it("switches presentation without inventing execution state", () => {
+  it("changes only presentation mode", () => {
     const changed = vi.fn();
     const handle = createWorkspaceTabs(changed);
-    const evidence = handle.element.querySelector<HTMLButtonElement>("[data-workspace-mode=evidence]")!;
-
-    evidence.click();
+    handle.element.querySelector<HTMLButtonElement>("[data-workspace-mode=evidence]")!.click();
 
     expect(handle.getMode()).toBe("evidence");
     expect(changed).toHaveBeenCalledWith("evidence");
@@ -165,48 +163,36 @@ Run:
 npm test -- tests/sidepanel/workspace-tabs.test.ts
 ```
 
-Expected: FAIL because `WorkspaceTabs.ts` does not exist.
+Expected: FAIL because the component does not exist.
 
-- [ ] **Step 2: Implement accessible tab state**
+- [ ] **Step 2: Implement tab semantics**
 
-Implement three native buttons inside a `role="tablist"` container. Each button gets:
+Render three native buttons inside `role="tablist"`. Each button uses:
 
 ```ts
 button.type = "button";
-button.role = "tab";
+button.setAttribute("role", "tab");
 button.dataset.workspaceMode = mode;
 button.setAttribute("aria-controls", panel.id);
 ```
 
-Each corresponding panel gets:
+Each panel uses:
 
 ```ts
-panel.role = "tabpanel";
+panel.setAttribute("role", "tabpanel");
 panel.id = `trace-workspace-${mode}`;
 panel.hidden = mode !== "debug";
 ```
 
-`setMode()` must update `aria-selected`, `tabIndex`, and `hidden`; `focusTab === true` focuses the selected tab.
+`setMode()` updates `aria-selected`, `tabIndex`, and `hidden`. Only `focusTab === true` moves focus.
 
-- [ ] **Step 3: Integrate the shell without moving existing content yet**
+- [ ] **Step 3: Integrate the shell without changing cursor behavior**
 
-In `TraceVisualizer.ts`, create the workspace shell and append all current trace content to `workspace.panels.debug` temporarily. Keep current DOM ordering otherwise unchanged for this task.
+Create the workspace once in `TraceVisualizer.ts`. For this task only, keep all existing trace panels under `workspace.panels.debug` so no feature disappears while the shell lands.
 
-The root becomes conceptually:
+Do not add any mode state to `setStep()`.
 
-```ts
-const workspace = createWorkspaceTabs();
-root.append(summary);
-if (failureFirstEntry) root.append(failureFirstEntry);
-root.append(workspace.element);
-workspace.panels.debug.append(/* existing trace content */);
-```
-
-Do not move Behavioral Timeline / Trace Outline / Advanced content to their final tabs yet; that occurs in later tasks.
-
-- [ ] **Step 4: Add shell styling**
-
-Add CSS classes:
+- [ ] **Step 4: Add base styles**
 
 ```css
 .trace-workspace__tabs {
@@ -233,7 +219,7 @@ Add CSS classes:
 }
 ```
 
-- [ ] **Step 5: Verify shell behavior and existing trace tests**
+- [ ] **Step 5: Verify**
 
 ```bash
 npm test -- tests/sidepanel/workspace-tabs.test.ts tests/sidepanel/trace-visualizer.test.ts
@@ -288,16 +274,11 @@ export function createStepNavigator(
 
 - [ ] **Step 1: Write failing navigator tests**
 
-Create tests covering raw-index scrub semantics and empty/single-step state:
-
 ```ts
-it("emits the selected raw index from the scrubber", () => {
+it("emits the exact raw index selected by the range input", () => {
   const onScrub = vi.fn();
   const handle = createStepNavigator({
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onTogglePlay: vi.fn(),
-    onScrub
+    onPrevious: vi.fn(), onNext: vi.fn(), onTogglePlay: vi.fn(), onScrub
   });
   handle.setState({ currentIndex: 1, totalSteps: 5, playing: false });
 
@@ -308,12 +289,13 @@ it("emits the selected raw index from the scrubber", () => {
   expect(onScrub).toHaveBeenCalledWith(3);
 });
 
-it("disables navigation when there are no captured steps", () => {
+it("disables raw navigation for an empty trace", () => {
   const handle = createStepNavigator({
     onPrevious: vi.fn(), onNext: vi.fn(), onTogglePlay: vi.fn(), onScrub: vi.fn()
   });
   handle.setState({ currentIndex: 0, totalSteps: 0, playing: false });
-  expect(handle.element.querySelectorAll("button:disabled").length).toBe(3);
+  expect(handle.element.querySelectorAll("button:disabled")).toHaveLength(3);
+  expect(handle.element.querySelector<HTMLInputElement>("input[type=range]")!.disabled).toBe(true);
 });
 ```
 
@@ -327,7 +309,7 @@ Expected: FAIL.
 
 - [ ] **Step 2: Implement the navigator**
 
-Use native buttons and `<input type="range">`.
+Use native Previous, Next, Play/Pause buttons and `<input type="range">`.
 
 State rules:
 
@@ -338,20 +320,18 @@ play.disabled = totalSteps < 2;
 range.disabled = totalSteps < 2;
 range.min = "0";
 range.max = String(Math.max(totalSteps - 1, 0));
-range.value = String(Math.max(0, Math.min(currentIndex, totalSteps - 1)));
-label.textContent = totalSteps === 0
-  ? "No steps"
-  : `Step ${currentIndex + 1} / ${totalSteps}`;
+range.value = String(totalSteps === 0 ? 0 : currentIndex);
+label.textContent = totalSteps === 0 ? "No steps" : `Step ${currentIndex + 1} / ${totalSteps}`;
 play.textContent = playing ? "Ⅱ Pause" : "▶ Play";
 ```
 
-Do not implement behavioral markers in v0.1.
+Do not add behavioral markers to the range in v0.1.
 
-- [ ] **Step 3: Replace old inline controls in `TraceVisualizer`**
+- [ ] **Step 3: Replace the old bottom controls**
 
-Remove the old `previous`, `next`, `play`, `controls`, `stepInfo`, and their direct DOM construction.
+Extract the existing Play listener into `togglePlaying()` without changing `PLAY_INTERVAL_MS` or reset behavior.
 
-Create the navigator after `navigateDirect` can be assigned:
+Create:
 
 ```ts
 const stepNavigator = createStepNavigator({
@@ -362,25 +342,11 @@ const stepNavigator = createStepNavigator({
 });
 ```
 
-Extract current Play button listener logic into `togglePlaying()` without changing playback interval or reset behavior.
+Every `setStep()` path updates the navigator with `currentIndex`, `interpretation.visualStates.length`, and `timer !== null`. `stopPlaying()` also updates the displayed playing state after clearing the timer.
 
-Every `setStep()` path calls:
+Delete the old `previous`, `next`, `play`, `controls`, and `stepInfo` DOM construction.
 
-```ts
-stepNavigator.setState({
-  currentIndex,
-  totalSteps: interpretation.visualStates.length,
-  playing: timer !== null
-});
-```
-
-`stopPlaying()` also updates navigator state after clearing the timer.
-
-- [ ] **Step 4: Place navigation above Code and make it sticky**
-
-Append it at the beginning of Debug content before Code.
-
-CSS:
+- [ ] **Step 4: Put navigation first in Debug and make it sticky**
 
 ```css
 .trace-step-nav {
@@ -408,15 +374,15 @@ CSS:
 }
 ```
 
-- [ ] **Step 5: Verify exact cursor and autoplay semantics**
+- [ ] **Step 5: Verify cursor/autoplay semantics**
 
 Extend `trace-visualizer.test.ts` to assert:
 
 ```text
-scrubber -> navigateDirect -> exact raw index
-Previous/Next -> exact adjacent raw index
-Play still advances raw states
-scrub while playing stops autoplay
+scrubber -> exact raw index
+Previous/Next -> adjacent raw index
+Play -> same raw-step sequence as before
+scrub while playing -> autoplay stops through navigateDirect()
 ```
 
 Run:
@@ -437,7 +403,7 @@ git commit -m "feat: add sticky trace step navigator"
 
 ---
 
-### Task 3: Compress Execution Status and Failure-First into a Small Header Region
+### Task 3: Compress Execution Status and Failure-First
 
 **Files:**
 - Create: `src/sidepanel/components/ExecutionHeader.ts`
@@ -462,9 +428,9 @@ export function createExecutionHeader(
 
 Keep `createFailureFirstEntry({ selection, onNavigate })` signature unchanged.
 
-- [ ] **Step 1: Rewrite Failure-First presentation tests before implementation**
+- [ ] **Step 1: Write failing compact-header tests**
 
-Update `failure-first-entry.test.ts` to assert compact factual content:
+Update Failure-First tests to keep exact navigation and forbidden-language checks while expecting compact text:
 
 ```ts
 expect(entry.textContent).toContain("Start here");
@@ -474,9 +440,7 @@ expect(entry.textContent).not.toContain("root cause");
 expect(entry.textContent).not.toContain("caused timeout");
 ```
 
-Preserve the existing exact `Inspect` callback assertion.
-
-Add `trace-visualizer.test.ts` assertion that `.trace-execution-header` occurs before `.trace-step-nav` and contains no `<h2>Trace</h2>` hero block.
+Add `trace-visualizer.test.ts` assertion that the new `.trace-execution-header` is before the workspace and old `<h2>Trace</h2>` hero markup is absent.
 
 Run:
 
@@ -484,17 +448,18 @@ Run:
 npm test -- tests/sidepanel/failure-first-entry.test.ts tests/sidepanel/trace-visualizer.test.ts
 ```
 
-Expected: FAIL against the current large summary/card structure.
+Expected: FAIL.
 
 - [ ] **Step 2: Implement compact `ExecutionHeader`**
 
-Render one status row:
+Render one main status line:
 
 ```text
-{status label} · {event count} captured steps
+completed · 81 captured steps
+exception · 24 captured steps
+trace limit · 256 captured steps
+timeout · 143 captured steps
 ```
-
-Use humanized `trace_limit -> trace limit`; retain `session.terminationReason` in a secondary `title` attribute or compact metadata span rather than a large separate block.
 
 Set:
 
@@ -502,22 +467,20 @@ Set:
 root.dataset.executionStatus = session.status;
 ```
 
-Do not use `role="alert"` or live-region attributes.
+Keep `terminationReason` available as compact secondary metadata or a `title` attribute. Do not use alert/live-region roles.
 
-- [ ] **Step 3: Compress `FailureFirstEntry` markup**
+- [ ] **Step 3: Compress `FailureFirstEntry`**
 
-Keep the factual title function and exact evidence range. Replace the five vertically stacked elements with a compact row + optional detail line:
+Keep the existing factual title mapping and exact evidence range. Render:
 
 ```text
-↻ Start here · {pattern title} · within {distance} captured steps of termination   [Inspect]
+↻ Start here · {pattern title} · within {distance} captured steps of termination    [Inspect]
 Evidence: Steps X–Y
 ```
 
-Use `Start here` capitalization in visible copy; retain exact accessible button destination.
+Retain the existing accessible button destination exactly.
 
-- [ ] **Step 4: Integrate the header and preserve navigation contract**
-
-In `TraceVisualizer.ts`:
+- [ ] **Step 4: Integrate exact Failure-First behavior**
 
 ```ts
 const failureFirstEntry = failureFirstSelection
@@ -531,52 +494,23 @@ const failureFirstEntry = failureFirstSelection
   : null;
 
 const executionHeader = createExecutionHeader({ session, failureFirstEntry });
-root.append(executionHeader, workspace.element);
+root.prepend(executionHeader);
 ```
 
-This is the first task where Failure-First `Inspect` explicitly restores Debug mode.
+Do not modify `selectFailureFirstEvidence()`.
 
-- [ ] **Step 5: Replace hero styling with compact styling**
+- [ ] **Step 5: Replace hero styling**
 
-Delete obsolete `.trace-viewer__summary*` hero rules after no references remain.
+Delete obsolete summary hero rules when no references remain. Add compact neutral-container styling; abnormal status uses warning/error text or small icon treatment, never a full large red card.
 
-Add compact CSS with no large filled red block:
-
-```css
-.trace-execution-header {
-  display: grid;
-  gap: 5px;
-  border: 1px solid #dfe5ee;
-  border-radius: 9px;
-  background: #fff;
-  padding: 7px 9px;
-}
-
-.trace-execution-header__status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 20px;
-  color: #475569;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.trace-execution-header[data-execution-status="timeout"] .trace-execution-header__status,
-.trace-execution-header[data-execution-status="trace_limit"] .trace-execution-header__status,
-.trace-execution-header[data-execution-status="exception"] .trace-execution-header__status {
-  color: #b45309;
-}
-```
-
-- [ ] **Step 6: Verify compact status and exact Failure-First behavior**
+- [ ] **Step 6: Verify**
 
 ```bash
 npm test -- tests/sidepanel/failure-first-entry.test.ts tests/sidepanel/failure-first-selection.test.ts tests/sidepanel/trace-visualizer.test.ts
 npm run typecheck
 ```
 
-Expected: PASS; selector tests must be untouched semantically.
+Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -614,9 +548,7 @@ export function createCodeWorkspace(
 ): CodeWorkspaceHandle;
 ```
 
-- [ ] **Step 1: Write failing source-workspace tests**
-
-Test that the component is not `<details>`, renders original source, marks exactly one active line, and marks a known exception line without replacing active-line semantics.
+- [ ] **Step 1: Write failing Code workspace tests**
 
 ```ts
 const handle = createCodeWorkspace({
@@ -630,7 +562,7 @@ expect(handle.element.querySelectorAll(".is-active")).toHaveLength(1);
 expect(handle.element.querySelector("[data-line='2']")?.classList.contains("is-exception-line")).toBe(true);
 ```
 
-Add a scroll test by stubbing `getBoundingClientRect()` and `scrollIntoView()` so scrolling occurs only when the active line falls outside the code viewport.
+Stub `getBoundingClientRect()` and `scrollIntoView()` to prove scrolling occurs only when the active line is outside the code viewport.
 
 Run:
 
@@ -640,11 +572,9 @@ npm test -- tests/sidepanel/code-workspace.test.ts
 
 Expected: FAIL.
 
-- [ ] **Step 2: Move code rendering from `TraceVisualizer.ts`**
+- [ ] **Step 2: Move source rendering out of `TraceVisualizer.ts`**
 
-Move current original-source line construction into `CodeWorkspace.ts`.
-
-Use a fixed primary structure:
+Render a persistent section rather than `<details>`:
 
 ```text
 <section class="trace-code-workspace">
@@ -653,34 +583,29 @@ Use a fixed primary structure:
 </section>
 ```
 
-Each line keeps `data-line` and line number text.
+Preserve original source text, `data-line`, line numbers, and monospace rendering.
 
 Active line:
 
 ```ts
 line.classList.toggle("is-active", lineNumber === currentLine);
-line.toggleAttribute("aria-current", lineNumber === currentLine);
+if (lineNumber === currentLine) line.setAttribute("aria-current", "step");
+else line.removeAttribute("aria-current");
 ```
 
-Exception line:
+Known exception line gets `is-exception-line` independently of current line.
+
+- [ ] **Step 3: Implement nearest-only active-line scrolling**
+
+When the active line changes, compare the line rectangle against the code viewport rectangle. Call:
 
 ```ts
-line.classList.toggle("is-exception-line", lineNumber === options.exceptionLine);
+activeLine.scrollIntoView({ block: "nearest" });
 ```
 
-- [ ] **Step 3: Implement nearest-only source scrolling**
+only if line top is above viewport top or line bottom is below viewport bottom.
 
-Track the prior active line. On a changed current line:
-
-1. inspect code viewport rectangle;
-2. inspect active line rectangle;
-3. call `scrollIntoView({ block: "nearest" })` only when the line top is above viewport top or line bottom is below viewport bottom.
-
-Do not scroll when the active line is already visible.
-
-- [ ] **Step 4: Integrate into `setStep()`**
-
-Create once:
+- [ ] **Step 4: Integrate with `setStep()`**
 
 ```ts
 const codeWorkspace = createCodeWorkspace({
@@ -697,9 +622,7 @@ codeWorkspace.setCurrentLine(state?.currentLine ?? null);
 
 Delete `renderCodePanel`, `codePanel.lines`, and `codePanel.lineLabel` from `TraceVisualizer.ts`.
 
-- [ ] **Step 5: Give Code primary visual space**
-
-Add CSS:
+- [ ] **Step 5: Allocate primary space**
 
 ```css
 .trace-code-workspace {
@@ -711,16 +634,15 @@ Add CSS:
 }
 
 .trace-code-workspace .trace-viewer__code {
-  max-height: min(34vh, 320px);
   min-height: 150px;
+  max-height: min(34vh, 320px);
+  overflow: auto;
 }
 ```
 
-At 800–1000 px viewport heights, this is consistent with the spec's approximate 25% Code target without introducing brittle JS viewport calculations.
+Add a visible active-line marker so current execution is not communicated by color alone.
 
-Add a visible marker pseudo-element or marker column for the active line so meaning is not color-only.
-
-- [ ] **Step 6: Verify integration**
+- [ ] **Step 6: Verify**
 
 ```bash
 npm test -- tests/sidepanel/code-workspace.test.ts tests/sidepanel/trace-visualizer.test.ts
@@ -738,7 +660,7 @@ git commit -m "refactor: promote code to primary debugger workspace"
 
 ---
 
-### Task 5: Extract and Enlarge Runtime State without Changing Visualizer Semantics
+### Task 5: Extract and Enlarge Runtime State
 
 **Files:**
 - Create: `src/sidepanel/components/RuntimeStateWorkspace.ts`
@@ -761,23 +683,13 @@ export function createRuntimeStateWorkspace(): RuntimeStateWorkspaceHandle;
 
 - [ ] **Step 1: Write failing Runtime State tests**
 
-Port the existing visualizer-host expectations into a focused test:
+Verify visible title `Runtime State`, empty trace copy, no-specialized-visual fallback, and DOM handle reuse for the same `visualId` across adjacent states.
 
-```ts
-const handle = createRuntimeStateWorkspace();
-expect(handle.element.textContent).toContain("Runtime State");
-
-handle.setState(undefined);
-expect(handle.element.textContent).toContain("No execution steps were captured.");
-```
-
-For a `VisualState` with no visual candidates, assert exact fallback:
+Required fallback:
 
 ```text
 No specialized runtime visualization for this step. Detailed variables are available in Advanced → Locals.
 ```
-
-For consecutive states with the same `visualId`, assert the same visual DOM handle is updated rather than replaced.
 
 Run:
 
@@ -787,41 +699,43 @@ npm test -- tests/sidepanel/runtime-state-workspace.test.ts
 
 Expected: FAIL.
 
-- [ ] **Step 2: Move `createVisualStateRenderer()` out of `TraceVisualizer.ts`**
+- [ ] **Step 2: Move `createVisualStateRenderer()` into the new component**
 
-Preserve the current stable `visualOrder`, handle reuse, `createVisualizer`, `updateVisualizer`, and disposal behavior exactly.
-
-Remove only the old `stateMeta` / `Line N` text. Source position is now owned by Code.
-
-- [ ] **Step 3: Use Runtime State product naming**
-
-Visible heading must be exactly:
+Preserve current:
 
 ```text
-Runtime State
+visualOrder
+createVisualizer()
+updateVisualizer()
+handle reuse
+disposal
 ```
 
-Do not rename `VisualState`, `visuals`, `visualId`, or visualizer-registry internals.
+Remove only the redundant `Line N` state metadata; Code now owns source position.
 
-- [ ] **Step 4: Integrate into `TraceVisualizer`**
+- [ ] **Step 3: Integrate**
 
-Replace old `visualPanel` and `visualStateRenderer` with one `runtimeStateWorkspace` handle.
+Create once and place immediately after Code:
 
-`setStep()` uses:
+```ts
+const runtimeStateWorkspace = createRuntimeStateWorkspace();
+```
+
+`setStep()`:
 
 ```ts
 runtimeStateWorkspace.setState(state);
 ```
 
-`dispose()` uses:
+`dispose()`:
 
 ```ts
 runtimeStateWorkspace.dispose();
 ```
 
-- [ ] **Step 5: Increase the visualizer viewport**
+Delete old `visualPanel` and embedded visual-state renderer from `TraceVisualizer.ts`.
 
-CSS:
+- [ ] **Step 4: Enlarge the viewport**
 
 ```css
 .trace-runtime-workspace {
@@ -840,9 +754,9 @@ CSS:
 }
 ```
 
-Do not impose a hard max-height on Tree / Graph / Matrix / Linked List content. Their existing internal viewport/pan/scroll behavior remains authoritative.
+Do not add a hard max-height to Tree, Graph, Matrix, or Linked List views.
 
-- [ ] **Step 6: Run all visualizer regression tests**
+- [ ] **Step 5: Run visualizer regressions**
 
 ```bash
 npm test -- \
@@ -858,7 +772,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/sidepanel/components/RuntimeStateWorkspace.ts src/sidepanel/components/TraceVisualizer.ts src/sidepanel/styles.css tests/sidepanel/runtime-state-workspace.test.ts tests/sidepanel/trace-visualizer.test.ts
@@ -867,7 +781,172 @@ git commit -m "refactor: promote runtime state workspace"
 
 ---
 
-### Task 6: Consolidate What Changed, Contextual Behavioral Evidence, and Expression Computation
+### Task 6: Move Full Behavioral Tooling into Evidence
+
+**Files:**
+- Create: `src/sidepanel/components/EvidenceWorkspace.ts`
+- Create: `tests/sidepanel/evidence-workspace.test.ts`
+- Modify: `src/sidepanel/components/BehavioralSignals.ts`
+- Modify: `tests/sidepanel/behavioral-signals.test.ts`
+- Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+- Modify: `src/sidepanel/styles.css`
+
+**Interfaces:**
+
+Extend Behavioral Signals presentation only:
+
+```ts
+export interface BehavioralSignalsOptions {
+  analysis: BehavioralAnalysis;
+  currentIndex: number;
+  evidenceByPatternId: ReadonlyMap<string, ResolvedBehavioralEvidence>;
+  onNavigate(index: number): void;
+  focusPatternId?: string | null;
+}
+```
+
+```ts
+export interface EvidenceWorkspaceHandle {
+  element: HTMLElement;
+  setCurrentIndex(index: number): void;
+  focusPattern(patternId: string): void;
+}
+
+export function createEvidenceWorkspace(options: {
+  analysis: BehavioralAnalysis;
+  traceIndex: TraceStepIndex;
+  evidenceByPatternId: ReadonlyMap<string, ResolvedBehavioralEvidence>;
+  traceFoldModel: TraceFoldModel;
+  currentIndex: number;
+  onNavigate(index: number): void;
+}): EvidenceWorkspaceHandle;
+```
+
+- [ ] **Step 1: Write failing Evidence workspace tests**
+
+Assert product sections exist:
+
+```text
+Execution Evidence
+Patterns
+Timeline
+Trace Structure
+```
+
+Verify:
+
+```ts
+handle.setCurrentIndex(3);
+```
+
+updates timeline/outline active state without calling `onNavigate`.
+
+Verify:
+
+```ts
+handle.focusPattern("pattern-2");
+```
+
+focuses the exact Behavioral Signals row without changing raw index.
+
+- [ ] **Step 2: Add explicit pattern focus support to Behavioral Signals**
+
+Rows already expose `data-pattern-id`. When `focusPatternId` matches a row, make that row programmatically focusable (`tabIndex = -1`) and expose a class such as `is-focused-evidence`.
+
+Do not focus during normal `setCurrentIndex()` updates. Focus occurs only from `EvidenceWorkspace.focusPattern()`.
+
+Keep First / Previous / Next / Last exact navigation unchanged.
+
+- [ ] **Step 3: Implement `EvidenceWorkspace`**
+
+Create Timeline and Trace Outline once:
+
+```ts
+const timeline = createBehavioralTimeline(...);
+const outline = createTraceOutline(...);
+```
+
+Keep a dedicated signals host because Behavioral Signals currently computes Previous/Next destinations during render.
+
+```ts
+const renderSignals = (focusPatternId: string | null = null) => {
+  signalsHost.replaceChildren(createBehavioralSignals({
+    analysis: options.analysis,
+    currentIndex,
+    evidenceByPatternId: options.evidenceByPatternId,
+    onNavigate: options.onNavigate,
+    focusPatternId
+  }));
+};
+```
+
+`setCurrentIndex(index)`:
+
+```ts
+currentIndex = index;
+renderSignals();
+timeline.setCurrentIndex(index);
+outline.setCurrentIndex(index);
+```
+
+`focusPattern(patternId)` calls `renderSignals(patternId)` and focuses the resulting matching row. It does not navigate.
+
+- [ ] **Step 4: Move behavioral surfaces out of Debug**
+
+```ts
+const evidenceWorkspace = createEvidenceWorkspace({
+  analysis: interpretation.behavioralAnalysis,
+  traceIndex,
+  evidenceByPatternId,
+  traceFoldModel,
+  currentIndex,
+  onNavigate: navigateDirect
+});
+workspace.panels.evidence.append(evidenceWorkspace.element);
+```
+
+Remove full Behavioral Signals, Behavioral Timeline, and Trace Outline from Debug/root composition.
+
+`setStep()` calls:
+
+```ts
+evidenceWorkspace.setCurrentIndex(currentIndex);
+```
+
+- [ ] **Step 5: Verify Evidence navigation uses the same raw cursor**
+
+In integration tests:
+
+1. switch to Evidence;
+2. click Behavioral Signals `Next`, a Timeline band, or Trace Outline `Inspect`;
+3. assert Step Navigator, Code, Runtime State, and Evidence all reflect the exact same raw index;
+4. assert ordinary Evidence navigation leaves mode as Evidence.
+
+- [ ] **Step 6: Run focused regressions**
+
+```bash
+npm test -- \
+  tests/sidepanel/evidence-workspace.test.ts \
+  tests/sidepanel/behavioral-signals.test.ts \
+  tests/sidepanel/behavioral-timeline.test.ts \
+  tests/sidepanel/trace-outline.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/sidepanel/components/EvidenceWorkspace.ts src/sidepanel/components/BehavioralSignals.ts src/sidepanel/components/TraceVisualizer.ts src/sidepanel/styles.css tests/sidepanel/evidence-workspace.test.ts tests/sidepanel/behavioral-signals.test.ts tests/sidepanel/trace-visualizer.test.ts
+git commit -m "refactor: move behavioral tooling into evidence workspace"
+```
+
+---
+
+### Task 7: Consolidate What Changed, Behavioral Clues, and Expression Computation
 
 **Files:**
 - Create: `src/sidepanel/contextual-behavioral-evidence.ts`
@@ -893,7 +972,7 @@ export function resolveContextualBehavioralEvidence(
 ): ContextualBehavioralEvidence[];
 ```
 
-The result includes only patterns whose resolved `evidenceIndexes` contain `currentIndex`, sorted lexicographically by `patternId`. This ordering is deterministic but intentionally does **not** express severity.
+Results include only resolved patterns whose `evidenceIndexes` contain `currentIndex`, sorted lexicographically by `patternId`. The ordering is deterministic and explicitly not severity ranking.
 
 ```ts
 export interface ChangeInspectorHandle {
@@ -911,15 +990,15 @@ export function createChangeInspector(options: {
 }): ChangeInspectorHandle;
 ```
 
-- [ ] **Step 1: Write failing pure contextual-evidence tests**
+- [ ] **Step 1: Write failing contextual-evidence tests**
 
-Cases:
+Cover:
 
 ```text
-pattern evidence does not include current raw index -> absent
-resolved evidence includes current raw index -> present
-missing evidence-map entry -> absent
-multiple matches -> sorted by patternId, no kind/severity priority
+current index absent from evidence -> excluded
+current index present -> included
+missing evidence map entry -> excluded
+multiple matches -> patternId order, no kind priority
 ```
 
 Run:
@@ -932,8 +1011,6 @@ Expected: FAIL.
 
 - [ ] **Step 2: Implement the pure resolver**
 
-Implementation is intentionally simple:
-
 ```ts
 return patterns
   .map((pattern) => ({ pattern, evidence: evidenceByPatternId.get(pattern.patternId) }))
@@ -943,31 +1020,27 @@ return patterns
   .sort((a, b) => a.pattern.patternId.localeCompare(b.pattern.patternId));
 ```
 
-Do not add a semantic pattern-kind priority.
-
 - [ ] **Step 3: Write failing Change Inspector tests**
-
-Create a test with mutations + three contextual patterns + expression evidence.
 
 Required behavior:
 
 ```text
 heading = What Changed
-mutation list renders first
-at most first two pattern clues render inline
-when >2 matches, show "+1 more evidence pattern" without selecting a semantic winner
-View evidence carries exact patternId
-expression section heading = How this value was computed
-no expression placeholder when expressionEvidence is undefined
+runtime mutations render first
+up to two current-step behavioral clues render inline
+more than two -> "+N more evidence patterns"
+View evidence emits exact patternId
+expression heading = How this value was computed
+no expression placeholder when no expression evidence exists
 ```
 
-Use the real `createExpressionEvidence()` from the completed Expression Tracing prerequisite.
+Use the actual `createExpressionEvidence()` from the completed expression-tracing prerequisite.
 
 - [ ] **Step 4: Implement `ChangeInspector`**
 
 Reuse `createMutationList()` unchanged.
 
-Map pattern titles factually:
+Factual clue titles:
 
 ```ts
 repeated_state      -> `Repeated observable state × ${repeatCount}`
@@ -975,29 +1048,35 @@ no_progress         -> `No observable progress across ${revisitCount} revisits`
 repeated_transition -> `Repeated ${periodSteps}-step behavior × ${repeatCount}`
 ```
 
-Render at most two clue rows, sorted by the pure resolver. Each gets a `View evidence` button calling the exact `pattern.patternId`.
+Render the first two items from the already deterministic result. If more exist, render `+${count} more evidence pattern(s)` without choosing a semantic winner.
+
+Each clue's `View evidence` button emits the exact `patternId`.
 
 If expression evidence exists:
 
 ```ts
 expressionHost.append(
-  heading("How this value was computed"),
-  createExpressionEvidence(expressionEvidence, input.expressionTracing)
+  createSectionHeading("How this value was computed"),
+  createExpressionEvidence(input.expressionEvidence, input.expressionTracing)
 );
 ```
 
-If it does not exist, omit the entire computation section; do not render `No expression evidence for this step` in the primary Debug flow.
+If it does not exist, omit the section entirely.
 
-- [ ] **Step 5: Integrate with `TraceVisualizer`**
+- [ ] **Step 5: Integrate with the already-existing `EvidenceWorkspace`**
 
-Create the inspector once. Its `onViewEvidence(patternId)` callback must:
+Create:
 
 ```ts
-workspace.setMode("evidence");
-evidenceWorkspace.focusPattern(patternId);
+const changeInspector = createChangeInspector({
+  onViewEvidence: (patternId) => {
+    workspace.setMode("evidence");
+    evidenceWorkspace.focusPattern(patternId);
+  }
+});
 ```
 
-`setStep()` computes:
+In `setStep()`:
 
 ```ts
 const event = session.events[currentIndex];
@@ -1018,20 +1097,21 @@ changeInspector.setStep({
 });
 ```
 
-This replaces the old `changesPanel` and removes the full Behavioral Signals panel from Debug.
+Delete the old primary `What Changed` panel and the old inspector grid.
 
-- [ ] **Step 6: Style the inspector as the third primary region**
+- [ ] **Step 6: Style as one primary inspector**
 
-Use one contained surface, not a three-column inspector grid. Delete `.trace-viewer__inspector-grid` after no references remain.
+Delete `.trace-viewer__inspector-grid` after all references are gone. Use one full-width contained surface beneath Runtime State.
 
-Ensure expression-tree content inherits the available width and may scroll internally only where the Expression Evidence component already requires it.
+Do not add a separate top-level Expression Evidence panel to Debug.
 
-- [ ] **Step 7: Verify primary-flow behavior**
+- [ ] **Step 7: Verify**
 
 ```bash
 npm test -- \
   tests/sidepanel/contextual-behavioral-evidence.test.ts \
   tests/sidepanel/change-inspector.test.ts \
+  tests/sidepanel/evidence-workspace.test.ts \
   tests/sidepanel/trace-visualizer.test.ts \
   tests/sidepanel/expression-evidence.test.ts
 npm run typecheck
@@ -1044,153 +1124,6 @@ Expected: PASS.
 ```bash
 git add src/sidepanel/contextual-behavioral-evidence.ts src/sidepanel/components/ChangeInspector.ts src/sidepanel/components/TraceVisualizer.ts src/sidepanel/styles.css tests/sidepanel/contextual-behavioral-evidence.test.ts tests/sidepanel/change-inspector.test.ts tests/sidepanel/trace-visualizer.test.ts
 git commit -m "feat: consolidate primary change inspector"
-```
-
----
-
-### Task 7: Move Full Behavioral Tooling into Evidence
-
-**Files:**
-- Create: `src/sidepanel/components/EvidenceWorkspace.ts`
-- Create: `tests/sidepanel/evidence-workspace.test.ts`
-- Modify: `src/sidepanel/components/BehavioralSignals.ts`
-- Modify: `tests/sidepanel/behavioral-signals.test.ts`
-- Modify: `src/sidepanel/components/TraceVisualizer.ts`
-- Modify: `tests/sidepanel/trace-visualizer.test.ts`
-- Modify: `src/sidepanel/styles.css`
-
-**Interfaces:**
-
-Extend Behavioral Signals presentation without changing navigation rules:
-
-```ts
-export interface BehavioralSignalsOptions {
-  analysis: BehavioralAnalysis;
-  currentIndex: number;
-  evidenceByPatternId: ReadonlyMap<string, ResolvedBehavioralEvidence>;
-  onNavigate(index: number): void;
-  focusPatternId?: string | null;
-}
-```
-
-When `focusPatternId` matches a rendered row, add `tabIndex = -1`, class `is-focused-evidence`, and call `focus({ preventScroll: true })` only when invoked through the workspace's explicit `focusPattern()` action; ordinary step updates never auto-focus.
-
-```ts
-export interface EvidenceWorkspaceHandle {
-  element: HTMLElement;
-  setCurrentIndex(index: number): void;
-  focusPattern(patternId: string): void;
-}
-
-export function createEvidenceWorkspace(options: {
-  analysis: BehavioralAnalysis;
-  traceIndex: TraceStepIndex;
-  evidenceByPatternId: ReadonlyMap<string, ResolvedBehavioralEvidence>;
-  traceFoldModel: TraceFoldModel;
-  currentIndex: number;
-  onNavigate(index: number): void;
-}): EvidenceWorkspaceHandle;
-```
-
-- [ ] **Step 1: Write failing evidence-workspace tests**
-
-Assert the workspace contains product-level sections:
-
-```text
-Execution Evidence
-Patterns
-Timeline
-Trace Structure
-```
-
-It may reuse `BehavioralSignals`, `BehavioralTimeline`, and `TraceOutline` internally.
-
-Verify `setCurrentIndex(3)` updates timeline and outline current state but does not emit navigation.
-
-Verify `focusPattern("pattern-2")` focuses the exact pattern row and does not navigate the trace.
-
-- [ ] **Step 2: Add explicit pattern focusing support to Behavioral Signals**
-
-Keep existing First / Previous / Next / Last exact navigation unchanged.
-
-Add a small helper so `EvidenceWorkspace.focusPattern()` can rebuild signals with the same current index and target `focusPatternId`, replace the pattern host, then focus the matching row.
-
-Do not auto-focus on every `setCurrentIndex()`.
-
-- [ ] **Step 3: Build `EvidenceWorkspace`**
-
-Create once:
-
-```ts
-const timeline = createBehavioralTimeline(...);
-const outline = createTraceOutline(...);
-```
-
-Keep a dedicated pattern host that rebuilds `createBehavioralSignals()` when current index changes because Behavioral Signals currently derives Previous/Next button destinations during render.
-
-`setCurrentIndex(index)` must:
-
-```ts
-currentIndex = index;
-renderSignals(null);
-timeline.setCurrentIndex(index);
-outline.setCurrentIndex(index);
-```
-
-`focusPattern(patternId)` calls `renderSignals(patternId)` without changing `currentIndex`.
-
-- [ ] **Step 4: Move old behavioral surfaces out of Debug**
-
-In `TraceVisualizer.ts`:
-
-```ts
-workspace.panels.evidence.append(evidenceWorkspace.element);
-```
-
-Delete direct root/debug appends of:
-
-```text
-Behavioral Signals panel
-Behavioral Timeline element
-Trace Outline element
-```
-
-In `setStep()` call only:
-
-```ts
-evidenceWorkspace.setCurrentIndex(currentIndex);
-```
-
-- [ ] **Step 5: Verify Evidence navigation reuses the raw cursor**
-
-Extend `trace-visualizer.test.ts`:
-
-1. switch to Evidence;
-2. click a Behavioral Signals `Next` or timeline band;
-3. assert exact raw index updates Code, Runtime State, Change Inspector, timeline, and outline;
-4. assert mode remains Evidence after ordinary Evidence navigation.
-
-Failure-First remains the only action that forcibly restores Debug.
-
-- [ ] **Step 6: Run focused regression tests**
-
-```bash
-npm test -- \
-  tests/sidepanel/evidence-workspace.test.ts \
-  tests/sidepanel/behavioral-signals.test.ts \
-  tests/sidepanel/behavioral-timeline.test.ts \
-  tests/sidepanel/trace-outline.test.ts \
-  tests/sidepanel/trace-visualizer.test.ts
-npm run typecheck
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/sidepanel/components/EvidenceWorkspace.ts src/sidepanel/components/BehavioralSignals.ts src/sidepanel/components/TraceVisualizer.ts src/sidepanel/styles.css tests/sidepanel/evidence-workspace.test.ts tests/sidepanel/behavioral-signals.test.ts tests/sidepanel/trace-visualizer.test.ts
-git commit -m "refactor: move behavioral tooling into evidence workspace"
 ```
 
 ---
@@ -1217,11 +1150,11 @@ export function createAdvancedWorkspace(
 ): AdvancedWorkspaceHandle;
 ```
 
-The component may keep its internal subsections as collapsible `<details>` because Advanced is explicitly a secondary inspection surface.
+Advanced may use internal `<details>` sections because it is explicitly secondary.
 
-- [ ] **Step 1: Write failing Advanced workspace tests**
+- [ ] **Step 1: Write failing Advanced tests**
 
-Test initial headings:
+Verify headings/content:
 
 ```text
 Locals
@@ -1231,36 +1164,17 @@ Exception Details   # only when session.exception exists
 Raw Trace
 ```
 
-Assert raw JSON is present only inside the Advanced component.
+Assert raw JSON exists only inside Advanced. Call `setStep()` with two states and assert Locals and Call Stack update to the new step.
 
-Call `setStep()` with two different states and assert Locals + Call Stack update synchronously.
+- [ ] **Step 2: Move Locals rendering**
 
-- [ ] **Step 2: Move Locals rendering into `AdvancedWorkspace.ts`**
+Move current `renderLocals()` logic out of `TraceVisualizer.ts` and continue using `formatValue()` against captured snapshots.
 
-Move `renderLocals()` from `TraceVisualizer.ts` unchanged except for CSS ownership.
+- [ ] **Step 3: Move Call Stack and Output**
 
-Locals continues to use `formatValue()` and the existing snapshot data; no interpretation changes.
-
-- [ ] **Step 3: Move Call Stack and Output rendering**
-
-Move `renderCallStack()` and `renderOutput()` into the component.
-
-Separate exception metadata from ordinary stdout in presentation:
-
-```text
-Output
-  stdout
-
-Exception Details
-  RuntimeError · line 5
-  boom
-```
-
-Do not alter `TraceSession.exception` authority.
+Move `renderCallStack()` and stdout rendering. Present runtime exception metadata under a distinct `Exception Details` section but do not alter `TraceSession.exception` semantics.
 
 - [ ] **Step 4: Move Raw Trace JSON**
-
-Render:
 
 ```ts
 const raw = document.createElement("pre");
@@ -1268,34 +1182,35 @@ raw.id = "trace-output";
 raw.textContent = JSON.stringify(session.events, null, 2);
 ```
 
-inside a closed-by-default `Raw Trace · ${session.events.length} events` details section.
+Place it in a closed-by-default `Raw Trace · ${session.events.length} events` details section.
 
-- [ ] **Step 5: Integrate and delete old primary-flow panels**
-
-Create once:
+- [ ] **Step 5: Integrate**
 
 ```ts
 const advancedWorkspace = createAdvancedWorkspace(session);
 workspace.panels.advanced.append(advancedWorkspace.element);
 ```
 
-`setStep()` uses:
+`setStep()`:
 
 ```ts
 advancedWorkspace.setStep(state);
 ```
 
-Delete old Locals panel, Call Stack panel, Output panel, and `Debug details` panel creation from `TraceVisualizer.ts`.
+Delete old primary/root Locals, Call Stack, Output, and Debug Details panels.
 
-- [ ] **Step 6: Verify Advanced does not alter execution state**
+- [ ] **Step 6: Verify mode switching does not mutate execution**
 
-Test:
+Test sequence:
 
-1. navigate to step 2;
-2. switch Advanced;
-3. inspect Locals/Call Stack;
-4. switch back Debug;
-5. assert still step 2 and playback state unchanged.
+```text
+navigate to step 2
+switch Advanced
+inspect Locals / Call Stack
+switch Debug
+raw cursor still step 2
+playing state unchanged
+```
 
 Run:
 
@@ -1315,7 +1230,7 @@ git commit -m "refactor: move raw debugger details into advanced workspace"
 
 ---
 
-### Task 9: Finalize Primary Layout, Narrow-Width Behavior, Accessibility, and End-to-End Synchronization
+### Task 9: Finalize Layout, Responsiveness, Accessibility, and End-to-End Synchronization
 
 **Files:**
 - Modify: `src/sidepanel/components/TraceVisualizer.ts`
@@ -1327,11 +1242,9 @@ git commit -m "refactor: move raw debugger details into advanced workspace"
 
 **Interfaces:**
 - Consumes all handles produced by Tasks 1–8.
-- Produces the final composition contract required by the spec.
+- Produces the final composition required by the design spec.
 
-- [ ] **Step 1: Add one final DOM-order integration test**
-
-In `trace-visualizer.test.ts`, assert the Debug panel child order by stable selectors:
+- [ ] **Step 1: Add final primary DOM-order test**
 
 ```ts
 const debug = root.querySelector("#trace-workspace-debug")!;
@@ -1345,11 +1258,11 @@ expect(selectors).toEqual([
 ]);
 ```
 
-The execution header remains above workspace tabs at root level. No Locals, full Behavioral Signals, Call Stack, Output, raw JSON, Timeline, or Outline may appear inside the Debug panel.
+The compact execution header remains above workspace tabs at root level. Debug must not contain full Behavioral Signals, Timeline, Trace Outline, Locals, Call Stack, Output, or raw JSON.
 
-- [ ] **Step 2: Add all-navigation synchronization coverage**
+- [ ] **Step 2: Add cross-surface single-cursor integration tests**
 
-For a fixture with visual state, mutations, expression evidence, behavioral evidence, locals, call stack, and output, exercise each path independently:
+Using a fixture with visual state, mutations, expression evidence, behavioral evidence, locals, call stack, and output, exercise independently:
 
 ```text
 Previous
@@ -1362,14 +1275,14 @@ Behavioral Timeline navigation
 Trace Outline Inspect
 ```
 
-After each action assert the authoritative raw index agrees across:
+After each action assert the same raw index is reflected in:
 
 ```text
-Step Navigator label/range
+Step Navigator
 Code current line
-Runtime State current visual
+Runtime State
 What Changed mutations
-expression evidence
+expression computation
 contextual behavioral clue
 Advanced Locals
 Advanced Call Stack
@@ -1377,11 +1290,15 @@ Evidence Timeline
 Evidence Trace Outline
 ```
 
-Do not assert a second cursor because none may exist.
+- [ ] **Step 3: Add narrow-width rules**
 
-- [ ] **Step 3: Add narrow-width CSS rules**
+Keep existing:
 
-Keep `body { min-width: 360px; }`.
+```css
+body {
+  min-width: 360px;
+}
+```
 
 Add:
 
@@ -1422,9 +1339,9 @@ Add:
 }
 ```
 
-Do not shrink visualizers with global `transform: scale(...)` or fixed tiny heights. Prefer vertical space and their existing internal scrolling/panning.
+Never solve narrow width by globally scaling Tree / Graph / Matrix / Linked List content to unreadable size.
 
-- [ ] **Step 4: Add reduced-motion and focus-visible rules**
+- [ ] **Step 4: Add reduced-motion and keyboard focus rules**
 
 ```css
 @media (prefers-reduced-motion: reduce) {
@@ -1443,11 +1360,11 @@ Do not shrink visualizers with global `transform: scale(...)` or fixed tiny heig
 }
 ```
 
-Ensure current-line and abnormal-status meaning remain textual/marker-based, not color-only.
+Current-line and abnormal-status meaning must remain readable without color.
 
-- [ ] **Step 5: Remove dead legacy CSS and DOM helpers**
+- [ ] **Step 5: Remove dead legacy presentation code**
 
-Search and remove unused rules/helpers for:
+Remove unused helpers/rules for:
 
 ```text
 trace-viewer__summary*
@@ -1457,7 +1374,7 @@ old bottom trace-viewer__controls
 old primary Locals / Behavioral panel layout wrappers
 ```
 
-Do not remove styles still used inside Evidence or Advanced.
+Do not remove styles still consumed inside Evidence/Advanced.
 
 Run:
 
@@ -1466,7 +1383,7 @@ npm test -- tests/sidepanel/trace-visualizer.test.ts
 npm run typecheck
 ```
 
-Expected: PASS and no TypeScript unused-reference errors introduced by the refactor.
+Expected: PASS.
 
 - [ ] **Step 6: Run the complete Side Panel suite**
 
@@ -1476,7 +1393,7 @@ npm test -- tests/sidepanel
 
 Expected: PASS.
 
-- [ ] **Step 7: Run full repository verification**
+- [ ] **Step 7: Run full repository gates**
 
 ```bash
 npm test
@@ -1488,32 +1405,32 @@ Expected: all commands exit 0.
 
 - [ ] **Step 8: Manual Chrome smoke test**
 
-Load the freshly built `dist/` extension as unpacked and verify these representative workflows:
+Build and load `dist/` as an unpacked extension. Verify:
 
 ```text
-Binary Search / timeout-like or trace-limit fixture:
+Binary Search / timeout-like or trace-limit execution:
   compact status -> Start Here -> Inspect -> Code + Runtime State + What Changed
 
-Two Sum / completed:
+Two Sum / completed execution:
   no failure hero -> raw stepping -> List/Dict visualization remains stable
 
 Linked List:
-  larger Runtime State keeps topology readable
+  Runtime State topology remains readable
 
 Tree / Graph / Matrix:
   visual area is not cramped by status/evidence panels
 
 Expression-traced DP-style assignment:
-  What Changed includes "How this value was computed"
+  What Changed contains "How this value was computed"
 
-Evidence tab:
-  pattern navigation changes the same raw cursor
+Evidence:
+  pattern/timeline/outline navigation changes the same raw cursor
 
-Advanced tab:
+Advanced:
   Locals / Call Stack / Output reflect the same selected step
 ```
 
-Do not evaluate LeetCode judge correctness; this smoke test validates extension UI behavior only.
+This smoke test validates extension behavior only; do not infer LeetCode judge correctness.
 
 - [ ] **Step 9: Commit**
 
@@ -1526,28 +1443,26 @@ git commit -m "test: validate debugger workspace information architecture"
 
 ## Final Acceptance Checklist
 
-Before marking the milestone complete, verify each spec outcome explicitly:
-
 ```text
 [ ] compact execution status is visible without a large hero banner
 [ ] eligible Start Here stays factual, single, compact, and non-automatic
 [ ] Failure-First Inspect returns to Debug and lands on exact inspectIndex
 [ ] sticky Step Navigator sits immediately above Code
-[ ] Code is persistent, non-collapsible, and visually larger than before
+[ ] Code is persistent, non-collapsible, and substantially larger than before
 [ ] Runtime State is persistent, named correctly, and substantially larger
-[ ] Runtime visualizers retain stable ordering and existing semantics
-[ ] What Changed contains runtime mutations as primary textual evidence
-[ ] current-step behavioral clues appear contextually, not as the full signals panel
+[ ] specialized visualizers preserve existing ordering and semantics
+[ ] What Changed is the primary textual inspector
+[ ] current-step behavioral clues are contextual rather than the full signals panel
 [ ] expression evidence appears under "How this value was computed"
-[ ] no empty expression placeholder appears in primary Debug flow
+[ ] no empty expression placeholder appears in primary Debug
 [ ] full Behavioral Signals / Timeline / Trace Outline live in Evidence
 [ ] Locals / Call Stack / Output / exception details / raw events live in Advanced
-[ ] Debug / Evidence / Advanced share one raw cursor
+[ ] Debug / Evidence / Advanced share exactly one raw cursor
 [ ] workspace changes do not start or stop autoplay
-[ ] Evidence navigation still uses navigateDirect()
-[ ] no causal/correctness/LeetCode judge claim was added
+[ ] all Evidence navigation still uses navigateDirect()
+[ ] no causal/correctness/LeetCode judge claim was introduced
 [ ] 360px-class Side Panel layout has no ordinary page-level horizontal overflow
-[ ] reduced-motion and keyboard focus behavior remain usable
+[ ] reduced-motion and keyboard-focus behavior remain usable
 [ ] npm test passes
 [ ] npm run typecheck passes
 [ ] npm run build passes

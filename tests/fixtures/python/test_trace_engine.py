@@ -763,6 +763,30 @@ class Solution:
     assert result["return_value"] == {"type": "int", "value": "3"}
 
 
+def test_expression_recording_ignores_user_replaced_helper_namespace():
+    result = request(
+        """def replacement(*args):
+    raise RuntimeError("replacement recorder")
+
+globals()["<lc_expression_helpers>"] = {
+    "__lc_expr_record": replacement,
+    "__lc_minmax_call": replacement,
+}
+
+class Solution:
+    def solve(self):
+        value = 1 + 2
+        return value
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "3"}
+
+
 def test_expression_recording_does_not_invoke_custom_repr_for_intermediate_values():
     result = request(
         """repr_calls = []
@@ -810,6 +834,9 @@ class ExpressionTracingRunnerTests(unittest.TestCase):
 
     def test_shadowed_globals_lookup(self):
         test_expression_recording_ignores_user_shadowed_globals_lookup()
+
+    def test_replaced_helper_namespace(self):
+        test_expression_recording_ignores_user_replaced_helper_namespace()
 
     def test_custom_repr_is_not_invoked(self):
         test_expression_recording_does_not_invoke_custom_repr_for_intermediate_values()

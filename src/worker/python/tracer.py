@@ -110,8 +110,6 @@ class TraceCollector:
             name: value
             for name, value in frame.f_locals.items()
             if not name.startswith("__lc_")
-            and not name.endswith("__lc_<expr_record>")
-            and not name.endswith("__lc_<minmax_call>")
             and not (
                 frame.f_code.co_name == "<module>"
                 and (name == "__builtins__" or name in self.baseline_global_names)

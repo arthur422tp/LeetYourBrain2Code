@@ -1,8 +1,11 @@
 import ast
 import contextlib
 import io
+import secrets
 import time
 import traceback
+import types
+import warnings
 
 from tracer import TraceCollector, TraceLimitExceeded, USER_CODE_FILENAME, _limit
 from ast_analyzer import analyze_subscript_relations, relations_as_dicts
@@ -41,40 +44,26 @@ class _LeetCodeNullTransformer(ast.NodeTransformer):
 
 
 class _ExpressionHelperLookupTransformer(ast.NodeTransformer):
-    _HELPER_BINDINGS = {
-        "__lc_expr_record": "__lc_<expr_record>",
-        "__lc_minmax_call": "__lc_<minmax_call>",
-    }
-    _HELPER_NAMESPACE = "<lc_expression_helpers>"
+    def __init__(self, capabilities):
+        self.capabilities = capabilities
 
     def visit_Name(self, node):
-        if not isinstance(node.ctx, ast.Load) or node.id not in self._HELPER_BINDINGS:
+        if not isinstance(node.ctx, ast.Load) or node.id not in self.capabilities:
             return node
-        return ast.copy_location(
-            ast.Name(id=self._HELPER_BINDINGS[node.id], ctx=ast.Load()), node
-        )
+        return ast.copy_location(ast.Constant(value=self.capabilities[node.id][0]), node)
 
-    def _bind_helpers(self, node):
-        node = self.generic_visit(node)
-        binding_names = set(self._HELPER_BINDINGS.values())
-        if not any(
-            isinstance(descendant, ast.Name) and descendant.id in binding_names
-            for descendant in ast.walk(node)
-        ):
-            return node
-        for helper_name, binding_name in self._HELPER_BINDINGS.items():
-            node.args.kwonlyargs.append(ast.arg(arg=binding_name))
-            node.args.kw_defaults.append(
-                ast.Subscript(
-                    value=ast.Name(id=self._HELPER_NAMESPACE, ctx=ast.Load()),
-                    slice=ast.Constant(value=helper_name),
-                    ctx=ast.Load(),
-                )
-            )
-        return node
 
-    visit_FunctionDef = _bind_helpers
-    visit_AsyncFunctionDef = _bind_helpers
+def _bind_expression_capabilities(code, capabilities):
+    constants = []
+    changed = False
+    for value in code.co_consts:
+        if isinstance(value, types.CodeType):
+            bound_value = _bind_expression_capabilities(value, capabilities)
+        else:
+            bound_value = capabilities.get(value, value)
+        changed = changed or bound_value is not value
+        constants.append(bound_value)
+    return code.replace(co_consts=tuple(constants)) if changed else code
 
 
 def _literal_eval_argument(line, parameter_kind):
@@ -277,18 +266,30 @@ def run_request(
     if len(arguments) != parameter_count:
         return _empty_result("input_error", "unsupported_testcase_format")
 
+    recorder = ExpressionRecorder(limits, lambda: None, session_id=session_id)
     instrumentation = instrument_expression_roots(source_code)
     expression_plan = instrumentation.plan_dict
     try:
         instrumented_tree = instrumentation.instrumented_tree
         if instrumentation.available:
-            instrumented_tree = _ExpressionHelperLookupTransformer().visit(instrumented_tree)
+            capabilities = {
+                "__lc_expr_record": (f"<lc-expr-{secrets.token_hex(16)}>", recorder.record_value),
+                "__lc_minmax_call": (f"<lc-minmax-{secrets.token_hex(16)}>", recorder.record_minmax_call),
+            }
+            instrumented_tree = _ExpressionHelperLookupTransformer(capabilities).visit(instrumented_tree)
             ast.fix_missing_locations(instrumented_tree)
-        user_code = compile(
-            instrumented_tree if instrumentation.available else source_code,
-            USER_CODE_FILENAME,
-            "exec",
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            user_code = compile(
+                instrumented_tree if instrumentation.available else source_code,
+                USER_CODE_FILENAME,
+                "exec",
+            )
+        if instrumentation.available:
+            user_code = _bind_expression_capabilities(
+                user_code,
+                {marker: helper for marker, helper in capabilities.values()},
+            )
     except SyntaxError as error:
         return _empty_result(
             "parse_error",
@@ -299,14 +300,9 @@ def run_request(
     subscript_relations = relations_as_dicts(analyze_subscript_relations(source_code))
 
     namespace = runtime_globals if runtime_globals is not None else {}
-    recorder = ExpressionRecorder(limits, lambda: None, session_id=session_id)
     if not instrumentation.available:
         recorder.status = "unavailable"
         recorder.reason = instrumentation.reason
-    namespace["<lc_expression_helpers>"] = {
-        "__lc_expr_record": recorder.record_value,
-        "__lc_minmax_call": recorder.record_minmax_call,
-    }
     baseline_global_names = set(namespace)
     stdout_buffer = io.StringIO()
     collector = TraceCollector(

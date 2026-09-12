@@ -52,6 +52,7 @@ MVP 的目標是呈現：
 - 帶有 index／pointer bindings 的 list state；
 - 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
 - 標準 LeetCode `TreeNode` 的專用二元樹視覺化，包含 active pointer、`left` / `right` 邊變更、斷開 component，以及 cycle / shared-child 的 deterministic fallback 呈現；
+- 標準 LeetCode `Node(val, neighbors)` 的專用 graph 視覺化，包含直接 adjacency-list testcase 執行、directed 與 reciprocal runtime reference、多個 component、isolated node、edge add/remove 狀態，以及 node／connection inspection；
 - 標準 LeetCode level-order binary-tree testcase literal（包含 `null` child marker）會在 trace 前轉換成 `TreeNode` 物件；
 - 基於事實的 behavioral signals：重複可觀察狀態、同一 execution anchor 沒有可觀察進展，以及重複 execution / mutation motif，並可直接在 first／previous／next／last evidence 之間導航；
 - behavioral trace timeline，支援 raw trace scrub 與 compact evidence-span bands，同時保留原本的 Previous／Next／Play raw navigation；
@@ -63,6 +64,24 @@ MVP 的目標是呈現：
 
 Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功能一起 bundle，並在本機 Web Worker 中運作；MVP 不需要 backend。
 
+## Graph 支援 v0.1
+
+已支援：
+
+- 標準 LeetCode `Node(val, neighbors)`；
+- 直接以 adjacency-list testcase 執行；
+- directed 與 reciprocal runtime reference；
+- 多個 component 與 isolated node；
+- edge add/remove 視覺化；
+- node 與 connection inspection。
+
+尚未支援：
+
+- generic dict/list adjacency inference；
+- weighted graph；
+- custom graph class；
+- BFS/DFS/shortest-path semantic interpretation。
+
 ## 重要邊界
 
 - `completed` 只代表本機執行正常返回，**不代表** LeetCode Accepted。
@@ -72,7 +91,7 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - Trace folding 只是 captured raw steps 上的 deterministic presentation projection，不會刪除 raw events，也不會診斷 execution failure 的原因。
 - Pyodide 無法完整重現 LeetCode judge environment。
 - Testcase synchronization 會讀取 LeetCode 畫面上可見的 testcase controls；如果 testcase editor 尚未 mount，Side Panel 仍會同步 code，並等待 testcase 出現。
-- 專用 TreeNode 視覺化目前只支援標準 LeetCode binary-tree 結構；generic node-edge graph、自訂／N-ary tree inference 與 DP table 仍不在目前範圍內。
+- 專用 TreeNode 視覺化目前只支援標準 LeetCode binary-tree 結構；generic dict/list adjacency inference、weighted graph、custom graph class、BFS/DFS/shortest-path semantic interpretation、自訂／N-ary tree inference 與 DP table 仍不在目前範圍內。
 - Web Worker 與 Pyodide 的隔離不應被視為可執行惡意程式碼的 hardened sandbox。
 
 ## 開發

@@ -373,6 +373,110 @@ function treeFailureFirstSession(): TraceSession {
   };
 }
 
+const graphReference = (objectId: string) => ({
+  type: "reference" as const,
+  objectId,
+  className: "Node"
+});
+
+const graphObject = (
+  objectId: string,
+  value: number,
+  neighbors: string[]
+) => ({
+  objectId,
+  className: "Node",
+  attributes: {
+    val: int(value),
+    neighbors: {
+      type: "list" as const,
+      length: neighbors.length,
+      items: neighbors.map(graphReference),
+      truncated: false
+    }
+  }
+});
+
+function graphObjects(reciprocal: boolean) {
+  return [
+    graphObject("obj-1", 1, ["obj-2"]),
+    graphObject("obj-2", 2, reciprocal ? ["obj-1"] : [])
+  ];
+}
+
+function graphSession(): TraceSession {
+  const base = session();
+  const firstEvent = {
+    ...base.events[0]!,
+    step: 1,
+    function: "cloneGraph",
+    line: 4,
+    locals: { root: graphReference("obj-1") },
+    objects: graphObjects(false),
+    objectsTruncated: false
+  };
+  const secondEvent = {
+    ...firstEvent,
+    step: 2,
+    line: 5,
+    objects: graphObjects(true)
+  };
+  return {
+    ...base,
+    sourceCode: "class Solution:\n    def cloneGraph(self, node):\n        node.neighbors = [node]\n        return node\n",
+    rawTestcase: "[[1, 2], [2, 1]]\n",
+    entrypoint: {
+      className: "Solution",
+      methodName: "cloneGraph",
+      parameterCount: 1,
+      parameterKinds: ["graph_node"]
+    },
+    subscriptRelations: [],
+    events: [firstEvent, secondEvent]
+  };
+}
+
+function graphPatternSession(
+  status: TraceSession["status"] = "completed"
+): TraceSession {
+  const base = session();
+  const primingEvent = {
+    ...base.events[0]!,
+    step: 1,
+    function: "cloneGraph",
+    line: 6,
+    locals: { root: graphReference("obj-1"), left: int(9) },
+    objects: graphObjects(false),
+    objectsTruncated: false
+  };
+  const motifEvents = [0, 1, 0, 1, 0, 1].map((value, index) => ({
+    ...primingEvent,
+    step: index + 2,
+    line: index % 2 === 0 ? 5 : 6,
+    locals: { root: graphReference("obj-1"), left: int(value) },
+    objects: graphObjects(index % 2 === 0)
+  }));
+  return {
+    ...base,
+    sourceCode: "class Solution:\n    def cloneGraph(self, node):\n        node.neighbors = [node]\n        return node\n",
+    rawTestcase: "[[1, 2], [2, 1]]\n",
+    entrypoint: {
+      className: "Solution",
+      methodName: "cloneGraph",
+      parameterCount: 1,
+      parameterKinds: ["graph_node"]
+    },
+    status,
+    terminationReason: status === "timeout" ? "hard_timeout" : "normal_return",
+    subscriptRelations: [],
+    events: [primingEvent, ...motifEvents]
+  };
+}
+
+function graphConnection(view: HTMLElement): SVGGElement {
+  return view.querySelector<SVGGElement>(".graph-visualizer__connection")!;
+}
+
 describe("createTraceVisualizer", () => {
   it.each(["timeout", "trace_limit", "exception"] as const)(
     "%s renders exactly one Failure-First entry",
@@ -1068,5 +1172,87 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector('[data-node-id="obj-1"]')).not.toBeNull();
     expect(view.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
     expect(view.element.querySelector('[data-edge-from="obj-1"][data-edge-to="obj-2"]')).not.toBeNull();
+  });
+
+  it("keeps one Graph visualizer handle while direct raw-step navigation updates connections", () => {
+    const view = createTraceVisualizer(graphSession());
+    const graph = view.element.querySelector<HTMLElement>(".graph-visualizer");
+
+    expect(graphConnection(view.element).dataset.reciprocal).toBe("false");
+    expect(graphConnection(view.element).dataset.edgeForward).toBe("obj-1→obj-2");
+
+    view.setStep(1);
+
+    expect(view.element.querySelector<HTMLElement>(".graph-visualizer")).toBe(graph);
+    expect(graphConnection(view.element).dataset.reciprocal).toBe("true");
+    expect(graphConnection(view.element).dataset.edgeReverse).toBe("obj-2→obj-1");
+    view.dispose();
+  });
+
+  it("keeps Graph state synchronized with the existing autoplay cursor", () => {
+    vi.useFakeTimers();
+    try {
+      const view = createTraceVisualizer(graphSession());
+      view.element.querySelector<HTMLButtonElement>("#trace-play")!.click();
+      vi.advanceTimersByTime(700);
+
+      expect(view.element.dataset.stepIndex).toBe("1");
+      expect(graphConnection(view.element).dataset.reciprocal).toBe("true");
+      expect(view.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
+      view.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconstructs Graph state when Behavioral Timeline navigates to a raw step", () => {
+    const view = createTraceVisualizer(graphPatternSession());
+    const band = view.element.querySelector<HTMLButtonElement>(
+      '.trace-viewer__timeline-band[data-pattern-kind="repeated_transition"]'
+    );
+
+    expect(band).not.toBeNull();
+    band!.click();
+
+    expect(view.element.dataset.stepIndex).toBe("1");
+    expect(graphConnection(view.element).dataset.reciprocal).toBe("true");
+    expect(graphConnection(view.element).dataset.edgeForward).toBe("obj-1→obj-2");
+    view.dispose();
+  });
+
+  it("reconstructs Graph state when Failure-First Inspect lands on terminal evidence", () => {
+    const view = createTraceVisualizer(graphPatternSession("timeout"));
+    const inspect = view.element.querySelector<HTMLButtonElement>(
+      ".trace-viewer__failure-first-inspect"
+    );
+
+    expect(inspect).not.toBeNull();
+    inspect!.click();
+
+    expect(view.element.dataset.stepIndex).toBe("5");
+    expect(graphConnection(view.element).dataset.reciprocal).toBe("true");
+    expect(graphConnection(view.element).dataset.edgeForward).toBe("obj-1→obj-2");
+    view.dispose();
+  });
+
+  it("reconstructs Graph state when a folded Outline iteration is inspected", () => {
+    const view = createTraceVisualizer(graphPatternSession());
+    const toggle = view.element.querySelector<HTMLButtonElement>(
+      ".trace-viewer__outline-toggle"
+    );
+
+    expect(toggle).not.toBeNull();
+    toggle!.click();
+    const lastIteration = view.element.querySelector<HTMLButtonElement>(
+      '[data-iteration="3"] .trace-viewer__outline-inspect'
+    );
+
+    expect(lastIteration).not.toBeNull();
+    lastIteration!.click();
+
+    expect(view.element.dataset.stepIndex).toBe("5");
+    expect(graphConnection(view.element).dataset.reciprocal).toBe("true");
+    expect(graphConnection(view.element).dataset.edgeForward).toBe("obj-1→obj-2");
+    view.dispose();
   });
 });

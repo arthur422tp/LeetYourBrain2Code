@@ -83,7 +83,7 @@ class ExpressionInstrumenterTests(unittest.TestCase):
         )
         namespace = {
             "__lc_expr_record": lambda root_id, expr_id, value: value,
-            "__lc_minmax_call": lambda root_id, expr_id, function, candidate_ids, values: function(*values),
+            "__lc_minmax_call": lambda root_id, expr_id, function, candidate_ids, values, _function_name: function(*values),
         }
 
         self.assertTrue(result.available)
@@ -175,7 +175,7 @@ class ExpressionInstrumenterTests(unittest.TestCase):
         helper_calls = []
         namespace = {
             "__lc_expr_record": lambda root_id, expr_id, value: records.append(expr_id) or value,
-            "__lc_minmax_call": lambda root_id, expr_id, function, candidate_ids, values: (
+            "__lc_minmax_call": lambda root_id, expr_id, function, candidate_ids, values, _function_name: (
                 helper_calls.append((root_id, expr_id, candidate_ids, list(values))) or function(*values)
             ),
         }

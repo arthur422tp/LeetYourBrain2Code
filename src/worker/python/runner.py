@@ -284,14 +284,20 @@ def run_request(
         session_id=session_id,
         emit_batch=emit_expression_batch,
     )
-    instrumentation = instrument_expression_roots(source_code)
+    expression_record_name = f"_lc_internal_expr_record_{secrets.token_hex(16)}"
+    minmax_call_name = f"_lc_internal_minmax_call_{secrets.token_hex(16)}"
+    instrumentation = instrument_expression_roots(
+        source_code,
+        expression_record_name=expression_record_name,
+        minmax_call_name=minmax_call_name,
+    )
     expression_plan = instrumentation.plan_dict
     try:
         instrumented_tree = instrumentation.instrumented_tree
         if instrumentation.available:
             capabilities = {
-                "__lc_expr_record": (f"<lc-expr-{secrets.token_hex(16)}>", recorder.record_value),
-                "__lc_minmax_call": (f"<lc-minmax-{secrets.token_hex(16)}>", recorder.record_minmax_call),
+                expression_record_name: (f"<lc-expr-{secrets.token_hex(16)}>", recorder.record_value),
+                minmax_call_name: (f"<lc-minmax-{secrets.token_hex(16)}>", recorder.record_minmax_call),
             }
             instrumented_tree = _ExpressionHelperLookupTransformer(capabilities).visit(instrumented_tree)
             ast.fix_missing_locations(instrumented_tree)
@@ -336,8 +342,6 @@ def run_request(
         root["rootId"]: root["expressionExprId"]
         for root in expression_plan["roots"]
     }
-    namespace["__lc_expr_record"] = recorder.record_value
-    namespace["__lc_minmax_call"] = recorder.record_minmax_call
     return_value = None
 
     if instrumentation.available:

@@ -819,6 +819,79 @@ class Solution:
     )
 
 
+def test_expression_recording_does_not_treat_replaced_builtin_min_as_builtin():
+    result = request(
+        """import builtins
+
+class Solution:
+    def solve(self):
+        original_min = builtins.min
+        builtins.min = lambda first, second: second
+        try:
+            return min(1, 2)
+        finally:
+            builtins.min = original_min
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "2"}
+    selections = [
+        selection
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        for selection in root.get("selection_evidence", [])
+    ]
+    assert selections
+    assert all(selection["function"] == "min" for selection in selections)
+    assert all(selection["status"] != "resolved" for selection in selections)
+
+
+def test_expression_recording_preserves_shadowed_max_function_label():
+    result = request(
+        """class Solution:
+    def solve(self):
+        max = lambda first, second: first
+        value = max(7, 2)
+        return value
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    selections = [
+        selection
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        for selection in root.get("selection_evidence", [])
+    ]
+    assert selections
+    assert all(selection["function"] == "max" for selection in selections)
+    assert all(selection["status"] != "resolved" for selection in selections)
+
+
+def test_expression_recording_does_not_rewrite_user_helper_identifiers():
+    result = request(
+        """class Solution:
+    def solve(self):
+        __lc_expr_record = lambda value: value + 1
+        __lc_minmax_call = lambda first, second: first - second
+        return __lc_expr_record(__lc_minmax_call(4, 1))
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "4"}
+
+
 def test_minimum_path_sum_captures_min_selection_binary_result_and_target():
     result = request(
         """class Solution:
@@ -963,6 +1036,15 @@ class ExpressionTracingRunnerTests(unittest.TestCase):
 
     def test_custom_repr_is_not_invoked(self):
         test_expression_recording_does_not_invoke_custom_repr_for_intermediate_values()
+
+    def test_replaced_builtin_min_is_not_selected(self):
+        test_expression_recording_does_not_treat_replaced_builtin_min_as_builtin()
+
+    def test_shadowed_max_label_is_preserved(self):
+        test_expression_recording_preserves_shadowed_max_function_label()
+
+    def test_user_helper_identifiers_are_preserved(self):
+        test_expression_recording_does_not_rewrite_user_helper_identifiers()
 
     def test_minimum_path_sum_channels(self):
         test_minimum_path_sum_captures_min_selection_binary_result_and_target()

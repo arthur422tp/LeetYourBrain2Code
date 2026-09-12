@@ -250,9 +250,17 @@ class _Planner(ast.NodeVisitor):
 
 
 class _Instrumenter(ast.NodeTransformer):
-    def __init__(self, expression_metadata, minmax_call_nodes):
+    def __init__(
+        self,
+        expression_metadata,
+        minmax_call_nodes,
+        expression_record_name="__lc_expr_record",
+        minmax_call_name="__lc_minmax_call",
+    ):
         self.expression_metadata = expression_metadata
         self.minmax_call_nodes = minmax_call_nodes
+        self.expression_record_name = expression_record_name
+        self.minmax_call_name = minmax_call_name
 
     def _wrap(self, original_node, rewritten_node):
         metadata = self.expression_metadata.get(original_node)
@@ -260,7 +268,7 @@ class _Instrumenter(ast.NodeTransformer):
             return rewritten_node
         root_id, expression_id = metadata
         wrapped = ast.Call(
-            func=ast.Name(id="__lc_expr_record", ctx=ast.Load()),
+            func=ast.Name(id=self.expression_record_name, ctx=ast.Load()),
             args=[ast.Constant(root_id), ast.Constant(expression_id), rewritten_node],
             keywords=[],
         )
@@ -278,6 +286,7 @@ class _Instrumenter(ast.NodeTransformer):
 
     def visit_Call(self, node):
         direct_minmax = node in self.minmax_call_nodes
+        function_name = node.func.id if direct_minmax else None
         candidate_ids = (
             [self.expression_metadata[argument][1] for argument in node.args]
             if direct_minmax
@@ -288,7 +297,7 @@ class _Instrumenter(ast.NodeTransformer):
             root_id, expression_id = self.expression_metadata[node]
             rewritten = ast.copy_location(
                 ast.Call(
-                    func=ast.Name(id="__lc_minmax_call", ctx=ast.Load()),
+                    func=ast.Name(id=self.minmax_call_name, ctx=ast.Load()),
                     args=[
                         ast.Constant(root_id),
                         ast.Constant(expression_id),
@@ -298,6 +307,7 @@ class _Instrumenter(ast.NodeTransformer):
                             ctx=ast.Load(),
                         ),
                         ast.List(elts=rewritten.args, ctx=ast.Load()),
+                        ast.Constant(function_name),
                     ],
                     keywords=[],
                 ),
@@ -306,7 +316,11 @@ class _Instrumenter(ast.NodeTransformer):
         return self._wrap(node, rewritten)
 
 
-def instrument_expression_roots(source_code):
+def instrument_expression_roots(
+    source_code,
+    expression_record_name="__lc_expr_record",
+    minmax_call_name="__lc_minmax_call",
+):
     try:
         original_tree = ast.parse(source_code)
     except (SyntaxError, TypeError, ValueError) as error:
@@ -316,7 +330,10 @@ def instrument_expression_roots(source_code):
         planner = _Planner(source_code)
         planner.visit(original_tree)
         instrumented_tree = _Instrumenter(
-            planner.expression_metadata, planner.minmax_call_nodes
+            planner.expression_metadata,
+            planner.minmax_call_nodes,
+            expression_record_name,
+            minmax_call_name,
         ).visit(original_tree)
         ast.fix_missing_locations(instrumented_tree)
         return InstrumentationResult(instrumented_tree, planner.plan, True)

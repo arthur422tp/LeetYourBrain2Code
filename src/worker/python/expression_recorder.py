@@ -5,6 +5,10 @@ import math
 from tracer import _limit
 
 
+_ORIGINAL_MIN = builtins.min
+_ORIGINAL_MAX = builtins.max
+
+
 class ExpressionRecorder:
     def __init__(self, limits, serializer_factory, session_id="session", emit_batch=None):
         self.limits = limits
@@ -136,7 +140,15 @@ class ExpressionRecorder:
         except Exception:
             return None
 
-    def record_minmax_call(self, root_id, call_expr_id, function_obj, candidate_expr_ids, candidate_values):
+    def record_minmax_call(
+        self,
+        root_id,
+        call_expr_id,
+        function_obj,
+        candidate_expr_ids,
+        candidate_values,
+        function_name=None,
+    ):
         result = function_obj(*candidate_values)
         if self.status != "complete":
             return result
@@ -157,6 +169,7 @@ class ExpressionRecorder:
             result_snapshot,
             candidate_snapshots,
             root,
+            function_name,
         )
         return result
 
@@ -169,10 +182,17 @@ class ExpressionRecorder:
         result_snapshot,
         candidate_snapshots,
         root,
+        function_name=None,
     ):
         status = "unsupported_call_shape"
         selected_index = None
-        function = "min" if function_obj is builtins.min else "max" if function_obj is builtins.max else None
+        function = None
+        if function_name == "min" and function_obj is _ORIGINAL_MIN:
+            function = "min"
+        elif function_name == "max" and function_obj is _ORIGINAL_MAX:
+            function = "max"
+        elif function_name not in {"min", "max"}:
+            function = "min" if function_obj is _ORIGINAL_MIN else "max" if function_obj is _ORIGINAL_MAX else None
         if function is not None and len(candidate_expr_ids) >= 2 and len(candidate_expr_ids) == len(candidate_snapshots):
             if all(self._is_safe_snapshot(snapshot) for snapshot in candidate_snapshots) and self._is_safe_snapshot(result_snapshot):
                 status = "resolved"
@@ -186,7 +206,7 @@ class ExpressionRecorder:
                 status = "unsupported_value"
         root.setdefault("selection_evidence", []).append({
             "call_expr_id": call_expr_id,
-            "function": function or "min",
+            "function": function_name if function_name in {"min", "max"} else function or "min",
             "candidate_expr_ids": candidate_expr_ids,
             "result": result_snapshot,
             "selected_candidate_index": selected_index,

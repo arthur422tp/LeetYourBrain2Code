@@ -15,6 +15,16 @@ const twoArgSource = `class Solution:
         return left + right
 `;
 
+const treeSourceWithPublicHelper = `from typing import Optional
+
+class Solution:
+    def mirror(self, left, right):
+        return True
+
+    def isSymmetric(self, root: Optional[TreeNode]) -> bool:
+        return True
+`;
+
 describe("testcase selection", () => {
   it("groups testcase text using the resolved parameter count", () => {
     expect(getTestcaseCases(oneArgSource, "7\n8\n9")).toEqual(["7", "8", "9"]);
@@ -24,6 +34,12 @@ describe("testcase selection", () => {
   it("returns the selected case or null for an unavailable index", () => {
     expect(getSelectedTestcase(oneArgSource, "7\n8\n9", 1)).toBe("8");
     expect(getSelectedTestcase(oneArgSource, "7\n8\n9", 3)).toBeNull();
+  });
+
+  it("selects the testcase-compatible public entrypoint when a helper is also public", () => {
+    expect(getTestcaseCases(treeSourceWithPublicHelper, "[1,2,2,3]")).toEqual([
+      "[1,2,2,3]"
+    ]);
   });
 
   it("returns no cases while the Solution entrypoint is incomplete", () => {

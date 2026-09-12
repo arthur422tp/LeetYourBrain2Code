@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "worker" / "python"))
 
 from runner import run_request
+from runtime_prelude import TreeNode
 
 
 LIMITS = {
@@ -308,6 +309,95 @@ class Solution:
         for object_snapshot in event["objects"]
         if "next" in object_snapshot["attributes"]
     )
+
+
+def test_binary_tree_parameter_builds_level_order_tree_and_captures_topology():
+    result = run_request(
+        """from typing import Optional
+
+class Solution:
+    def isSymmetric(self, root: Optional[TreeNode]) -> bool:
+        return (
+            root is not None
+            and root.left is not None
+            and root.right is not None
+            and root.left.val == root.right.val
+            and root.left.left.val == root.right.right.val
+        )
+""",
+        "[1,2,2,3,4,4,3]",
+        {
+            "class_name": "Solution",
+            "method_name": "isSymmetric",
+            "parameter_count": 1,
+            "parameter_kinds": ["binary_tree"],
+        },
+        LIMITS,
+        runtime_globals={"TreeNode": TreeNode},
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "bool", "value": True}
+    tree_objects = [
+        object_snapshot
+        for event in result["events"]
+        for object_snapshot in event.get("objects", [])
+        if object_snapshot["className"] == "TreeNode"
+    ]
+    assert tree_objects
+    root = next(
+        object_snapshot
+        for object_snapshot in tree_objects
+        if object_snapshot["attributes"]["val"] == {"type": "int", "value": "1"}
+    )
+    assert root["attributes"]["left"]["type"] == "reference"
+    assert root["attributes"]["right"]["type"] == "reference"
+
+
+def test_binary_tree_builder_uses_queue_order_after_a_missing_child():
+    result = run_request(
+        """from typing import Optional
+
+class Solution:
+    def child_value(self, root: Optional[TreeNode]) -> int:
+        return root.right.left.val
+""",
+        "[1,None,2,3]",
+        {
+            "class_name": "Solution",
+            "method_name": "child_value",
+            "parameter_count": 1,
+            "parameter_kinds": ["binary_tree"],
+        },
+        LIMITS,
+        runtime_globals={"TreeNode": TreeNode},
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "3"}
+
+
+def test_binary_tree_builder_accepts_leetcode_null_markers():
+    result = run_request(
+        """from typing import Optional
+
+class Solution:
+    def child_sum(self, root: Optional[TreeNode]) -> int:
+        return root.left.right.val + root.right.right.val
+""",
+        "[1,2,2,null,3,null,3]",
+        {
+            "class_name": "Solution",
+            "method_name": "child_sum",
+            "parameter_count": 1,
+            "parameter_kinds": ["binary_tree"],
+        },
+        LIMITS,
+        runtime_globals={"TreeNode": TreeNode},
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "6"}
 
 
 def test_value_parameter_keeps_a_literal_list_as_a_builtin_list():

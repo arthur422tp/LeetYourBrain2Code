@@ -1,11 +1,11 @@
-import { resolveEntrypoint } from "./entrypoint-resolver";
+import { resolveEntrypointForTestcase } from "./entrypoint-resolver";
 import { splitTestcaseIntoCases } from "./testcase-parser";
 
 export function getTestcaseCases(
   sourceCode: string,
   rawTestcase: string
 ): string[] {
-  const resolution = resolveEntrypoint(sourceCode);
+  const resolution = resolveEntrypointForTestcase(sourceCode, rawTestcase);
   if (!resolution.ok) {
     return [];
   }

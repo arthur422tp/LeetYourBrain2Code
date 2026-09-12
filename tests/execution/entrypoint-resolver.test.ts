@@ -90,6 +90,17 @@ describe("resolveEntrypoint", () => {
     });
   });
 
+  it("does not select another public method around an incomplete draft", () => {
+    expect(resolveEntrypoint(`class Solution:
+    def helper(self, value):
+    def one(self, value):
+        return value
+`)).toEqual({
+      ok: false,
+      reason: "entrypoint_resolution_failed"
+    });
+  });
+
   it("classifies ListNode annotations without using the problem title", () => {
     const result = resolveEntrypoint(`class Solution:
     def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:

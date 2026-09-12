@@ -128,6 +128,35 @@ describe("LeetCode adapter", () => {
     });
   });
 
+  it("reads structured testcase controls without treating the code editor as testcase", () => {
+    document.body.innerHTML = `
+      <button>Python3</button>
+      <a href="/problems/symmetric-tree/">101. Symmetric Tree</a>
+      <textarea aria-label="Code editor">class Solution:\n    pass</textarea>
+      <input aria-label="Search questions" value="search text">
+      <section data-testid="testcase-panel" aria-label="Testcase">
+        <label for="root-input">root</label>
+        <input id="root-input" value="[1,2,2,3,4,4,3]">
+      </section>
+    `;
+
+    expect(extractPageState(document, window).testcase).toBe("[1,2,2,3,4,4,3]");
+    expect(extractIsolatedPageState(document).testcase).toBe("[1,2,2,3,4,4,3]");
+  });
+
+  it("finds structured testcase controls next to a plain Testcase tab label", () => {
+    document.body.innerHTML = `
+      <button>Python3</button>
+      <textarea aria-label="Code editor">class Solution:\n    pass</textarea>
+      <div class="console-panel">
+        <div class="console-tabs"><div>Testcase</div><div>Test Result</div></div>
+        <div class="testcase-content"><input value="[1,null,2,3]"></div>
+      </div>
+    `;
+
+    expect(extractPageState(document, window).testcase).toBe("[1,null,2,3]");
+  });
+
   it("publishes code changes while testcase is still unavailable", async () => {
     installTwoSumEditorWithoutTestcase();
     const updates: LeetCodePageState[] = [];

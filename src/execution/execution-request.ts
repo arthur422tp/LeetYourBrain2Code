@@ -3,7 +3,7 @@ import {
   type ExecutionLimits,
   type ExecutionRequest
 } from "../shared/execution-types";
-import { resolveEntrypoint } from "./entrypoint-resolver";
+import { resolveEntrypointForTestcase } from "./entrypoint-resolver";
 import { validateTestcaseLineCount } from "./testcase-parser";
 
 export interface ExecutionRequestInput {
@@ -24,7 +24,7 @@ export function createExecutionRequest(
     return { ok: false, reason: "input_error" };
   }
 
-  const resolution = resolveEntrypoint(input.sourceCode);
+  const resolution = resolveEntrypointForTestcase(input.sourceCode, input.rawTestcase);
   if (!resolution.ok) {
     return resolution;
   }

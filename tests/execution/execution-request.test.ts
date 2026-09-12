@@ -78,4 +78,27 @@ describe("createExecutionRequest", () => {
 
     expect(result.ok && result.request.entrypoint.parameterKinds).toEqual(["linked_list"]);
   });
+
+  it("preserves binary-tree parameter kinds on the execution request", () => {
+    const result = createExecutionRequest({
+      sessionId: "session-6",
+      sourceCode: `from typing import Optional
+
+class Solution:
+    def mirror(self, left, right):
+        return True
+
+    def isSymmetric(self, root: Optional[TreeNode]) -> bool:
+        return True
+`,
+      rawTestcase: "[1,2,2,3,4,4,3]"
+    });
+
+    expect(result.ok && result.request.entrypoint).toEqual({
+      className: "Solution",
+      methodName: "isSymmetric",
+      parameterCount: 1,
+      parameterKinds: ["binary_tree"]
+    });
+  });
 });

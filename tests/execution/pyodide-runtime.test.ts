@@ -43,6 +43,7 @@ describe("Pyodide runtime", () => {
     expect(script).toContain(`compile(`);
     expect(script).toContain(USER_CODE_FILENAME);
     expect(script).toContain("leetcode-runtime-prelude");
+    expect(script).toContain("class TreeNode");
     expect(script).toContain("class ListNode");
     expect(script).toContain("leetcode-serializer");
     expect(script).toContain("leetcode-tracer");

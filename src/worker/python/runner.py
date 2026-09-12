@@ -18,6 +18,30 @@ class _FallbackListNode:
         self.next = next
 
 
+class _FallbackTreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+class _LeetCodeNullTransformer(ast.NodeTransformer):
+    def visit_Name(self, node):
+        if node.id == "null":
+            return ast.copy_location(ast.Constant(value=None), node)
+        return node
+
+
+def _literal_eval_argument(line, parameter_kind):
+    if parameter_kind != "binary_tree":
+        return ast.literal_eval(line)
+
+    expression = ast.parse(line, mode="eval")
+    expression = _LeetCodeNullTransformer().visit(expression)
+    ast.fix_missing_locations(expression)
+    return ast.literal_eval(expression)
+
+
 def _build_linked_list(values, node_class):
     head = None
     tail = None
@@ -29,6 +53,67 @@ def _build_linked_list(values, node_class):
             tail.next = node
         tail = node
     return head
+
+
+def _build_binary_tree(values, node_class):
+    if values is None:
+        return None
+    if not isinstance(values, list):
+        raise UnsupportedTestcaseFormat(
+            "binary-tree parameters require a literal list or None"
+        )
+    if len(values) == 0:
+        return None
+    if values[0] is None:
+        if any(value is not None for value in values[1:]):
+            raise UnsupportedTestcaseFormat(
+                "binary-tree input cannot contain nodes after an empty root"
+            )
+        return None
+
+    try:
+        root = node_class(values[0])
+    except Exception as error:
+        raise UnsupportedTestcaseFormat(
+            "binary-tree values could not construct a TreeNode"
+        ) from error
+
+    nodes = [root]
+    value_index = 1
+    parent_index = 0
+    while parent_index < len(nodes) and value_index < len(values):
+        parent = nodes[parent_index]
+
+        left_value = values[value_index]
+        value_index += 1
+        if left_value is not None:
+            try:
+                parent.left = node_class(left_value)
+            except Exception as error:
+                raise UnsupportedTestcaseFormat(
+                    "binary-tree values could not construct a TreeNode"
+                ) from error
+            nodes.append(parent.left)
+
+        if value_index < len(values):
+            right_value = values[value_index]
+            value_index += 1
+            if right_value is not None:
+                try:
+                    parent.right = node_class(right_value)
+                except Exception as error:
+                    raise UnsupportedTestcaseFormat(
+                        "binary-tree values could not construct a TreeNode"
+                    ) from error
+                nodes.append(parent.right)
+
+        parent_index += 1
+
+    if any(value is not None for value in values[value_index:]):
+        raise UnsupportedTestcaseFormat(
+            "binary-tree input contains unreachable level-order values"
+        )
+    return root
 
 
 def _exception_info(error):
@@ -87,9 +172,18 @@ def run_request(
     started_at = time.monotonic()
     lines = _argument_lines(raw_testcase)
     parameter_count = int(entrypoint.get("parameter_count", entrypoint.get("parameterCount", -1)))
+    parameter_kinds = entrypoint.get("parameter_kinds", entrypoint.get("parameterKinds", []))
+    if not isinstance(parameter_kinds, list):
+        parameter_kinds = []
 
     try:
-        arguments = [ast.literal_eval(line) for line in lines]
+        arguments = [
+            _literal_eval_argument(
+                line,
+                parameter_kinds[index] if index < len(parameter_kinds) else "value",
+            )
+            for index, line in enumerate(lines)
+        ]
     except (SyntaxError, ValueError, TypeError, MemoryError) as error:
         return _empty_result(
             "input_error",
@@ -99,10 +193,6 @@ def run_request(
 
     if len(arguments) != parameter_count:
         return _empty_result("input_error", "unsupported_testcase_format")
-
-    parameter_kinds = entrypoint.get("parameter_kinds", entrypoint.get("parameterKinds", []))
-    if not isinstance(parameter_kinds, list):
-        parameter_kinds = []
 
     try:
         user_code = compile(source_code, USER_CODE_FILENAME, "exec")
@@ -132,9 +222,13 @@ def run_request(
         with contextlib.redirect_stdout(stdout_buffer):
             exec(user_code, namespace, namespace)
             node_class = namespace.get("ListNode", _FallbackListNode)
+            tree_node_class = namespace.get("TreeNode", _FallbackTreeNode)
             converted_arguments = []
             for index, argument in enumerate(arguments):
                 parameter_kind = parameter_kinds[index] if index < len(parameter_kinds) else "value"
+                if parameter_kind == "binary_tree":
+                    converted_arguments.append(_build_binary_tree(argument, tree_node_class))
+                    continue
                 if parameter_kind != "linked_list":
                     converted_arguments.append(argument)
                     continue

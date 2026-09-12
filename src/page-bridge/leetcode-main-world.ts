@@ -4,6 +4,7 @@ import {
   LEETCODE_MESSAGE_TYPES,
   extractMetadata,
   normalizeLanguage,
+  readTestcaseFromDom,
   validatePageState
 } from "../content/leetcode-adapter";
 import type { LeetCodePageState } from "../content/leetcode-adapter";
@@ -36,22 +37,6 @@ function readLanguageFromDom(doc: Document): string | null {
     if (language) {
       return language;
     }
-  }
-  return null;
-}
-
-function readTestcase(doc: Document): string | null {
-  const fields = Array.from(
-    doc.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseFields)
-  );
-  if (fields.length > 0) {
-    return fields.map((field) => field.textContent ?? "").join("\n");
-  }
-
-  const codeMirror = doc.querySelector<HTMLElement>(LEETCODE_ACCESSORS.testcaseCodeMirror);
-  if (codeMirror) {
-    const value = codeMirror.innerText ?? codeMirror.textContent ?? "";
-    return value;
   }
   return null;
 }
@@ -90,7 +75,7 @@ export function extractPageState(
   return {
     code: monacoCode?.code ?? readCodeFromDom(doc),
     language: monacoCode?.language ?? selectedLanguage,
-    testcase: readTestcase(doc),
+    testcase: readTestcaseFromDom(doc),
     metadata: extractMetadata(doc)
   };
 }

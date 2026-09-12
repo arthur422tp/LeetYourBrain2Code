@@ -34,6 +34,8 @@ export const LEETCODE_ACCESSORS = {
   codeEditor: 'textarea[aria-label="Code editor"]',
   testcaseFields: 'div[contenteditable="true"].cursor-text',
   testcaseCodeMirror: '.cm-content[contenteditable="true"]',
+  testcaseRegionCandidates: '[data-testid], [data-test-id], [aria-label], [aria-labelledby], [role="tabpanel"], [role="region"]',
+  testcaseControls: 'input, textarea, select, [role="textbox"], [contenteditable="true"]',
   languageButtons: "button",
   problemLinks: 'a[href^="/problems/"]'
 } as const;
@@ -94,22 +96,161 @@ function readLanguageFromDom(doc: Document): string | null {
   return null;
 }
 
-function readTestcaseFromDom(doc: Document): string | null {
+function isTestcaseSemanticText(value: string): boolean {
+  return /test[\s_-]*case/i.test(value);
+}
+
+function readLabelledByText(element: HTMLElement, doc: Document): string {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (!labelledBy) return "";
+
+  return labelledBy
+    .split(/\s+/)
+    .map((id) => doc.getElementById(id)?.textContent ?? "")
+    .join(" ");
+}
+
+function hasTestcaseSemantics(element: HTMLElement, doc: Document): boolean {
+  const attributes = [
+    element.getAttribute("data-testid") ?? "",
+    element.getAttribute("data-test-id") ?? "",
+    element.getAttribute("aria-label") ?? "",
+    element.getAttribute("title") ?? "",
+    element.id,
+    readLabelledByText(element, doc)
+  ];
+
+  return attributes.some(isTestcaseSemanticText);
+}
+
+function isCodeEditorElement(doc: Document, element: Element): boolean {
+  const editor = doc.querySelector<HTMLElement>(LEETCODE_ACCESSORS.codeEditor);
+  if (!editor) return false;
+  if (editor === element || editor.contains(element)) return true;
+
+  const editorContainer = editor.closest<HTMLElement>(".monaco-editor, .cm-editor");
+  return editorContainer?.contains(element) === true;
+}
+
+function readControlValue(element: HTMLElement): string {
+  if (
+    "value" in element &&
+    typeof (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value ===
+      "string"
+  ) {
+    return (element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
+  }
+
+  return element.innerText ?? element.textContent ?? "";
+}
+
+const NON_VALUE_INPUT_TYPES = new Set([
+  "hidden",
+  "button",
+  "submit",
+  "reset",
+  "checkbox",
+  "radio"
+]);
+
+function isUsableTestcaseControl(doc: Document, element: HTMLElement): boolean {
+  if (isCodeEditorElement(doc, element)) return false;
+
+  if (element.tagName.toLowerCase() === "input") {
+    return !NON_VALUE_INPUT_TYPES.has((element as HTMLInputElement).type);
+  }
+
+  return true;
+}
+
+function testcaseRegions(doc: Document): HTMLElement[] {
+  const regions = Array.from(
+    doc.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseRegionCandidates)
+  ).filter((element) => hasTestcaseSemantics(element, doc));
+
+  const labelledTabs = Array.from(
+    doc.querySelectorAll<HTMLElement>('[role="tab"], button')
+  ).filter((element) => isTestcaseSemanticText(element.textContent ?? ""));
+
+  for (const tab of labelledTabs) {
+    const controlledId = tab.getAttribute("aria-controls");
+    const controlledRegion = controlledId ? doc.getElementById(controlledId) : null;
+    if (controlledRegion instanceof HTMLElement && !regions.includes(controlledRegion)) {
+      regions.push(controlledRegion);
+    }
+
+    const siblingRegion = tab.parentElement?.querySelector<HTMLElement>(
+      '[role="tabpanel"], [data-testid], [data-test-id]'
+    );
+    if (
+      siblingRegion &&
+      hasTestcaseSemantics(siblingRegion, doc) &&
+      !regions.includes(siblingRegion)
+    ) {
+      regions.push(siblingRegion);
+    }
+  }
+
+  const plainLabels = Array.from(doc.querySelectorAll<HTMLElement>("div, span, p, strong"))
+    .filter((element) => element.children.length === 0)
+    .filter((element) => isTestcaseSemanticText(element.textContent?.trim() ?? ""));
+
+  for (const label of plainLabels) {
+    let ancestor = label.parentElement;
+    let depth = 0;
+    while (ancestor && depth < 6) {
+      const controls = Array.from(
+        ancestor.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseControls)
+      ).filter((element) => isUsableTestcaseControl(doc, element));
+      if (controls.length > 0) {
+        if (!regions.includes(ancestor)) regions.push(ancestor);
+        break;
+      }
+      ancestor = ancestor.parentElement;
+      depth += 1;
+    }
+  }
+
+  return regions;
+}
+
+function readStructuredTestcaseFromDom(doc: Document): string | null {
+  const controls: HTMLElement[] = [];
+  const seen = new Set<HTMLElement>();
+
+  for (const region of testcaseRegions(doc)) {
+    const candidates = region.matches(LEETCODE_ACCESSORS.testcaseControls)
+      ? [region]
+      : Array.from(region.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseControls));
+
+    for (const candidate of candidates) {
+      if (!seen.has(candidate) && isUsableTestcaseControl(doc, candidate)) {
+        seen.add(candidate);
+        controls.push(candidate);
+      }
+    }
+  }
+
+  return controls.length > 0 ? controls.map(readControlValue).join("\n") : null;
+}
+
+export function readTestcaseFromDom(doc: Document): string | null {
   const fields = Array.from(
     doc.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseFields)
-  );
+  ).filter((field) => !isCodeEditorElement(doc, field));
   if (fields.length > 0) {
-    const values = fields.map((field) => field.textContent ?? "");
+    const values = fields.map(readControlValue);
     return values.join("\n");
   }
 
-  const codeMirror = doc.querySelector<HTMLElement>(LEETCODE_ACCESSORS.testcaseCodeMirror);
+  const codeMirror = Array.from(
+    doc.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseCodeMirror)
+  ).find((element) => !isCodeEditorElement(doc, element));
   if (codeMirror) {
-    const value = codeMirror.innerText ?? codeMirror.textContent ?? "";
-    return value;
+    return readControlValue(codeMirror);
   }
 
-  return null;
+  return readStructuredTestcaseFromDom(doc);
 }
 
 function extractSlug(pathname: string): string | null {

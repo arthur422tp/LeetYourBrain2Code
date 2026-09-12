@@ -1,4 +1,5 @@
 import type { EntryPoint, ParameterKind } from "../shared/execution-types";
+import { getTestcaseArgumentLines } from "./testcase-parser";
 
 export type EntrypointResolution =
   | { ok: true; entrypoint: EntryPoint }
@@ -184,9 +185,13 @@ function parameterKind(annotation: string | null): ParameterKind {
     return "value";
   }
   const normalized = annotation.replace(/\s+/g, "");
-  return /^(?:ListNode|Optional\[ListNode\]|ListNode\|None|None\|ListNode)$/.test(normalized)
-    ? "linked_list"
-    : "value";
+  if (/^(?:ListNode|Optional\[ListNode\]|ListNode\|None|None\|ListNode)$/.test(normalized)) {
+    return "linked_list";
+  }
+  if (/^(?:TreeNode|Optional\[TreeNode\]|TreeNode\|None|None\|TreeNode)$/.test(normalized)) {
+    return "binary_tree";
+  }
+  return "value";
 }
 
 function findSolutionClass(lines: string[]): { indent: number; start: number } | null {
@@ -264,29 +269,55 @@ function findMethods(lines: string[], classInfo: { indent: number; start: number
   return methods;
 }
 
-export function resolveEntrypoint(sourceCode: string): EntrypointResolution {
+function entrypointForMethod(candidate: MethodCandidate): EntryPoint {
+  const parameters = parseParameters(candidate.parameterSource);
+  return {
+    className: "Solution",
+    methodName: candidate.name,
+    parameterCount: parameters.length,
+    parameterKinds: parameters.map(({ annotation }) => parameterKind(annotation))
+  };
+}
+
+function resolveEntrypointCandidates(sourceCode: string): EntryPoint[] {
   const lines = sourceCode.replace(/\r\n?/g, "\n").split("\n");
   const classInfo = findSolutionClass(lines);
-  if (!classInfo) {
-    return { ok: false, reason: "entrypoint_resolution_failed" };
-  }
+  if (!classInfo) return [];
 
   const candidates = findMethods(lines, classInfo).filter(
     (method) => method.name !== "__init__" && !method.name.startsWith("_")
   );
-  if (candidates.length !== 1 || !candidates[0]?.hasBody) {
-    return { ok: false, reason: "entrypoint_resolution_failed" };
-  }
+  if (candidates.some((method) => !method.hasBody)) return [];
+  return candidates.map(entrypointForMethod);
+}
 
-  const [candidate] = candidates;
-  const parameters = parseParameters(candidate.parameterSource);
-  return {
-    ok: true,
-    entrypoint: {
-      className: "Solution",
-      methodName: candidate.name,
-      parameterCount: parameters.length,
-      parameterKinds: parameters.map(({ annotation }) => parameterKind(annotation))
-    }
-  };
+function failedEntrypointResolution(): EntrypointResolution {
+  return { ok: false, reason: "entrypoint_resolution_failed" };
+}
+
+export function resolveEntrypoint(sourceCode: string): EntrypointResolution {
+  const candidates = resolveEntrypointCandidates(sourceCode);
+  if (candidates.length !== 1) return failedEntrypointResolution();
+
+  return { ok: true, entrypoint: candidates[0] };
+}
+
+export function resolveEntrypointForTestcase(
+  sourceCode: string,
+  rawTestcase: string
+): EntrypointResolution {
+  const candidates = resolveEntrypointCandidates(sourceCode);
+  if (candidates.length === 0) return failedEntrypointResolution();
+  if (candidates.length === 1) return { ok: true, entrypoint: candidates[0] };
+
+  const argumentLineCount = getTestcaseArgumentLines(rawTestcase).length;
+  const compatible = candidates.filter(({ parameterCount }) =>
+    parameterCount === 0
+      ? argumentLineCount === 0
+      : argumentLineCount > 0 && argumentLineCount % parameterCount === 0
+  );
+
+  return compatible.length === 1
+    ? { ok: true, entrypoint: compatible[0] }
+    : failedEntrypointResolution();
 }

@@ -120,6 +120,37 @@ describe("createTreeVisualizer", () => {
     )).not.toBeNull();
   });
 
+  it("shows readable details for the selected node and preserves selection across steps", () => {
+    const handle = createTreeVisualizer(model);
+    const button = handle.element.querySelector<HTMLButtonElement>('[data-node-id="obj-2"] button')!;
+    expect(button).not.toBeNull();
+    button.click();
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(handle.element.querySelector(".tree-visualizer__inspector")?.textContent).toContain("obj-2");
+    const changed = structuredClone(model);
+    changed.nodes[1]!.label = int(42);
+    handle.update(changed);
+    expect(handle.element.querySelector(".tree-visualizer__inspector")?.textContent).toContain("42");
+    expect(handle.element.querySelector('[data-node-id="obj-2"] button')?.getAttribute("aria-pressed")).toBe("true");
+    handle.dispose();
+  });
+
+  it("preserves viewport position and falls back when the selected node disappears", () => {
+    const handle = createTreeVisualizer(twoComponentModel);
+    handle.element.querySelector<HTMLButtonElement>('[data-node-id="obj-2"] button')!.click();
+    const viewport = handle.element.querySelector<HTMLElement>(".tree-visualizer__viewport")!;
+    viewport.scrollLeft = 30;
+    viewport.scrollTop = 50;
+    handle.update(updatedTwoComponentModel);
+    const updatedViewport = handle.element.querySelector<HTMLElement>(".tree-visualizer__viewport")!;
+    expect(updatedViewport.scrollLeft).toBe(30);
+    expect(updatedViewport.scrollTop).toBe(50);
+    expect(handle.element.querySelector(".tree-visualizer__inspector")?.textContent).toContain("obj-1");
+    handle.element.querySelector<HTMLButtonElement>('[data-node-id="obj-9"] button')!.click();
+    expect(handle.element.querySelector(".tree-visualizer__inspector")?.textContent).toContain("obj-9");
+    handle.dispose();
+  });
+
   it("renders changed val independently", () => {
     const changed = structuredClone(model);
     changed.nodes[0]!.valueStatus = "changed";
@@ -175,7 +206,7 @@ describe("createTreeVisualizer", () => {
     expect(handle.element.querySelector('[data-node-id="obj-9"]')).not.toBeNull();
   });
 
-  it("centers the main entry node in a horizontally scrollable viewport", () => {
+  it("does not scroll a compact tree that already fits the viewport", () => {
     const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth");
     Object.defineProperty(Element.prototype, "clientWidth", {
       configurable: true,
@@ -189,7 +220,7 @@ describe("createTreeVisualizer", () => {
     try {
       const handle = createTreeVisualizer(model);
       const viewport = handle.element.querySelector<HTMLElement>(".tree-visualizer__viewport")!;
-      expect(viewport.scrollLeft).toBe(68);
+      expect(viewport.scrollLeft).toBe(0);
     } finally {
       if (descriptor) {
         Object.defineProperty(Element.prototype, "clientWidth", descriptor);

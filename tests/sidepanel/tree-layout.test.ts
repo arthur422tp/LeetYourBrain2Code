@@ -103,11 +103,27 @@ const selfCycleModel: TreeVisualModel = {
 };
 
 describe("layoutTree", () => {
-  it("reserves enough vertical space for a TreeNode card", () => {
+  it("fits a seven-node tree in a narrow sidebar without shrinking its values", () => {
     const layout = layoutTree(strictModel)[0]!;
+    expect(layout.width).toBeLessThanOrEqual(280);
+    expect(layout.height).toBeLessThanOrEqual(280);
+    expect(layout.nodes.every((node) => node.width >= 44)).toBe(true);
+    const byId = new Map(layout.nodes.map((node) => [node.objectId, node]));
+    expect(byId.get("obj-4")!.x).toBe((byId.get("obj-2")!.x + byId.get("obj-7")!.x) / 2);
+  });
 
-    expect(TREE_NODE_HEIGHT).toBeGreaterThanOrEqual(104);
-    expect(layout.nodes.every((node) => node.height >= 104)).toBe(true);
+  it("reserves vertical room for multiple long pointer labels", () => {
+    const model = structuredClone(strictModel);
+    model.pointers = ["newNode", "tail", "aVeryLongPointerName"].map((variableName) => ({variableName, objectId: "obj-4", status: "unchanged"}));
+    const layout = layoutTree(model)[0]!;
+    const root = layout.nodes.find((node) => node.objectId === "obj-4")!;
+    expect(root.height).toBeGreaterThan(120);
+    for (const edge of layout.edges) {
+      const from = layout.nodes.find((node) => node.objectId === edge.fromObjectId)!;
+      const to = layout.nodes.find((node) => node.objectId === edge.toObjectId)!;
+      expect(edge.y1).toBe(from.y + from.height);
+      expect(edge.y2).toBe(to.y + to.height - 44);
+    }
   });
 
   it("produces identical geometry for identical strict-tree models", () => {
@@ -124,6 +140,21 @@ describe("layoutTree", () => {
     expect(right.y).toBeGreaterThan(root.y);
     expect(left.x).toBeLessThan(root.x);
     expect(right.x).toBeGreaterThan(root.x);
+  });
+
+  it("preserves the side of a lone child without inventing a sibling", () => {
+    for (const field of ["left", "right"] as const) {
+      const single = structuredClone(strictModel);
+      single.nodes = [node("root", 1, field === "left" ? "child" : null, field === "right" ? "child" : null), node("child", 2, null, null)];
+      single.components[0]!.nodeIds = ["root", "child"];
+      single.components[0]!.entryNodeIds = ["root"];
+      const layout = layoutTree(single)[0]!;
+      const root = layout.nodes.find((node) => node.objectId === "root")!;
+      const child = layout.nodes.find((node) => node.objectId === "child")!;
+      expect(layout.nodes).toHaveLength(2);
+      expect(child.y).toBeGreaterThan(root.y);
+      expect(Math.sign(child.x - root.x)).toBe(field === "left" ? -1 : 1);
+    }
   });
 
   it("does not overlap same-depth strict-tree nodes", () => {

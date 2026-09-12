@@ -1,3 +1,4 @@
+import { appendPointerName } from "./pointer-label";
 import type {
   TreeNodeVisual,
   TreeVisualModel
@@ -53,8 +54,9 @@ function renderPointerBadge(
   const badge = createTextElement(
     "span",
     `tree-visualizer__pointer is-${pointer.status}`,
-    pointer.variableName
+    ""
   );
+  appendPointerName(badge, pointer.variableName);
   badge.dataset.pointerName = pointer.variableName;
   badge.dataset.pointerStatus = pointer.status;
   badge.setAttribute("aria-label", `${pointer.variableName} pointer ${pointer.status}`);
@@ -84,9 +86,23 @@ function renderNode(
   item.dataset.nodeId = node.objectId;
   item.dataset.nodeStatus = node.status;
 
+  const button = createTextElement("button", "tree-visualizer__node-button", formatValue(node.label ?? undefined));
+  button.type = "button";
+  button.setAttribute("aria-label", `Inspect TreeNode ${node.objectId}, value ${formatValue(node.label ?? undefined)}`);
+  button.setAttribute("aria-pressed", "false");
+  button.dataset.valueStatus = node.valueStatus;
+  const hasTerminal = (["left", "right"] as const).some((field) =>
+    fieldTargetKind(node, field) === "external" || fieldTargetKind(node, field) === "unresolved" ||
+    fieldStatus(node, field) === "removed");
+  if (hasTerminal) {
+    item.classList.add("has-terminal");
+    button.title = "Select to inspect changed or uncaptured references";
+  }
+
   const pointerRow = document.createElement("div");
   pointerRow.className = "tree-visualizer__pointers";
   pointerRow.append(...pointers.map(renderPointerBadge));
+  pointerRow.title = pointers.map((pointer) => pointer.variableName).join(", ");
 
   const value = document.createElement("div");
   value.className = `tree-visualizer__value is-${node.valueStatus}`;
@@ -103,7 +119,11 @@ function renderNode(
     createTextElement("code", "tree-visualizer__object-id", node.objectId)
   );
 
-  item.append(pointerRow, value, identity, renderField(node, "left"), renderField(node, "right"));
+  const details = document.createElement("div");
+  details.className = "tree-visualizer__node-details";
+  details.hidden = true;
+  details.append(value, identity, renderField(node, "left"), renderField(node, "right"));
+  item.append(pointerRow, button, details);
   return item;
 }
 
@@ -200,6 +220,7 @@ function renderComponent(
   const canvas = document.createElement("div");
   canvas.className = "tree-visualizer__canvas";
   canvas.dataset.layoutMode = layout.mode;
+  canvas.style.setProperty("--pointer-band-height", `${(layout.nodes[0]?.height ?? 68) - 44}px`);
   canvas.style.width = `${Math.max(layout.width, 1)}px`;
   canvas.style.height = `${Math.max(layout.height, 1)}px`;
 
@@ -230,7 +251,7 @@ function renderComponent(
     for (const field of ["left", "right"] as const) {
       const terminal = renderTerminal(node, field);
       if (terminal) {
-        item.append(terminal);
+        item.querySelector(".tree-visualizer__node-details")!.append(terminal);
       }
     }
   }
@@ -283,7 +304,7 @@ function renderNotices(model: TreeVisualModel): HTMLDivElement | null {
   return notices.childElementCount > 0 ? notices : null;
 }
 
-function render(model: TreeVisualModel): HTMLElement {
+function render(model: TreeVisualModel, selectedId?: string): HTMLElement {
   const section = document.createElement("section");
   section.className = "tree-visualizer";
   section.dataset.visualId = model.visualId;
@@ -326,7 +347,30 @@ function render(model: TreeVisualModel): HTMLElement {
     viewport.append(removed);
   }
 
-  section.append(title, viewport);
+  const inspector = createTextElement("div", "tree-visualizer__inspector", "");
+  inspector.setAttribute("aria-label", "Selected TreeNode details");
+  const selectNode = (nodeId: string): void => {
+    viewport.dataset.selectedNodeId = nodeId;
+    for (const item of viewport.querySelectorAll<HTMLElement>("[data-node-id]")) {
+      const selected = item.dataset.nodeId === nodeId;
+      item.querySelector("button")!.setAttribute("aria-pressed", String(selected));
+      if (selected) {
+        const details = item.querySelector<HTMLElement>(".tree-visualizer__node-details")!;
+        inspector.replaceChildren(
+          item.querySelector(".tree-visualizer__pointers")!.cloneNode(true),
+          ...Array.from(details.children).map((child) => child.cloneNode(true))
+        );
+      }
+    }
+  };
+  for (const item of viewport.querySelectorAll<HTMLElement>("[data-node-id]")) {
+    item.querySelector("button")!.addEventListener("click", () => selectNode(item.dataset.nodeId!));
+  }
+  const initialSelection = model.nodes.some((node) => node.objectId === selectedId)
+    ? selectedId : model.components.find((component) => component.role === "main")?.entryNodeIds[0] ?? model.nodes[0]?.objectId;
+  if (initialSelection) selectNode(initialSelection);
+  const hint = createTextElement("p", "tree-visualizer__hint", "Select a node to inspect · Left / right follow the branches");
+  section.append(title, viewport, hint, inspector);
   centerMainEntry(viewport, model, layouts);
   const notices = renderNotices(model);
   if (notices) {
@@ -369,12 +413,17 @@ export function createTreeVisualizer(initialModel: TreeVisualModel): TreeVisuali
     element: section,
     update(model) {
       currentModel = model;
-      const replacement = render(model);
+      const selectedId = section.querySelector<HTMLElement>(".tree-visualizer__viewport")?.dataset.selectedNodeId;
+      const previousViewport = section.querySelector<HTMLElement>(".tree-visualizer__viewport");
+      const scrollLeft = previousViewport?.scrollLeft ?? 0;
+      const scrollTop = previousViewport?.scrollTop ?? 0;
+      const replacement = render(model, selectedId);
       section.dataset.visualId = model.visualId;
       section.setAttribute("aria-label", "TreeNode visualization");
       section.replaceChildren(...Array.from(replacement.children));
-      centerRenderedMainEntry(section, model);
-      scheduleCenterAfterMount();
+      const viewport = section.querySelector<HTMLElement>(".tree-visualizer__viewport")!;
+      viewport.scrollLeft = scrollLeft;
+      viewport.scrollTop = scrollTop;
     },
     dispose() {
       if (centeringFrame !== null) {

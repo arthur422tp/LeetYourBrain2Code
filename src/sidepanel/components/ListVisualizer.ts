@@ -1,5 +1,6 @@
 import type { ListVisualModel } from "../../core/visual-model";
 import { formatValue } from "./value-format";
+import { createSelectionInspector, inspectionButton, type InspectionDetails } from "./SelectionInspector";
 
 export interface ListVisualizerHandle {
   element: HTMLElement;
@@ -91,8 +92,8 @@ function createListItem(
     model.items[effectiveIndex(pointer.index, model.items.length)]
   )));
 
-  const value = document.createElement("div");
-  value.className = "list-visualizer__value";
+  const value = inspectionButton(`index:${index}`, `Inspect index ${index}`);
+  value.classList.add("list-visualizer__value");
   value.textContent = `[${formatValue(model.items[index]!)}]`;
 
   const itemIndex = document.createElement("div");
@@ -125,8 +126,8 @@ function createRequestedItem(
   pointerRow.className = "list-visualizer__pointers";
   pointerRow.append(...pointers.map((pointer) => createPointerMarker(pointer)));
 
-  const value = document.createElement("div");
-  value.className = "list-visualizer__value";
+  const value = inspectionButton(`requested:${pointer.index}`, `Inspect requested index ${pointer.index}`);
+  value.classList.add("list-visualizer__value");
   value.textContent = `[${pointer.index}]`;
 
   const requested = document.createElement("div");
@@ -141,7 +142,7 @@ function effectiveIndex(index: number, itemCount: number): number {
   return index < 0 ? itemCount + index : index;
 }
 
-export function renderListVisualizer(model: ListVisualModel): HTMLElement {
+function renderListContents(model: ListVisualModel): HTMLElement {
   const section = document.createElement("section");
   section.id = "list-visualizer";
   section.className = "list-visualizer";
@@ -265,17 +266,37 @@ function animatePointerMove(
 }
 
 export function createListVisualizer(initialModel: ListVisualModel): ListVisualizerHandle {
-  const section = renderListVisualizer(initialModel);
+  const section = renderListContents(initialModel);
+  let currentModel = initialModel;
+  const inspector = createSelectionInspector(section, (key): InspectionDetails | null => {
+    const index = Number(key.slice(key.indexOf(":") + 1));
+    if (key.startsWith("requested:")) {
+      const pointers = currentModel.pointers.filter((pointer) => pointer.outOfBounds && pointer.index === index);
+      return {title: "Requested index", fields: [
+        ["index", String(index)], ["status", "out of bounds"],
+        ["length", String(currentModel.items.length)],
+        ["pointers", pointers.map((pointer) => `${pointer.name} = ${pointer.index}`).join(", ")]
+      ]};
+    }
+    const value = currentModel.items[index];
+    if (!value) return null;
+    const pointers = currentModel.pointers.filter((pointer) => !pointer.outOfBounds && effectiveIndex(pointer.index, currentModel.items.length) === index);
+    return {title: `${currentModel.variableName}[${index}]`, fields: [
+      ["value", formatValue(value)], ["type", value.type], ["index", String(index)],
+      ["status", currentModel.changedIndexes.includes(index) ? "changed" : "unchanged"],
+      ["pointers", pointers.map((pointer) => `${pointer.name} = ${pointer.index}${pointer.valueVariable ? `, ${pointer.valueVariable} = ${formatValue(value)}` : ""}`).join("; ") || "None"]
+    ]};
+  });
   const list = section.querySelector<HTMLElement>(".list-visualizer__list")!;
   const animations: Animation[] = [];
 
-  const update = (model: ListVisualModel): void => {
+  const updateItems = (model: ListVisualModel): void => {
     const requiresRebuild =
       list.querySelectorAll("[data-list-item-index]").length !== model.items.length ||
       currentRequestedPointerSignature(list) !== requestedPointerSignature(model);
 
     if (requiresRebuild) {
-      const replacement = renderListVisualizer(model);
+      const replacement = renderListContents(model);
       list.replaceChildren(...Array.from(replacement.querySelector(".list-visualizer__list")!.children));
       return;
     }
@@ -324,12 +345,24 @@ export function createListVisualizer(initialModel: ListVisualModel): ListVisuali
 
   return {
     element: section,
-    update,
+    update(model) {
+      currentModel = model;
+      section.dataset.variableName = model.variableName;
+      section.setAttribute("aria-label", `${model.variableName} list visualization`);
+      section.querySelector(".list-visualizer__title")!.textContent = model.variableName;
+      updateItems(model);
+      inspector.refresh();
+    },
     dispose: () => {
+      inspector.dispose();
       for (const animation of animations) {
         animation.cancel();
       }
       animations.splice(0);
     }
   };
+}
+
+export function renderListVisualizer(model: ListVisualModel): HTMLElement {
+  return createListVisualizer(model).element;
 }

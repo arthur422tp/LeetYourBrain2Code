@@ -1,5 +1,7 @@
 import type { DictVisualModel } from "../../core/visual-model";
 import { formatValue } from "./value-format";
+import { valueSnapshotKey } from "../../core/value-snapshot";
+import { createSelectionInspector, inspectionButton } from "./SelectionInspector";
 
 export interface DictVisualizerHandle {
   element: HTMLElement;
@@ -7,7 +9,11 @@ export interface DictVisualizerHandle {
   dispose(): void;
 }
 
-export function renderDictVisualizer(model: DictVisualModel): HTMLElement {
+function probeKey(probe: NonNullable<DictVisualModel["probes"]>[number]): string {
+  return `probe:${JSON.stringify([probe.keyVariable, probe.operation, valueSnapshotKey(probe.key)])}`;
+}
+
+function renderDictContents(model: DictVisualModel): HTMLElement {
   const section = document.createElement("section");
   section.className = "dict-visualizer";
   section.dataset.variableName = model.variableName;
@@ -19,11 +25,11 @@ export function renderDictVisualizer(model: DictVisualModel): HTMLElement {
 
   const table = document.createElement("div");
   table.className = "dict-visualizer__table";
-  table.setAttribute("role", "table");
+  table.setAttribute("role", "group");
 
   const header = document.createElement("div");
   header.className = "dict-visualizer__row dict-visualizer__header";
-  header.setAttribute("role", "row");
+
   for (const label of ["key", "value"]) {
     const cell = document.createElement("span");
     cell.className = "dict-visualizer__cell";
@@ -33,10 +39,10 @@ export function renderDictVisualizer(model: DictVisualModel): HTMLElement {
   table.append(header);
 
   for (const entry of model.entries) {
-    const row = document.createElement("div");
-    row.className = `dict-visualizer__row is-${entry.status}`;
+    const row = inspectionButton(valueSnapshotKey(entry.key), `Inspect key ${formatValue(entry.key)}`);
+    row.classList.add("dict-visualizer__row", `is-${entry.status}`);
     row.dataset.dictEntryKey = formatValue(entry.key);
-    row.setAttribute("role", "row");
+
 
     const key = document.createElement("code");
     key.className = "dict-visualizer__cell dict-visualizer__key";
@@ -53,8 +59,8 @@ export function renderDictVisualizer(model: DictVisualModel): HTMLElement {
   const probes = document.createElement("div");
   probes.className = "dict-visualizer__probes";
   for (const probe of model.probes ?? []) {
-    const row = document.createElement("div");
-    row.className = `dict-visualizer__probe is-${probe.status}`;
+    const row = inspectionButton(probeKey(probe), `Inspect ${probe.keyVariable} lookup`);
+    row.classList.add("dict-visualizer__probe", `is-${probe.status}`);
     row.dataset.dictProbeKeyVariable = probe.keyVariable;
     row.dataset.dictProbeStatus = probe.status;
     row.setAttribute(
@@ -86,18 +92,42 @@ export function renderDictVisualizer(model: DictVisualModel): HTMLElement {
 }
 
 export function createDictVisualizer(initialModel: DictVisualModel): DictVisualizerHandle {
-  const section = renderDictVisualizer(initialModel);
+  const section = renderDictContents(initialModel);
+  let currentModel = initialModel;
+  const inspector = createSelectionInspector(section, (key) => {
+    const probe = currentModel.probes?.find((probe) => probeKey(probe) === key);
+    if (probe) {
+      return {title: `${currentModel.variableName} lookup`, fields: [
+        ["key", formatValue(probe.key)], ["key type", probe.key.type],
+        ["variable", probe.keyVariable], ["operation", probe.operation], ["result", probe.status]
+      ]};
+    }
+    const entry = currentModel.entries.find((entry) => valueSnapshotKey(entry.key) === key);
+    if (!entry) return null;
+    const probes = currentModel.probes?.filter((probe) => valueSnapshotKey(probe.key) === key) ?? [];
+    return {title: `${currentModel.variableName}[${formatValue(entry.key)}]`, fields: [
+      ["key", formatValue(entry.key)], ["key type", entry.key.type],
+      ["value", formatValue(entry.value)], ["value type", entry.value.type], ["status", entry.status],
+      ["lookup", probes.map((probe) => `${probe.keyVariable}: ${probe.operation} · ${probe.status}`).join("; ") || "None"]
+    ]};
+  });
 
   return {
     element: section,
     update(model) {
-      const replacement = renderDictVisualizer(model);
+      currentModel = model;
+      const replacement = renderDictContents(model);
       section.dataset.variableName = model.variableName;
       section.setAttribute("aria-label", `${model.variableName} dictionary visualization`);
       section.replaceChildren(...Array.from(replacement.children));
+      inspector.refresh();
     },
     dispose() {
-      // Dictionary rows are recreated per step; there are no long-lived resources.
+      inspector.dispose();
     }
   };
+}
+
+export function renderDictVisualizer(model: DictVisualModel): HTMLElement {
+  return createDictVisualizer(model).element;
 }

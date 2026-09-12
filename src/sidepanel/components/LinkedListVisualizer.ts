@@ -1,5 +1,7 @@
+import { appendPointerName, pointerLabelHeight } from "./pointer-label";
 import type { LinkedListVisualModel } from "../../core/linked-list-interpreter";
 import { formatValue } from "./value-format";
+import { createSelectionInspector, inspectionButton } from "./SelectionInspector";
 
 export interface LinkedListVisualizerHandle {
   element: HTMLElement;
@@ -128,6 +130,10 @@ function appendEdge(
     target.textContent = node.nextObjectId;
   }
 
+  if (edge.dataset.edgeKind === "next" || edge.dataset.edgeKind === "terminal") {
+    target.hidden = true;
+  }
+  edge.title = `next → ${node.nextObjectId ?? "None"}`;
   edge.append(label, line, target);
   track.append(edge);
 
@@ -150,8 +156,7 @@ function appendEdge(
 function renderNode(
   node: LinkedListVisualModel["nodes"][number],
   nodeIndex: number,
-  pointers: LinkedListVisualModel["pointers"],
-  nextTarget: string
+  pointers: LinkedListVisualModel["pointers"]
 ): HTMLElement {
   const item = document.createElement("div");
   item.className = `linked-list-visualizer__node is-${node.status}`;
@@ -165,46 +170,20 @@ function renderNode(
     marker.className = `linked-list-visualizer__pointer is-${pointer.status}`;
     marker.dataset.pointerName = pointer.variableName;
     marker.dataset.pointerStatus = pointer.status;
-    marker.textContent = `${pointer.variableName}${pointer.status === "moved" ? " →" : ""}`;
+    appendPointerName(marker, pointer.variableName);
+    marker.setAttribute("aria-label", `${pointer.variableName} pointer ${pointer.status}`);
     pointerRow.append(marker);
   }
 
-  const identity = document.createElement("div");
-  identity.className = "linked-list-visualizer__identity";
-
+  const value = inspectionButton(node.objectId, `Inspect ListNode ${node.objectId}`);
+  value.classList.add("linked-list-visualizer__node-button");
+  value.textContent = formatValue(node.label ?? { type: "none", value: null });
+  item.dataset.nextStatus = node.nextStatus;
   const index = document.createElement("span");
   index.className = "linked-list-visualizer__index";
   index.textContent = `Node ${nodeIndex + 1}`;
-
-  const objectId = document.createElement("code");
-  objectId.className = "linked-list-visualizer__object-id";
-  objectId.textContent = node.objectId;
-  identity.append(index, objectId);
-
-  const value = document.createElement("div");
-  value.className = "linked-list-visualizer__value";
-
-  const valueLabel = document.createElement("span");
-  valueLabel.className = "linked-list-visualizer__field-label";
-  valueLabel.textContent = "val";
-
-  const valueCode = document.createElement("code");
-  valueCode.textContent = formatValue(node.label ?? { type: "none", value: null });
-  value.append(valueLabel, valueCode);
-
-  const next = document.createElement("div");
-  next.className = `linked-list-visualizer__next is-${node.nextStatus}`;
-  next.dataset.nextStatus = node.nextStatus;
-
-  const nextLabel = document.createElement("span");
-  nextLabel.className = "linked-list-visualizer__field-label";
-  nextLabel.textContent = "next";
-
-  const nextCode = document.createElement("code");
-  nextCode.textContent = nextTarget;
-  next.append(nextLabel, nextCode);
-
-  item.append(pointerRow, identity, value, next);
+  pointerRow.title = pointers.map((pointer) => pointer.variableName).join(", ");
+  item.append(pointerRow, value, index);
   return item;
 }
 
@@ -243,6 +222,9 @@ function render(model: LinkedListVisualModel): HTMLElement {
     const componentNodeIds = new Set(component.nodeIds);
     const nodeIndexById = new Map(orderedIds.map((objectId, index) => [objectId, index]));
     const cycleSources = cycleEdgeSources(component, nodeById);
+    const labelHeight = Math.max(28, ...orderedIds.map((id) =>
+      pointerLabelHeight((pointersByNode.get(id) ?? []).map((pointer) => pointer.variableName), 28)));
+    track.style.setProperty("--pointer-band-height", `${labelHeight}px`);
 
     orderedIds.forEach((objectId, index) => {
       const node = nodeById.get(objectId);
@@ -250,14 +232,10 @@ function render(model: LinkedListVisualModel): HTMLElement {
         return;
       }
       const nextNode = node.nextObjectId === null ? undefined : nodeById.get(node.nextObjectId);
-      const nextTarget = node.nextObjectId === null
-        ? "None"
-        : node.nextObjectId;
       track.append(renderNode(
         node,
         index,
-        pointersByNode.get(node.objectId) ?? [],
-        nextTarget
+        pointersByNode.get(node.objectId) ?? []
       ));
       appendEdge(
         track,
@@ -313,15 +291,33 @@ export function createLinkedListVisualizer(
   initialModel: LinkedListVisualModel
 ): LinkedListVisualizerHandle {
   const section = render(initialModel);
+  let currentModel = initialModel;
+  const inspector = createSelectionInspector(section, (key) => {
+    const node = currentModel.nodes.find((node) => node.objectId === key);
+    if (!node) return null;
+    const pointers = currentModel.pointers.filter((pointer) => pointer.objectId === key);
+    return {title: node.className, fields: [
+      ["val", formatValue(node.label ?? { type: "none", value: null })], ["object ID", node.objectId],
+      ["next", node.nextObjectId ?? "None"], ["next status", node.nextStatus], ["status", node.status],
+      ["pointers", pointers.map((pointer) => `${pointer.variableName} (${pointer.status})`).join(", ") || "None"]
+    ]};
+  });
   return {
     element: section,
     update(model) {
+      const scrollPositions = new Map([...section.querySelectorAll<HTMLElement>("[data-component-id]")]
+        .map((row) => [row.dataset.componentId, row.scrollLeft]));
+      currentModel = model;
       const replacement = render(model);
       section.dataset.visualId = model.visualId;
       section.replaceChildren(...Array.from(replacement.children));
+      for (const row of section.querySelectorAll<HTMLElement>("[data-component-id]")) {
+        row.scrollLeft = scrollPositions.get(row.dataset.componentId) ?? 0;
+      }
+      inspector.refresh();
     },
     dispose() {
-      // This renderer owns no external resources.
+      inspector.dispose();
     }
   };
 }

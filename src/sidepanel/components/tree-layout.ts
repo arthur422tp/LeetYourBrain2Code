@@ -1,12 +1,11 @@
+import { pointerLabelHeight } from "./pointer-label";
 import type { TreeVisualModel } from "../../core/tree-interpreter";
 
-export const TREE_NODE_WIDTH = 104;
-// A TreeNode card contains pointer, value, identity, left, and right rows.
-// Keep the layout height in sync with that rendered card so descendants are
-// not painted into the card or clipped by the canvas bounds.
-export const TREE_NODE_HEIGHT = 104;
-export const TREE_HORIZONTAL_GAP = 32;
-export const TREE_VERTICAL_GAP = 72;
+// Geometry reserves room above each value for its pointer badges.
+export const TREE_NODE_WIDTH = 52;
+export const TREE_NODE_HEIGHT = 68;
+export const TREE_HORIZONTAL_GAP = 16;
+export const TREE_VERTICAL_GAP = 28;
 export const TREE_FALLBACK_COLUMNS = 3;
 
 export interface TreeLayoutNode {
@@ -37,7 +36,7 @@ export interface TreeComponentLayout {
 }
 
 const horizontalStride = TREE_NODE_WIDTH + TREE_HORIZONTAL_GAP;
-const verticalStride = TREE_NODE_HEIGHT + TREE_VERTICAL_GAP;
+
 
 function orderedComponents(model: TreeVisualModel): TreeVisualModel["components"] {
   return [...model.components].sort((left, right) =>
@@ -122,62 +121,51 @@ function bounds(nodes: TreeLayoutNode[]): { width: number; height: number } {
 
 function strictNodes(
   component: TreeVisualModel["components"][number],
-  nodes: TreeVisualModel["nodes"]
+  nodes: TreeVisualModel["nodes"],
+  nodeHeight: number
 ): TreeLayoutNode[] {
   const nodeIds = new Set(component.nodeIds);
   const nodeById = new Map(nodes.map((node) => [node.objectId, node]));
-  const positions = new Map<string, { slot: number; depth: number }>();
-  let nextSlot = 0;
-
-  const place = (objectId: string, depth: number): void => {
-    const node = nodeById.get(objectId);
-    if (!node || positions.has(objectId)) {
-      return;
-    }
-    const left = internalTarget(node, "left", nodeIds);
-    const right = internalTarget(node, "right", nodeIds);
-    if (left !== null) {
-      place(left, depth + 1);
-    }
-    positions.set(objectId, { slot: nextSlot, depth });
-    nextSlot += 1;
-    if (right !== null) {
-      place(right, depth + 1);
-    }
-  };
-
-  const entryNodeId = [...component.entryNodeIds].sort((left, right) => left.localeCompare(right))[0];
-  if (entryNodeId !== undefined) {
-    place(entryNodeId, 0);
-  }
-  for (const node of nodes) {
-    if (!positions.has(node.objectId)) {
-      place(node.objectId, 0);
-    }
-  }
-
-  return nodes.map((node) => {
-    const position = positions.get(node.objectId)!;
-    return {
-      objectId: node.objectId,
-      x: position.slot * horizontalStride,
-      y: position.depth * verticalStride,
-      width: TREE_NODE_WIDTH,
-      height: TREE_NODE_HEIGHT
+  const visited = new Set<string>();
+  type Subtree = { nodes: TreeLayoutNode[]; width: number; rootX: number };
+  const place = (objectId: string, depth: number): Subtree => {
+    const node = nodeById.get(objectId)!;
+    visited.add(objectId);
+    const leftId = internalTarget(node, "left", nodeIds);
+    const rightId = internalTarget(node, "right", nodeIds);
+    const left = leftId !== null && !visited.has(leftId) ? place(leftId, depth + 1) : null;
+    const right = rightId !== null && !visited.has(rightId) ? place(rightId, depth + 1) : null;
+    const rightOffset = left ? left.width + TREE_HORIZONTAL_GAP : 0;
+    const rootX = left && right
+      ? (left.rootX + right.rootX + rightOffset) / 2
+      : left ? left.rootX + horizontalStride / 2
+        : right ? right.rootX - horizontalStride / 2 : 0;
+    const offset = Math.max(0, -rootX);
+    const descendants = [
+      ...(left?.nodes ?? []),
+      ...(right?.nodes ?? []).map((item) => ({ ...item, x: item.x + (left ? rightOffset : 0) }))
+    ].map((item) => ({ ...item, x: item.x + offset }));
+    const root = {
+      objectId, x: rootX + offset, y: depth * (nodeHeight + TREE_VERTICAL_GAP),
+      width: TREE_NODE_WIDTH, height: nodeHeight
     };
-  });
+    const placed = [root, ...descendants];
+    return { nodes: placed, width: bounds(placed).width, rootX: root.x };
+  };
+  const rootId = component.entryNodeIds[0]!;
+  return place(rootId, 0).nodes.sort((left, right) => left.objectId.localeCompare(right.objectId));
 }
 
-function fallbackNodes(nodes: TreeVisualModel["nodes"]): TreeLayoutNode[] {
+function fallbackNodes(nodes: TreeVisualModel["nodes"], nodeHeight: number): TreeLayoutNode[] {
   return nodes.map((node, index) => {
     const column = index % TREE_FALLBACK_COLUMNS;
     const row = Math.floor(index / TREE_FALLBACK_COLUMNS);
     return {
       objectId: node.objectId,
       x: column * horizontalStride,
-      y: row * verticalStride,
+      y: row * (nodeHeight + TREE_VERTICAL_GAP),
       width: TREE_NODE_WIDTH,
-      height: TREE_NODE_HEIGHT
+      height: nodeHeight
     };
   });
 }
@@ -209,9 +197,9 @@ function layoutEdges(
         toObjectId: targetId,
         field,
         x1: from.x + TREE_NODE_WIDTH / 2,
-        y1: from.y + TREE_NODE_HEIGHT,
+        y1: from.y + from.height,
         x2: to.x + TREE_NODE_WIDTH / 2,
-        y2: to.y
+        y2: to.y + to.height - 44
       });
     }
   }
@@ -220,11 +208,15 @@ function layoutEdges(
 
 function layoutComponent(
   component: TreeVisualModel["components"][number],
-  nodeById: Map<string, TreeVisualModel["nodes"][number]>
+  nodeById: Map<string, TreeVisualModel["nodes"][number]>,
+  pointers: TreeVisualModel["pointers"]
 ): TreeComponentLayout {
   const nodes = componentNodes(component, nodeById);
   const strict = isStrictTree(component, nodes);
-  const layoutNodes = strict ? strictNodes(component, nodes) : fallbackNodes(nodes);
+  const nodeHeight = 44 + Math.max(24, ...nodes.map((node) => pointerLabelHeight(
+    pointers.filter((pointer) => pointer.objectId === node.objectId).map((pointer) => pointer.variableName), 24
+  )));
+  const layoutNodes = strict ? strictNodes(component, nodes, nodeHeight) : fallbackNodes(nodes, nodeHeight);
   const dimensions = bounds(layoutNodes);
   return {
     componentId: component.componentId,
@@ -237,5 +229,5 @@ function layoutComponent(
 
 export function layoutTree(model: TreeVisualModel): TreeComponentLayout[] {
   const nodeById = new Map(model.nodes.map((node) => [node.objectId, node]));
-  return orderedComponents(model).map((component) => layoutComponent(component, nodeById));
+  return orderedComponents(model).map((component) => layoutComponent(component, nodeById, model.pointers));
 }

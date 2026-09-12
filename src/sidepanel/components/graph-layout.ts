@@ -295,11 +295,42 @@ function bounds(nodes: readonly GraphLayoutNode[]): { width: number; height: num
   return {
     width: nodes.length === 0
       ? 0
-      : Math.max(...nodes.map((node) => node.x + node.width)),
+      : Math.max(...nodes.map((node) => node.x + node.width)) + PADDING,
     height: nodes.length === 0
       ? 0
-      : Math.max(...nodes.map((node) => node.y + node.height))
+      : Math.max(...nodes.map((node) => node.y + node.height)) + PADDING
   };
+}
+
+// Simple cycles have an unambiguous perimeter order. Preserve that order
+// instead of allowing a force simulation to fold the ring across itself.
+function cycleNodes(objectIds: ObjectId[], edges: GraphEdgeVisual[]): SimulationNode[] | null {
+  if (objectIds.length < 3) return null;
+  const adjacent = new Map(objectIds.map((id) => [id, [] as ObjectId[]]));
+  for (const [from, to] of physicalEdges(edges, new Set(objectIds))) {
+    if (from === to) return null;
+    adjacent.get(from)!.push(to);
+    adjacent.get(to)!.push(from);
+  }
+  if ([...adjacent.values()].some((neighbors) => neighbors.length !== 2)) return null;
+  const order: ObjectId[] = [];
+  let current = objectIds[0]!;
+  let previous: ObjectId | undefined;
+  while (!order.includes(current)) {
+    order.push(current);
+    const next = adjacent.get(current)!.slice().sort(compareObjectIds)
+      .find((id) => id !== previous)!;
+    previous = current;
+    current = next;
+  }
+  if (order.length !== objectIds.length || current !== order[0]) return null;
+  const radius = IDEAL_EDGE_LENGTH / (2 * Math.sin(Math.PI / order.length));
+  const nodes = order.map((objectId, index) => {
+    const angle = -3 * Math.PI / 4 + index * 2 * Math.PI / order.length;
+    return { objectId, x: radius * Math.cos(angle), y: radius * Math.sin(angle), vx: 0, vy: 0 };
+  });
+  normalize(nodes);
+  return nodes;
 }
 
 function presentationConnections(
@@ -383,7 +414,7 @@ function layoutComponent(
   const objectIds = component.nodeIds
     .filter((objectId) => nodeById.has(objectId))
     .sort(compareObjectIds);
-  const simulation = simulate(objectIds, model.edges);
+  const simulation = cycleNodes(objectIds, model.edges) ?? simulate(objectIds, model.edges);
   const mode = finiteSimulation(simulation) ? "force" : "fallback";
   const positioned = mode === "force" ? simulation : fallbackNodes(objectIds);
   const layoutNodes = positioned

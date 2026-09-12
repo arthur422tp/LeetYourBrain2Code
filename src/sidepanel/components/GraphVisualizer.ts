@@ -77,6 +77,7 @@ function renderNode(
   button.className = "graph-visualizer__node-button";
   button.textContent = graphNodeLabel(node);
   button.dataset.nodeStatus = node.status;
+  button.title = `Node ${graphNodeLabel(node)} · ${node.objectId}`;
 
   item.append(pointerRow, button);
   return item;
@@ -196,7 +197,7 @@ function renderComponent(
   section.append(createTextElement(
     "h3",
     "graph-visualizer__component-title",
-    component.role === "main" ? "Main graph" : "Secondary component"
+    `${component.role === "main" ? "Main graph" : "Secondary component"} · ${component.nodeIds.length} node${component.nodeIds.length === 1 ? "" : "s"}`
   ));
 
   const canvas = document.createElement("div");

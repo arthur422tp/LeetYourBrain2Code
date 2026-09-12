@@ -62,6 +62,22 @@ const cycleModel = model({
 });
 
 describe("layoutGraph", () => {
+  it("lays a four-node cycle out as an open square with space around every node", () => {
+    const layout = layoutGraph(cycleModel)[0]!;
+    const byId = new Map(layout.nodes.map((node) => [node.objectId, node]));
+    const lengths = layout.connections.map((edge) => Math.hypot(edge.x2 - edge.x1, edge.y2 - edge.y1));
+    for (const length of lengths) expect(length).toBeCloseTo(92);
+    const first = byId.get("obj-1")!;
+    const opposite = byId.get("obj-3")!;
+    expect(Math.hypot(first.x - opposite.x, first.y - opposite.y)).toBeCloseTo(92 * Math.SQRT2);
+    for (const node of layout.nodes) {
+      expect(node.x).toBeGreaterThanOrEqual(28);
+      expect(node.y).toBeGreaterThanOrEqual(28);
+      expect(layout.width - node.x - node.width).toBeGreaterThanOrEqual(27.999);
+      expect(layout.height - node.y - node.height).toBeGreaterThanOrEqual(27.999);
+    }
+  });
+
   it("returns identical geometry for identical models and reordered inputs", () => {
     const shuffled = structuredClone(cycleModel);
     shuffled.nodes.reverse();

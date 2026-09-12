@@ -1728,6 +1728,10 @@ button.is-primary:hover:not(:disabled) {
 }
 
 .graph-visualizer__pointers {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   min-height: 24px;
   width: 68px;

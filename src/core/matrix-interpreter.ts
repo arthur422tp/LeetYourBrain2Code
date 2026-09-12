@@ -3,6 +3,7 @@ import type {
   StaticRelation,
   ValueSnapshot
 } from "../shared/trace-types";
+import type { StructureOperandReference } from "../shared/expression-types";
 import { relationMatchesFrameScope } from "./ast-relations";
 import type { RuntimeMutation } from "./runtime-mutation";
 import type { RuntimeState } from "./runtime-state";
@@ -36,6 +37,7 @@ export interface MatrixVisualModel {
   rowCount: number;
   columnCount: number;
   cells: ValueSnapshot[][];
+  expressionReferences: StructureOperandReference[];
   focuses: MatrixFocus[];
   changedCells: MatrixCellChange[];
 }
@@ -209,7 +211,8 @@ function projectMatrixChanges(
 export function buildMatrixVisuals(
   runtime: RuntimeState,
   _relations: StaticRelation[],
-  _mutations: RuntimeMutation[] = []
+  _mutations: RuntimeMutation[] = [],
+  expressionReferences: StructureOperandReference[] = []
 ): MatrixVisualModel[] {
   if (runtime.activeFrameId === null) {
     return [];
@@ -235,6 +238,9 @@ export function buildMatrixVisuals(
         rowCount,
         columnCount,
         cells: rows.map((row) => row.items.map(cloneValueSnapshot)),
+        expressionReferences: expressionReferences.filter((reference) =>
+          reference.kind === "matrix_cell" && reference.variableName === variableName
+        ),
         focuses: buildMatrixFocuses(
           runtime,
           frame.functionName,

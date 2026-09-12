@@ -14,6 +14,7 @@ import type {
   RuntimeMutation,
   SequenceElementMutation
 } from "./runtime-mutation";
+import type { StructureOperandReference } from "../shared/expression-types";
 import { cloneRuntimeMutation } from "./runtime-mutation";
 import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
 import { resolveVisualCandidates, type VisualCandidate } from "./visual-candidate-resolver";
@@ -23,6 +24,7 @@ export interface ListVisualModel {
   visualId: string;
   variableName: string;
   items: ValueSnapshot[];
+  expressionReferences: StructureOperandReference[];
   pointers: Array<{
     name: string;
     index: number;
@@ -120,7 +122,8 @@ function buildListVisual(
   runtime: RuntimeState,
   bindings: PointerBinding[],
   container: string,
-  mutations: RuntimeMutation[]
+  mutations: RuntimeMutation[],
+  expressionReferences: StructureOperandReference[]
 ): ListVisualModel | null {
   if (runtime.activeFrameId === null) {
     return null;
@@ -136,6 +139,9 @@ function buildListVisual(
     visualId: `list:${container}`,
     variableName: container,
     items: snapshot.items.map(cloneValueSnapshot),
+    expressionReferences: expressionReferences.filter((reference) =>
+      reference.kind === "list_index" && reference.variableName === container
+    ),
     pointers: bindings
       .filter((binding) => binding.container === container)
       .map((binding) => ({
@@ -232,14 +238,15 @@ function buildContainerVisual(
   bindings: PointerBinding[],
   container: string,
   relations: StaticRelation[],
-  mutations: RuntimeMutation[]
+  mutations: RuntimeMutation[],
+  expressionReferences: StructureOperandReference[]
 ): ContainerVisualModel | null {
   const frame = runtime.activeFrameId === null
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const snapshot = frame?.locals[container];
   if (snapshot?.type === "list" || snapshot?.type === "tuple") {
-    return buildListVisual(runtime, bindings, container, mutations);
+    return buildListVisual(runtime, bindings, container, mutations, expressionReferences);
   }
   if (snapshot?.type === "dict") {
     return buildDictVisual(runtime, container, mutations, relations);
@@ -353,13 +360,14 @@ export function buildVisualState(
   diff: FrameDiff | null,
   relations: StaticRelation[],
   objectDiff: ObjectDiff | null = null,
-  mutations: RuntimeMutation[] = []
+  mutations: RuntimeMutation[] = [],
+  expressionReferences: StructureOperandReference[] = []
 ): VisualState {
   const frame = runtime.activeFrameId === null
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const bindings = resolvePointerBindings(relations, runtime);
-  const matrixVisuals = buildMatrixVisuals(runtime, relations, mutations);
+  const matrixVisuals = buildMatrixVisuals(runtime, relations, mutations, expressionReferences);
   const matrixVariables = new Set(matrixVisuals.map((visual) => visual.variableName));
   const containerNames = frame
     ? Object.entries(frame.locals)
@@ -368,7 +376,14 @@ export function buildVisualState(
       .map(([name]) => name)
     : [];
   const containerVisuals = containerNames
-    .map((container) => buildContainerVisual(runtime, bindings, container, relations, mutations))
+    .map((container) => buildContainerVisual(
+      runtime,
+      bindings,
+      container,
+      relations,
+      mutations,
+      expressionReferences
+    ))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
   const linkedListVisuals = buildLinkedListVisuals(runtime, mutations);
   const treeVisuals = buildTreeVisuals(runtime, mutations);

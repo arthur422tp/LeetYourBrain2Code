@@ -18,6 +18,7 @@ function model(overrides: Partial<ListVisualModel> = {}): ListVisualModel {
     visualId: "list:nums",
     variableName: "nums",
     items: [int(2), int(7), int(11), int(15)],
+    expressionReferences: [],
     pointers: [
       { name: "left", index: 1, outOfBounds: false },
       { name: "right", index: 3, outOfBounds: false }

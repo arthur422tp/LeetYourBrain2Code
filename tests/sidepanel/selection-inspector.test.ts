@@ -9,7 +9,7 @@ import {
 import type { DictVisualModel, ListVisualModel } from "../../src/core/visual-model";
 import type { LinkedListVisualModel } from "../../src/core/linked-list-interpreter";
 const int = (n: number) => ({type: "int" as const, value: String(n)});
-const list: ListVisualModel = {kind:"list", visualId:"list:nums", variableName:"nums", items:[int(1),int(2)], pointers:[],changedIndexes:[]};
+const list: ListVisualModel = {kind:"list", visualId:"list:nums", variableName:"nums", items:[int(1),int(2)], expressionReferences:[], pointers:[],changedIndexes:[]};
 const dict: DictVisualModel = {kind:"dict",visualId:"dict:d",variableName:"d",entries:[{key:int(1),value:int(10),status:"unchanged"},{key:{type:"str",value:"1",length:1,truncated:false},value:int(20),status:"unchanged"}]};
 const linked: LinkedListVisualModel = {kind:"linked_list",visualId:"linked_list:obj-1",nodes:[{objectId:"obj-1",className:"ListNode",label:int(1),nextObjectId:"obj-2",status:"unchanged",nextStatus:"unchanged"},{objectId:"obj-2",className:"ListNode",label:int(2),nextObjectId:null,status:"unchanged",nextStatus:"unchanged"}],components:[{componentId:"c",nodeIds:["obj-1","obj-2"],entryNodeIds:["obj-1"]}],pointers:[],cyclic:false,truncated:false};
 const details = (element: HTMLElement) => element.querySelector(".visualizer-inspector")!.textContent!;

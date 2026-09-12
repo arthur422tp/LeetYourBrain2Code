@@ -48,6 +48,7 @@ function listModel(): ListVisualModel {
     visualId: "list:nums",
     variableName: "nums",
     items: [int(1)],
+    expressionReferences: [],
     pointers: [],
     changedIndexes: []
   };
@@ -84,6 +85,7 @@ function matrixModel(value = 1): MatrixVisualModel {
     rowCount: 1,
     columnCount: 1,
     cells: [[int(value)]],
+    expressionReferences: [],
     focuses: [],
     changedCells: []
   };

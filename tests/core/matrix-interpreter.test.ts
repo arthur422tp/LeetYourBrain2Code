@@ -7,6 +7,7 @@ import type {
   MatrixSubscriptRelation,
   ValueSnapshot
 } from "../../src/shared/trace-types";
+import type { StructureOperandReference } from "../../src/shared/expression-types";
 import { buildMatrixVisuals } from "../../src/core/matrix-interpreter";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
@@ -78,6 +79,28 @@ const invalidMatrices: Array<[string, ValueSnapshot]> = [
 ];
 
 describe("buildMatrixVisuals", () => {
+  it("filters expression references to each Matrix variable", () => {
+    const references: StructureOperandReference[] = [
+      {
+        exprId: "r1.0", variableName: "dp", kind: "matrix_cell",
+        row: 1, column: 0, rawRow: 1, rawColumn: 0, role: "operand"
+      },
+      {
+        exprId: "r1.1", variableName: "nums", kind: "list_index",
+        index: 0, rawIndex: 0, role: "selected_operand"
+      }
+    ];
+
+    const visuals = buildMatrixVisuals(
+      runtime({ dp: matrix([row([int(1), int(2)]), row([int(3), int(4)])]) }),
+      [],
+      [],
+      references
+    );
+
+    expect(visuals[0]?.expressionReferences).toEqual([references[0]]);
+  });
+
   it("builds a matrix model from complete rectangular list and tuple rows", () => {
     const visuals = buildMatrixVisuals(
       runtime({

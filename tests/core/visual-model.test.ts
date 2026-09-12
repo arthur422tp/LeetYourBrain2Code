@@ -389,6 +389,7 @@ describe("buildVisualState", () => {
         visualId: "list:nums",
         variableName: "nums",
         items: [int(2), int(9), int(11), int(15)],
+        expressionReferences: [],
         pointers: [
           { name: "left", index: 1, outOfBounds: false },
           { name: "right", index: 3, outOfBounds: false }
@@ -417,6 +418,7 @@ describe("buildVisualState", () => {
       visualId: "list:nums",
       variableName: "nums",
       items: [int(2), int(7)],
+      expressionReferences: [],
       pointers: [{ name: "left", index: 5, outOfBounds: true }],
       changedIndexes: []
     });
@@ -500,6 +502,7 @@ describe("buildVisualState", () => {
         visualId: "list:nums",
         variableName: "nums",
         items: [int(2), int(7), int(11), int(15)],
+        expressionReferences: [],
         pointers: [],
         changedIndexes: []
       }

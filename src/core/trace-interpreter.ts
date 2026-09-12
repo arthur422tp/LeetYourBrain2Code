@@ -96,7 +96,9 @@ export function interpretTrace(
       frameDiffs[index] ?? null,
       relations,
       objectDiffs[index] ?? null,
-      mutationBatches[index]!.mutations
+      mutationBatches[index]!.mutations,
+      expressionEvidence.get(runtime.step)?.roots
+        .flatMap((root) => root.structureReferences) ?? []
     )
   );
 

@@ -1,4 +1,5 @@
 import type { RuntimeState } from "./runtime-state";
+import { projectStructureReferences } from "./expression-structure-projection";
 import type {
   ExpressionBatch,
   ExpressionEvidenceByStep,
@@ -74,7 +75,7 @@ export function buildExpressionEvidence(
         ...(root.kind === "assignment" ? { target: root.target } : {}),
         tree,
         selections: rootEvaluation.selectionEvidence ?? [],
-        structureReferences: []
+        structureReferences: projectStructureReferences(plan, root, rootEvaluation, runtime)
       });
     }
 

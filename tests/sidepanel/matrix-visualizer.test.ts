@@ -46,6 +46,7 @@ function model(overrides: Partial<MatrixVisualModel> = {}): MatrixVisualModel {
     rowCount,
     columnCount,
     cells: overrides.cells ?? cells(rowCount, columnCount),
+    expressionReferences: overrides.expressionReferences ?? [],
     focuses: overrides.focuses ?? [],
     changedCells: overrides.changedCells ?? [],
     ...overrides

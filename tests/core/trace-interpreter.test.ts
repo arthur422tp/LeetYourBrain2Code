@@ -132,6 +132,52 @@ describe("interpretTrace", () => {
     });
   });
 
+  it("passes projected expression references into matching List visuals", () => {
+    const expressionPlan: ExpressionPlan = {
+      version: 1,
+      roots: [{
+        rootId: "r-list",
+        kind: "assignment",
+        expressionExprId: "r-list.0",
+        target: { source: "x", span: { line: 7, column: 0, endLine: 7, endColumn: 1 } },
+        span: { line: 7, column: 0, endLine: 7, endColumn: 10 }
+      }],
+      expressions: [
+        {
+          exprId: "r-list.0", rootId: "r-list", parentExprId: null, kind: "subscript",
+          span: { line: 7, column: 4, endLine: 7, endColumn: 11 }, source: "nums[i]",
+          childExprIds: [],
+          structureHint: { kind: "list_index", variableName: "nums", indexExprId: "r-list.i" }
+        },
+        {
+          exprId: "r-list.i", rootId: "r-list", parentExprId: "r-list.0", kind: "name",
+          span: { line: 7, column: 9, endLine: 7, endColumn: 10 }, source: "i", childExprIds: []
+        }
+      ]
+    };
+    const result = interpretTrace(
+      [event(1, "solve", { nums: list([4, 7, 9]), i: int(1) })],
+      [],
+      expressionPlan,
+      [{
+        batchId: 1, anchorStep: 1, frameId: 4, line: 7,
+        roots: [{
+          rootId: "r-list", status: "completed",
+          evaluations: [{ evaluationId: 1, exprId: "r-list.i", order: 1, value: int(1) }]
+        }]
+      }]
+    );
+
+    expect(result.visualStates[0]?.visuals.find((visual) => visual.visualId === "list:nums"))
+      .toMatchObject({
+        expressionReferences: [{
+          exprId: "r-list.0", variableName: "nums", kind: "list_index",
+          index: 1, rawIndex: 1, role: "operand"
+        }],
+        changedIndexes: []
+      });
+  });
+
   it("aligns one mutation batch with every reconstructed runtime state", () => {
     const result = interpretTrace([
       event(1, "solve", { left: int(0) }),
@@ -342,6 +388,7 @@ describe("interpretTrace", () => {
       visualId: "list:nums",
       variableName: "nums",
       items: [int(2), int(9), int(11), int(15)],
+      expressionReferences: [],
       pointers: [
         { name: "left", index: 1, outOfBounds: false },
         { name: "right", index: 3, outOfBounds: false }
@@ -373,6 +420,7 @@ describe("interpretTrace", () => {
       visualId: "list:dp",
       variableName: "dp",
       items: [int(0), int(5), int(0)],
+      expressionReferences: [],
       pointers: [{ name: "i", index: 1, outOfBounds: false }],
       changedIndexes: [1]
     });
@@ -415,6 +463,7 @@ describe("interpretTrace", () => {
       ],
       rowCount: 2,
       columnCount: 2,
+      expressionReferences: [],
       focuses: [],
       changedCells: []
     }]);
@@ -462,6 +511,7 @@ describe("interpretTrace", () => {
         visualId: "list:queue",
         variableName: "queue",
         items: [int(0)],
+        expressionReferences: [],
         pointers: [],
         changedIndexes: []
       }

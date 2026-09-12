@@ -779,6 +779,139 @@ button.is-primary:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
+.matrix-visualizer {
+  min-width: 0;
+}
+
+.matrix-visualizer__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.matrix-visualizer__title {
+  margin: 0;
+  color: #475569;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.matrix-visualizer__shape {
+  color: #64748b;
+  font: 10px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.matrix-visualizer__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+
+.matrix-visualizer__control {
+  padding: 5px 7px;
+  color: #475569;
+  font-size: 10px;
+}
+
+.matrix-visualizer__viewport {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #b8c4d4;
+  border-radius: 6px;
+  background: #f8fafc;
+  scrollbar-width: thin;
+}
+
+.matrix-visualizer__grid {
+  display: grid;
+  min-width: max-content;
+  grid-template-columns: 30px repeat(var(--matrix-column-count), minmax(46px, 1fr));
+  padding: 4px;
+  gap: 3px;
+}
+
+.matrix-visualizer__corner,
+.matrix-visualizer__column-label,
+.matrix-visualizer__row-label {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font: 10px/1 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.matrix-visualizer__column-label,
+.matrix-visualizer__row-label {
+  font-weight: 750;
+}
+
+.matrix-visualizer__cell {
+  min-width: 46px;
+  min-height: 38px;
+  overflow: hidden;
+  border: 1px solid #b8c4d4;
+  border-radius: 5px;
+  background: #fff;
+  color: #0f172a;
+  font: 700 12px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  padding: 5px 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-visualizer__cell.is-focus {
+  border-color: #4f86df;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(29, 103, 237, 0.18);
+}
+
+.matrix-visualizer__cell.is-changed {
+  border-color: #f59e8b;
+  background: #fff3f1;
+}
+
+.matrix-visualizer__cell.is-focus-and-changed {
+  border-color: #8b5cf6;
+  background: linear-gradient(135deg, #eff6ff 0 50%, #fff3f1 50% 100%);
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.25);
+}
+
+.matrix-visualizer__cell[aria-pressed="true"] {
+  outline: 2px solid #1d67ed;
+  outline-offset: 1px;
+}
+
+.matrix-visualizer__notices {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+
+.matrix-visualizer__notice {
+  margin: 0;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #64748b;
+  font: 10px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.matrix-visualizer__notice--requested {
+  border: 1px dashed #fdba74;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.matrix-visualizer__notice--changed-outside {
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+}
+
 .list-visualizer__title {
   margin: 0 0 7px;
   color: #475569;

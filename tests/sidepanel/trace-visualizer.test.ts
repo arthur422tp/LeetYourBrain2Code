@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SubscriptRelation } from "../../src/core/ast-relations";
-import type { TraceSession } from "../../src/shared/trace-types";
+import type { MatrixSubscriptRelation, TraceSession } from "../../src/shared/trace-types";
 import { createTraceVisualizer } from "../../src/sidepanel/components/TraceVisualizer";
 
 const int = (value: number) => ({ type: "int" as const, value: String(value) });
@@ -20,10 +20,31 @@ const dict = (entries: Array<[number, number]>) => ({
   truncated: false
 });
 
+const matrix = (values: number[][]) => ({
+  type: "list" as const,
+  length: values.length,
+  items: values.map((row) => ({
+    type: "list" as const,
+    length: row.length,
+    items: row.map(int),
+    truncated: false
+  })),
+  truncated: false
+});
+
 const relations: SubscriptRelation[] = [
   { scope: "Solution.twoSum", line: 5, container: "nums", index: "left" },
   { scope: "Solution.twoSum", line: 5, container: "nums", index: "right" }
 ];
+
+const matrixRelation: MatrixSubscriptRelation = {
+  kind: "matrix_subscript",
+  scope: "Solution.solve",
+  line: 3,
+  container: "dp",
+  rowIndex: { kind: "variable", name: "i" },
+  columnIndex: { kind: "variable", name: "j" }
+};
 
 function session(): TraceSession {
   return {
@@ -79,6 +100,76 @@ function session(): TraceSession {
     },
     subscriptRelations: relations,
     returnValue: null
+  };
+}
+
+function matrixSession(): TraceSession {
+  const base = session();
+  return {
+    ...base,
+    sourceCode: "class Solution:\n    def solve(self, grid):\n        return grid\n",
+    rawTestcase: "[[0, 0], [0, 0]]",
+    entrypoint: {
+      className: "Solution",
+      methodName: "solve",
+      parameterCount: 1,
+      parameterKinds: ["value"]
+    },
+    subscriptRelations: [matrixRelation],
+    events: [
+      {
+        ...base.events[0]!,
+        step: 1,
+        function: "solve",
+        line: 3,
+        locals: { dp: matrix([[0, 0], [0, 0]]), i: int(0), j: int(0) }
+      },
+      {
+        ...base.events[0]!,
+        step: 2,
+        function: "solve",
+        line: 3,
+        locals: { dp: matrix([[0, 0], [7, 0]]), i: int(1), j: int(0) }
+      },
+      {
+        ...base.events[0]!,
+        step: 3,
+        function: "solve",
+        line: 4,
+        locals: {}
+      },
+      {
+        ...base.events[0]!,
+        step: 4,
+        function: "solve",
+        line: 3,
+        locals: { dp: matrix([[0, 0], [8, 0]]), i: int(1), j: int(0) }
+      }
+    ]
+  };
+}
+
+function matrixBehaviorSession(): TraceSession {
+  const base = alternatingRepeatedStateSession();
+  return {
+    ...base,
+    sourceCode: "class Solution:\n    def solve(self, grid):\n        return grid\n",
+    entrypoint: {
+      className: "Solution",
+      methodName: "solve",
+      parameterCount: 1,
+      parameterKinds: ["value"]
+    },
+    subscriptRelations: [matrixRelation],
+    events: base.events.map((event) => ({
+      ...event,
+      function: "solve",
+      locals: {
+        dp: matrix([[0, 0], [Number((event.locals.left as { value: string }).value), 0]]),
+        i: int(1),
+        j: int(0)
+      }
+    }))
   };
 }
 
@@ -1040,6 +1131,42 @@ describe("createTraceVisualizer", () => {
     expect(view.element.querySelector("#list-visualizer")).toBe(list);
     expect(view.element.querySelector('[data-pointer-name="left"]')).toBe(pointer);
     expect(pointer?.getAttribute("data-pointer-index")).toBe("1");
+  });
+
+  it("creates, updates, disposes, and recreates Matrix visualizer lifetimes", () => {
+    const view = createTraceVisualizer(matrixSession());
+    const first = view.element.querySelector<HTMLElement>('[data-visual-id="matrix:dp"]');
+
+    expect(first).not.toBeNull();
+    view.setStep(1);
+    expect(view.element.querySelector<HTMLElement>('[data-visual-id="matrix:dp"]')).toBe(first);
+    expect(view.element.querySelector('[data-cell-row="1"][data-cell-column="0"]')?.classList.contains("is-changed"))
+      .toBe(true);
+
+    view.setStep(2);
+    expect(view.element.querySelector('[data-visual-id="matrix:dp"]')).toBeNull();
+
+    view.setStep(3);
+    const recreated = view.element.querySelector<HTMLElement>('[data-visual-id="matrix:dp"]');
+    expect(recreated).not.toBeNull();
+    expect(recreated).not.toBe(first);
+    view.dispose();
+  });
+
+  it("updates Matrix through the existing Behavioral Timeline navigation path", () => {
+    const view = createTraceVisualizer(matrixBehaviorSession());
+    view.setStep(4);
+    const band = view.element.querySelector<HTMLButtonElement>(
+      '.trace-viewer__timeline-band[data-pattern-kind="repeated_state"]'
+    );
+
+    expect(band).not.toBeNull();
+    band!.click();
+
+    expect(view.element.dataset.stepIndex).toBe("0");
+    expect(view.element.querySelector('[data-visual-id="matrix:dp"]')).not.toBeNull();
+    expect(view.element.querySelector('[data-cell-row="1"][data-cell-column="0"]')).not.toBeNull();
+    view.dispose();
   });
 
   it("keeps an empty trace readable when execution fails before the first event", () => {

@@ -3,11 +3,13 @@ import type {
   ListVisualModel,
   StructureVisualModel
 } from "../../core/visual-model";
+import type { MatrixVisualModel } from "../../core/matrix-interpreter";
 import { createLinkedListVisualizer } from "./LinkedListVisualizer";
 import { createDictVisualizer } from "./DictVisualizer";
 import { createListVisualizer } from "./ListVisualizer";
 import { createTreeVisualizer } from "./TreeVisualizer";
 import { createGraphVisualizer } from "./GraphVisualizer";
+import { createMatrixVisualizer } from "./MatrixVisualizer";
 
 export interface VisualizerHandle {
   element: HTMLElement;
@@ -52,7 +54,9 @@ const registry = {
   tree: (model: ModelOf<"tree">) =>
     withVisualId(model, createTreeVisualizer(model), "tree"),
   graph: (model: ModelOf<"graph">) =>
-    withVisualId(model, createGraphVisualizer(model), "graph")
+    withVisualId(model, createGraphVisualizer(model), "graph"),
+  matrix: (model: MatrixVisualModel) =>
+    withVisualId(model, createMatrixVisualizer(model), "matrix")
 } satisfies VisualizerRegistry;
 
 export function createVisualizer(model: StructureVisualModel): VisualizerHandle {

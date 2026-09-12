@@ -170,6 +170,7 @@ function renderGrid(model: MatrixVisualModel, viewport: MatrixViewport): HTMLEle
 
   const grid = document.createElement("div");
   grid.className = "matrix-visualizer__grid";
+  grid.style.setProperty("--matrix-column-count", String(viewport.columnCount));
   grid.setAttribute("role", "grid");
   grid.setAttribute("aria-rowcount", String(model.rowCount));
   grid.setAttribute("aria-colcount", String(model.columnCount));

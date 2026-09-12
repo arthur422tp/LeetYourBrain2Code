@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TreeVisualModel } from "../../src/core/tree-interpreter";
 import type { GraphVisualModel } from "../../src/core/graph-interpreter";
+import type { MatrixVisualModel } from "../../src/core/matrix-interpreter";
 import type { ListVisualModel } from "../../src/core/visual-model";
 import {
   createVisualizer,
@@ -75,6 +76,19 @@ function graphModel(objectId: string): GraphVisualModel {
   };
 }
 
+function matrixModel(value = 1): MatrixVisualModel {
+  return {
+    kind: "matrix",
+    visualId: "matrix:dp",
+    variableName: "dp",
+    rowCount: 1,
+    columnCount: 1,
+    cells: [[int(value)]],
+    focuses: [],
+    changedCells: []
+  };
+}
+
 describe("visualizer registry", () => {
   it("creates and updates Tree through the generic registry", () => {
     const first = treeModel("obj-1");
@@ -107,6 +121,26 @@ describe("visualizer registry", () => {
     const handle = createVisualizer(graphModel("obj-1"));
     expect(() => updateVisualizer(handle, treeModel("obj-2"))).toThrow(
       /Cannot update graph visualizer with tree/
+    );
+  });
+
+  it("creates and updates Matrix through the generic registry", () => {
+    const first = matrixModel(1);
+    const second = matrixModel(2);
+    const handle = createVisualizer(first);
+    const root = handle.element;
+
+    expect(handle.kind).toBe("matrix");
+    expect(handle.element.dataset.visualId).toBe("matrix:dp");
+    updateVisualizer(handle, second);
+    expect(handle.element).toBe(root);
+    expect(handle.element.textContent).toContain("2");
+  });
+
+  it("rejects updating a Matrix visualizer with a List model", () => {
+    const handle = createVisualizer(matrixModel());
+    expect(() => updateVisualizer(handle, listModel())).toThrow(
+      /Cannot update matrix visualizer with list/
     );
   });
 });

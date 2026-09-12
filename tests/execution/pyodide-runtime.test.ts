@@ -56,6 +56,8 @@ describe("Pyodide runtime", () => {
     expect(script).toContain('sys.modules["object_topology"]');
     expect(script).toContain("leetcode-ast-analyzer");
     expect(script).toContain('sys.modules["ast_analyzer"]');
+    expect(script).toContain("leetcode-expression-instrumenter");
+    expect(script).toContain('sys.modules["expression_instrumenter"]');
     expect(script).toContain("leetcode-runner");
     expect(script).toContain("run_request");
     expect(script).toContain("parameter_kinds");
@@ -63,6 +65,8 @@ describe("Pyodide runtime", () => {
     expect(script).toContain("ObjectTopologyCollector");
     expect(script).toContain("topology_collector");
     expect(script).toContain("max_container_items");
+    expect(script).toContain("max_expression_events");
+    expect(script).toContain("max_expression_bytes");
     expect(script).toContain("_is_traversal_container");
     expect(script).toContain("_container_children");
     expect(script).toContain(JSON.stringify(request.sourceCode));

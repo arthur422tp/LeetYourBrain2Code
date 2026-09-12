@@ -9,6 +9,7 @@ import type {
 import type { ObjectSnapshot, TraceEvent, ValueSnapshot } from "../shared/trace-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
 import astAnalyzerSource from "./python/ast_analyzer.py?raw";
+import expressionInstrumenterSource from "./python/expression_instrumenter.py?raw";
 import runnerSource from "./python/runner.py?raw";
 import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
@@ -68,6 +69,10 @@ __lc_ast_analyzer_module = types.ModuleType("ast_analyzer")
 exec(compile(${quotePython(astAnalyzerSource)}, "<leetcode-ast-analyzer>", "exec"), vars(__lc_ast_analyzer_module), vars(__lc_ast_analyzer_module))
 sys.modules["ast_analyzer"] = __lc_ast_analyzer_module
 
+__lc_expression_instrumenter_module = types.ModuleType("expression_instrumenter")
+sys.modules["expression_instrumenter"] = __lc_expression_instrumenter_module
+exec(compile(${quotePython(expressionInstrumenterSource)}, "<leetcode-expression-instrumenter>", "exec"), vars(__lc_expression_instrumenter_module), vars(__lc_expression_instrumenter_module))
+
 __lc_object_identity_module = types.ModuleType("object_identity")
 exec(compile(${quotePython(objectIdentitySource)}, "<leetcode-object-identity>", "exec"), vars(__lc_object_identity_module), vars(__lc_object_identity_module))
 sys.modules["object_identity"] = __lc_object_identity_module
@@ -106,6 +111,8 @@ __lc_runner_module.run_request(
         "max_object_nodes": ${request.limits.maxObjectNodes},
         "max_object_attributes": ${request.limits.maxObjectAttributes},
         "max_object_depth": ${request.limits.maxObjectDepth},
+        "max_expression_events": ${request.limits.maxExpressionEvents},
+        "max_expression_bytes": ${request.limits.maxExpressionBytes},
     },
     runtime_globals=__lc_runtime_namespace,
     session_id=${quotePython(request.sessionId)},

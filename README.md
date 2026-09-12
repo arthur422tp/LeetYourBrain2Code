@@ -51,6 +51,10 @@ The MVP is designed to expose:
 - function calls, returns, exceptions, and the call stack;
 - locals, scalar changes, and container mutations;
 - stdout and return values;
+- captured Expression Evidence for supported assignment / return expressions,
+  including operand, intermediate, and result values, factual `min` / `max`
+  candidate selection when it can be proven safely, and List / Matrix overlays
+  for operands, the selected candidate, and assignment targets;
 - list state with index/pointer bindings;
 - dedicated Matrix / Grid visualization for complete rectangular 2D `list` / `tuple` scalar state, including direct `matrix[i][j]` focus, negative-index normalization, out-of-bounds requested-cell evidence, runtime-backed cell changes, a bounded focus-aware viewport, and persistent cell inspection;
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
@@ -93,13 +97,17 @@ Supported:
 - direct `matrix[row][column]` focus for variable and integer-literal operands;
 - Python negative-index normalization and explicit out-of-bounds requested-cell evidence;
 - actual cell changes derived from runtime mutation evidence;
-- a bounded focus-aware viewport and persistent cell inspection.
+- a bounded focus-aware viewport and persistent cell inspection;
+- Expression Evidence overlays for captured List / Matrix operands, selected
+  `min` / `max` candidates, and assignment targets.
 
 Not yet supported:
 
 - ragged, 3D, sparse, or NumPy matrix visualization;
 - alias recovery when the same runtime matrix is reached through another name;
 - focus inference for `i + 1`, `j - 1`, or other arbitrary index expressions;
+- comparison, boolean, and `if` / `while` branch evidence; these belong to the
+  future Condition / Decision Tracing work;
 - DP recurrence or algorithm inference, or expected-vs-actual correctness diagnosis.
 
 ## Important boundaries
@@ -108,6 +116,9 @@ Not yet supported:
 - `timeout` means the local visualization runtime exceeded its wall-clock limit. It does **not** mean LeetCode TLE.
 - Failure-First v0.1 evaluates only `exception`, `trace_limit`, and `timeout`; `Inspect` is user-triggered and the recommendation does not claim a cause or correctness result.
 - Behavioral Signals describe evidence in the captured trace. They do not diagnose an infinite loop, correctness failure, bug, or fix.
+- Expression Evidence describes captured executed computation. It does not infer
+  the correct recurrence, algorithm intent, root cause, or a fix; `min` / `max`
+  candidate selection is shown only when the runtime evidence proves it safely.
 - Trace folding is a deterministic presentation projection over captured raw steps. It does not delete raw events or diagnose why execution failed.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
 - Testcase synchronization observes LeetCode's visible testcase controls; if the testcase editor has not mounted yet, the Side Panel keeps code synchronized and waits for the testcase.

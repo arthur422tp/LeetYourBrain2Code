@@ -666,6 +666,19 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("renders a v2-style session without expression fields", () => {
+    const view = createTraceVisualizer(session());
+    const panel = view.element.querySelector<HTMLElement>(".trace-viewer__expression-panel");
+
+    expect(panel).not.toBeNull();
+    expect(panel?.querySelector(".trace-viewer__panel-body")?.textContent)
+      .toBe("No expression evidence for this step.");
+    expect(view.element.querySelector(".trace-viewer__visual-panel")).not.toBeNull();
+    expect(view.element.querySelector(".trace-viewer__behavioral-panel")).not.toBeNull();
+    expect(view.element.querySelector(".list-visualizer")).not.toBeNull();
+    view.dispose();
+  });
+
   it("keeps the expression panel mounted while showing evidence only on matching steps", () => {
     const view = createTraceVisualizer(expressionSession());
     const panel = view.element.querySelector<HTMLDetailsElement>(".trace-viewer__expression-panel");

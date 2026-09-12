@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ExecutionRequest, ExecutionTerminalResult } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
+import { interpretTrace } from "../../src/core/trace-interpreter";
 import {
   buildExecutionScript,
   createPyodideRuntime,
@@ -655,6 +656,145 @@ describe("Pyodide runtime", () => {
         })
       ])
     }));
+  });
+
+  it("captures Minimum Path Sum expression choices independently from runtime mutations", async () => {
+    const finished: ExecutionTerminalResult[] = [];
+    const traceBatches: TraceEvent[][] = [];
+    const expressionPlans: ExpressionPlan[] = [];
+    const runtime = createPyodideRuntime({
+      indexURL: `${process.cwd()}/node_modules/pyodide/`,
+      onTraceBatch: (_sessionId, events) => traceBatches.push(events),
+      onExpressionPlan: (_sessionId, plan) => expressionPlans.push(plan),
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute({
+      ...request,
+      sessionId: "expression-min-path-session",
+      sourceCode: `class Solution:
+    def minPathSum(self, grid):
+        m, n = len(grid), len(grid[0])
+        dp = [[0] * n for _ in range(m)]
+        for i in range(m):
+            for j in range(n):
+                if i == 0 and j == 0:
+                    dp[i][j] = grid[i][j]
+                elif i == 0:
+                    dp[i][j] = dp[i][j - 1] + grid[i][j]
+                elif j == 0:
+                    dp[i][j] = dp[i - 1][j] + grid[i][j]
+                else:
+                    dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]
+        return dp[-1][-1]
+`,
+      rawTestcase: "[[1,3,1],[1,5,1],[4,2,1]]",
+      entrypoint: {
+        className: "Solution",
+        methodName: "minPathSum",
+        parameterCount: 1,
+        parameterKinds: ["value"]
+      }
+    });
+
+    const terminal = finished[0]!;
+    expect(terminal).toEqual(expect.objectContaining({
+      status: "completed",
+      returnValue: { type: "int", value: "7" }
+    }));
+    const plan = expressionPlans[0] ?? terminal.expressionPlan!;
+    const targetRoot = plan.roots.find((root) =>
+      root.kind === "assignment" &&
+      root.target.source === "dp[i][j]" &&
+      plan.expressions.find((expression) => expression.exprId === root.expressionExprId)?.source.startsWith("min(")
+    );
+    expect(targetRoot).toBeDefined();
+    const rootExpression = plan.expressions.find((expression) => expression.exprId === targetRoot?.expressionExprId);
+    expect(rootExpression).toEqual(expect.objectContaining({
+      kind: "binary",
+      source: "min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]"
+    }));
+
+    const traceEvents = traceBatches.flat();
+    const matchingBatch = terminal.expressionBatches
+      ?.flatMap((batch) => batch.roots.map((root) => ({ batch, root })))
+      .find(({ batch, root }) => {
+        const resultEvaluation = root.evaluations.find((evaluation) => evaluation.exprId === targetRoot?.expressionExprId);
+        const anchorEvent = traceEvents.find((event) => event.step === batch.anchorStep);
+        return root.rootId === targetRoot?.rootId &&
+          resultEvaluation?.value.type === "int" &&
+          resultEvaluation.value.value === "7" &&
+          anchorEvent?.locals.i?.type === "int" &&
+          anchorEvent.locals.i.value === "2" &&
+          anchorEvent.locals.j?.type === "int" &&
+          anchorEvent.locals.j.value === "2" &&
+          root.selectionEvidence?.some((selection) =>
+            selection.function === "min" && selection.status === "resolved"
+          );
+      });
+    expect(matchingBatch).toBeDefined();
+    const selection = matchingBatch?.root.selectionEvidence?.find((item) => item.function === "min");
+    expect(selection).toEqual(expect.objectContaining({
+      candidateExprIds: expect.arrayContaining([
+        expect.any(String),
+        expect.any(String)
+      ]),
+      selectedCandidateIndex: expect.any(Number),
+      status: "resolved"
+    }));
+    expect(selection?.candidateExprIds).toHaveLength(2);
+
+    const interpretation = interpretTrace(
+      traceEvents,
+      terminal.subscriptRelations ?? [],
+      plan,
+      terminal.expressionBatches ?? []
+    );
+    const evidenceRoot = interpretation.expressionEvidence
+      .get(matchingBatch!.batch.anchorStep)?.roots
+      .find((root) => root.rootId === targetRoot?.rootId);
+    expect(evidenceRoot?.structureReferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        variableName: "dp",
+        kind: "matrix_cell",
+        row: 1,
+        column: 2,
+        role: "selected_operand"
+      }),
+      expect.objectContaining({
+        variableName: "dp",
+        kind: "matrix_cell",
+        row: 2,
+        column: 1,
+        role: "operand"
+      }),
+      expect.objectContaining({
+        variableName: "grid",
+        kind: "matrix_cell",
+        row: 2,
+        column: 2,
+        role: "operand"
+      }),
+      expect.objectContaining({
+        variableName: "dp",
+        kind: "matrix_cell",
+        row: 2,
+        column: 2,
+        role: "assignment_target"
+      })
+    ]));
+
+    const dpMutation = interpretation.mutationBatches
+      .flatMap((batch) => batch.mutations)
+      .find((mutation) =>
+        mutation.kind === "sequence_element" &&
+        mutation.containerName === "dp" &&
+        mutation.index === 2 &&
+        mutation.after?.type === "list" &&
+        mutation.after.items[2]?.type === "int" &&
+        mutation.after.items[2].value === "7"
+      );
+    expect(dpMutation).toBeDefined();
   });
 
   it("loads Pyodide once while rebuilding a fresh runtime namespace for every request", async () => {

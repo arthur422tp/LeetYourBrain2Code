@@ -178,6 +178,102 @@ describe("interpretTrace", () => {
       });
   });
 
+  it("keeps expression overlays independent from mutation authority", () => {
+    const expressionPlan: ExpressionPlan = {
+      version: 1,
+      roots: [{
+        rootId: "r-mutation",
+        kind: "assignment",
+        expressionExprId: "r-mutation.0",
+        target: {
+          source: "dp[i][j]",
+          span: { line: 7, column: 0, endLine: 7, endColumn: 10 },
+          structureHint: {
+            kind: "matrix_cell",
+            variableName: "dp",
+            rowSource: "i",
+            columnSource: "j"
+          }
+        },
+        span: { line: 7, column: 0, endLine: 7, endColumn: 10 }
+      }],
+      expressions: [{
+        exprId: "r-mutation.0",
+        rootId: "r-mutation",
+        parentExprId: null,
+        kind: "subscript",
+        span: { line: 7, column: 0, endLine: 7, endColumn: 10 },
+        source: "dp[i][j]",
+        childExprIds: [],
+        structureHint: {
+          kind: "matrix_cell",
+          variableName: "dp",
+          rowExprId: "r-mutation.row",
+          columnExprId: "r-mutation.column"
+        }
+      }, {
+        exprId: "r-mutation.row",
+        rootId: "r-mutation",
+        parentExprId: "r-mutation.0",
+        kind: "name",
+        span: { line: 7, column: 0, endLine: 7, endColumn: 1 },
+        source: "i",
+        childExprIds: []
+      }, {
+        exprId: "r-mutation.column",
+        rootId: "r-mutation",
+        parentExprId: "r-mutation.0",
+        kind: "name",
+        span: { line: 7, column: 0, endLine: 7, endColumn: 1 },
+        source: "j",
+        childExprIds: []
+      }]
+    };
+    const result = interpretTrace(
+      [
+        event(1, "solve", { dp: matrix([[0, 0], [0, 0]]), i: int(1), j: int(1) }),
+        event(2, "solve", { dp: matrix([[0, 0], [0, 7]]), i: int(1), j: int(1) })
+      ],
+      [matrixRelation()],
+      expressionPlan,
+      [{
+        batchId: 1,
+        anchorStep: 1,
+        frameId: 4,
+        line: 7,
+        roots: [{
+          rootId: "r-mutation",
+          status: "completed",
+          evaluations: [
+            { evaluationId: 1, exprId: "r-mutation.row", order: 1, value: int(1) },
+            { evaluationId: 2, exprId: "r-mutation.column", order: 2, value: int(1) }
+          ]
+        }]
+      }]
+    );
+
+    expect(result.visualStates[0]?.visuals.find((visual) => visual.visualId === "matrix:dp"))
+      .toMatchObject({
+        expressionReferences: expect.arrayContaining([
+          expect.objectContaining({ role: "operand", row: 1, column: 1 }),
+          expect.objectContaining({ role: "assignment_target", row: 1, column: 1 })
+        ])
+      });
+    expect(result.mutationBatches[1]?.mutations).toContainEqual(expect.objectContaining({
+      kind: "sequence_element",
+      containerName: "dp",
+      index: 1,
+      after: expect.objectContaining({
+        type: "list",
+        items: [int(0), int(7)]
+      })
+    }));
+    expect(result.visualStates[1]?.visuals.find((visual) => visual.visualId === "matrix:dp"))
+      .toMatchObject({
+        changedCells: [expect.objectContaining({ row: 1, column: 1, action: "changed" })]
+      });
+  });
+
   it("aligns one mutation batch with every reconstructed runtime state", () => {
     const result = interpretTrace([
       event(1, "solve", { left: int(0) }),

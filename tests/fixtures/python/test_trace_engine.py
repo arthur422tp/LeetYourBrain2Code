@@ -819,6 +819,129 @@ class Solution:
     )
 
 
+def test_minimum_path_sum_captures_min_selection_binary_result_and_target():
+    result = request(
+        """class Solution:
+    def minPathSum(self, grid):
+        m, n = len(grid), len(grid[0])
+        dp = [[0] * n for _ in range(m)]
+        for i in range(m):
+            for j in range(n):
+                if i == 0 and j == 0:
+                    dp[i][j] = grid[i][j]
+                elif i == 0:
+                    dp[i][j] = dp[i][j - 1] + grid[i][j]
+                elif j == 0:
+                    dp[i][j] = dp[i - 1][j] + grid[i][j]
+                else:
+                    dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]
+        return dp[-1][-1]
+""",
+        "minPathSum",
+        1,
+        "[[1,3,1],[1,5,1],[4,2,1]]",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "7"}
+    expressions = {
+        expression["exprId"]: expression
+        for expression in result["expression_plan"]["expressions"]
+    }
+    target_root = next(
+        root
+        for root in result["expression_plan"]["roots"]
+        if root["kind"] == "assignment"
+        and root["target"]["source"] == "dp[i][j]"
+        and expressions[root["expressionExprId"]]["source"].startswith("min(")
+    )
+    root = next(
+        root
+        for batch in result["expression_batches"]
+        for root in batch["roots"]
+        if root["root_id"] == target_root["rootId"]
+    )
+
+    assert root["status"] == "completed"
+    evaluations = {item["expr_id"]: item["value"] for item in root["evaluations"]}
+    root_expression = expressions[target_root["expressionExprId"]]
+    assert root_expression["kind"] == "binary"
+    assert root_expression["source"] == "min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]"
+    assert target_root["target"]["source"] == "dp[i][j]"
+    assert target_root["target"]["structureHint"] == {
+        "kind": "matrix_cell",
+        "variableName": "dp",
+        "rowSource": "i",
+        "columnSource": "j",
+    }
+    assert root_expression["exprId"] in evaluations
+
+    selections = [
+        selection
+        for selection in root["selection_evidence"]
+        if selection["function"] == "min"
+    ]
+    assert len(selections) == 1
+    selection = selections[0]
+    assert len(selection["candidate_expr_ids"]) == 2
+    assert selection["status"] == "resolved"
+    assert selection["selected_candidate_index"] in (0, 1)
+    selected_expr_id = selection["candidate_expr_ids"][selection["selected_candidate_index"]]
+    assert evaluations[selected_expr_id] == selection["result"]
+
+    assert any(
+        event["event"] == "line"
+        and event["locals"].get("i") == {"type": "int", "value": "2"}
+        and event["locals"].get("j") == {"type": "int", "value": "2"}
+        for event in result["events"]
+    )
+
+
+def test_unsupported_comparison_root_fails_open_to_ordinary_trace():
+    result = request(
+        """class Solution:
+    def solve(self, a, b):
+        flag = a < b
+""",
+        "solve",
+        2,
+        "1\n2",
+    )
+
+    assert result["status"] == "completed"
+    assert result["termination_reason"] == "normal_return"
+    assert result["events"]
+    assert result["return_value"] == {"type": "none", "value": None}
+    assert result["expression_plan"] == {"version": 1, "roots": [], "expressions": []}
+    assert result["expression_batches"] == []
+    assert result["expression_tracing"] == {"status": "complete"}
+
+
+def test_expression_soft_limit_truncates_expression_channel_only():
+    result = run_request(
+        """class Solution:
+    def loop(self):
+        total = 0
+        for index in range(20):
+            total = total + index
+        return total
+""",
+        "",
+        {"class_name": "Solution", "method_name": "loop", "parameter_count": 0},
+        {**LIMITS, "max_expression_events": 1, "max_trace_steps": 200},
+    )
+
+    assert result["status"] == "completed"
+    assert result["termination_reason"] == "normal_return"
+    assert result["return_value"] == {"type": "int", "value": "190"}
+    assert result["expression_tracing"] == {
+        "status": "truncated",
+        "reason": "expression_event_limit",
+    }
+    assert len(result["events"]) > 4
+    assert result["events"][-1]["event"] == "return"
+
+
 class ExpressionTracingRunnerTests(unittest.TestCase):
     def test_pop_side_effect_order_and_count(self):
         test_expression_recording_preserves_pop_side_effect_order_and_count()
@@ -840,3 +963,12 @@ class ExpressionTracingRunnerTests(unittest.TestCase):
 
     def test_custom_repr_is_not_invoked(self):
         test_expression_recording_does_not_invoke_custom_repr_for_intermediate_values()
+
+    def test_minimum_path_sum_channels(self):
+        test_minimum_path_sum_captures_min_selection_binary_result_and_target()
+
+    def test_unsupported_comparison_fails_open(self):
+        test_unsupported_comparison_root_fails_open_to_ordinary_trace()
+
+    def test_expression_soft_limit_is_not_trace_limit(self):
+        test_expression_soft_limit_truncates_expression_channel_only()

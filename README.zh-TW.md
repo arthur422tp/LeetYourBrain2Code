@@ -49,6 +49,10 @@ MVP 的目標是呈現：
 - function call、return、exception 與 call stack；
 - locals、scalar changes 與 container mutations；
 - stdout 與 return value；
+- 對支援的 assignment／return expression 提供 captured Expression Evidence，
+  包含 operand、intermediate、result value；若 runtime evidence 能安全證明，
+  也會呈現 factual `min`／`max` candidate selection，以及 List／Matrix 上的
+  operand、selected candidate 與 assignment target overlay；
 - 帶有 index／pointer bindings 的 list state；
 - 完整矩形 2D `list`／`tuple` scalar state 的專用 Matrix / Grid 視覺化，包含直接 `matrix[i][j]` focus、負索引正規化、越界 requested-cell evidence、由 runtime mutation evidence 推導的實際 cell 變更、受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection；
 - 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
@@ -91,13 +95,17 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - 對 variable 與 integer-literal operand 的直接 `matrix[row][column]` focus；
 - Python 負索引正規化，以及明確呈現越界 requested-cell evidence；
 - 由 runtime mutation evidence 推導的實際 cell 變更；
-- 受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection。
+- 受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection；
+- 對已捕獲的 List／Matrix operand、selected `min`／`max` candidate 與
+  assignment target 提供 Expression Evidence overlay。
 
 尚未支援：
 
 - ragged、3D、sparse 或 NumPy matrix 視覺化；
 - 同一 runtime matrix 透過其他名稱存取時的 alias recovery；
 - 對 `i + 1`、`j - 1` 或其他任意 index expression 的 focus 推導；
+- comparison、boolean，以及 `if`／`while` branch evidence；這些屬於未來的
+  Condition／Decision Tracing 工作；
 - DP recurrence 或演算法意圖推導，也不進行 expected-vs-actual correctness diagnosis。
 
 ## 重要邊界
@@ -106,6 +114,9 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - `timeout` 只代表本機視覺化 runtime 超過 wall-clock limit，**不等於** LeetCode TLE。
 - Failure-First v0.1 只評估 `exception`、`trace_limit`、`timeout`；`Inspect` 必須由使用者觸發，推薦結果只是對 validated captured evidence 的檢視優先順序，不宣稱原因、正確性或 LeetCode TLE。
 - Behavioral Signals 只描述 captured trace 中的 runtime evidence，不會自行診斷 infinite loop、correctness failure、bug 或修正方式。
+- Expression Evidence 只描述 captured execution computation，不會推導正確的
+  recurrence、演算法意圖、root cause 或修正方式；只有在 runtime evidence 能
+  安全證明時，才會呈現 `min`／`max` candidate selection。
 - Trace folding 只是 captured raw steps 上的 deterministic presentation projection，不會刪除 raw events，也不會診斷 execution failure 的原因。
 - Pyodide 無法完整重現 LeetCode judge environment。
 - Testcase synchronization 會讀取 LeetCode 畫面上可見的 testcase controls；如果 testcase editor 尚未 mount，Side Panel 仍會同步 code，並等待 testcase 出現。

@@ -1,13 +1,20 @@
-import type { StaticRelation, SubscriptRelation } from "../shared/trace-types";
+import type {
+  MatrixIndexOperand,
+  MatrixSubscriptRelation,
+  StaticRelation,
+  SubscriptRelation
+} from "../shared/trace-types";
 
 export type {
   IterationRelation,
+  MatrixIndexOperand,
+  MatrixSubscriptRelation,
   MembershipRelation,
   StaticRelation,
   SubscriptRelation
 } from "../shared/trace-types";
 
-function hasRelationFields(value: unknown): value is Record<string, unknown> {
+function hasBaseRelationFields(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -16,28 +23,46 @@ function hasRelationFields(value: unknown): value is Record<string, unknown> {
     typeof candidate.scope === "string" &&
     typeof candidate.line === "number" &&
     Number.isInteger(candidate.line) &&
-    typeof candidate.container === "string" &&
-    typeof candidate.index === "string"
+    typeof candidate.container === "string"
   );
 }
 
+function isMatrixIndexOperand(value: unknown): value is MatrixIndexOperand {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind === "variable") {
+    return typeof candidate.name === "string";
+  }
+  return candidate.kind === "literal" &&
+    typeof candidate.value === "number" &&
+    Number.isSafeInteger(candidate.value);
+}
+
 export function isSubscriptRelation(value: unknown): value is SubscriptRelation {
-  return hasRelationFields(value) &&
+  return hasBaseRelationFields(value) &&
+    typeof value.index === "string" &&
     (value.kind === undefined || value.kind === "subscript");
 }
 
 export function isStaticRelation(value: unknown): value is StaticRelation {
-  if (!hasRelationFields(value)) {
+  if (!hasBaseRelationFields(value)) {
     return false;
   }
   if (value.kind === undefined || value.kind === "subscript") {
-    return true;
+    return typeof value.index === "string";
   }
   if (value.kind === "membership") {
-    return true;
+    return typeof value.index === "string";
   }
-  return value.kind === "iteration" &&
+  if (value.kind === "iteration") {
+    return typeof value.index === "string" &&
     (value.value === undefined || typeof value.value === "string");
+  }
+  return value.kind === "matrix_subscript" &&
+    isMatrixIndexOperand(value.rowIndex) &&
+    isMatrixIndexOperand(value.columnIndex);
 }
 
 export function normalizeSubscriptRelation(value: unknown): StaticRelation | null {

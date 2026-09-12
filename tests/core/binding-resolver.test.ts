@@ -126,4 +126,21 @@ describe("resolvePointerBindings", () => {
       }
     ]);
   });
+
+  it("ignores matrix relations instead of treating a legacy index field as a 1D binding", () => {
+    const matrixRelation = {
+      kind: "matrix_subscript",
+      scope: "Solution.twoSum",
+      line: 7,
+      container: "nums",
+      rowIndex: { kind: "variable", name: "row" },
+      columnIndex: { kind: "variable", name: "column" },
+      index: "row"
+    } as unknown as SubscriptRelation;
+
+    expect(resolvePointerBindings(
+      [matrixRelation],
+      state({ nums: numbers, row: int(1), column: int(2) })
+    )).toEqual([]);
+  });
 });

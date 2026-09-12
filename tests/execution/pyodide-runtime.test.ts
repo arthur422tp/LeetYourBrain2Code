@@ -349,6 +349,65 @@ describe("Pyodide runtime", () => {
     }));
   });
 
+  it("extracts strict matrix subscript relations from a real Pyodide execution", async () => {
+    const finished: ExecutionTerminalResult[] = [];
+    const runtime = createPyodideRuntime({
+      indexURL: `${process.cwd()}/node_modules/pyodide/`,
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute({
+      ...request,
+      sessionId: "matrix-runtime-session",
+      sourceCode: `class Solution:
+    def inspect(self, matrix: list[list[int]], i: int, j: int):
+        a = matrix[i][j]
+        b = matrix[0][-1]
+        c = matrix[i + 1][j]
+        return a + b + c
+`,
+      rawTestcase: "[[1, 2], [3, 4]]\n0\n0",
+      entrypoint: {
+        className: "Solution",
+        methodName: "inspect",
+        parameterCount: 3,
+        parameterKinds: ["value", "value", "value"]
+      }
+    });
+
+    expect(finished[0]).toEqual(expect.objectContaining({
+      status: "completed",
+      subscriptRelations: expect.arrayContaining([
+        {
+          kind: "matrix_subscript",
+          scope: "Solution.inspect",
+          line: 3,
+          container: "matrix",
+          rowIndex: { kind: "variable", name: "i" },
+          columnIndex: { kind: "variable", name: "j" }
+        },
+        {
+          kind: "matrix_subscript",
+          scope: "Solution.inspect",
+          line: 4,
+          container: "matrix",
+          rowIndex: { kind: "literal", value: 0 },
+          columnIndex: { kind: "literal", value: -1 }
+        }
+      ])
+    }));
+    expect(finished[0]?.subscriptRelations).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "matrix_subscript",
+          rowIndex: { kind: "variable", name: "i" },
+          columnIndex: { kind: "variable", name: "j" },
+          line: 5
+        })
+      ])
+    );
+  });
+
   it("loads Pyodide once while rebuilding a fresh runtime namespace for every request", async () => {
     let loadCount = 0;
     const scripts: string[] = [];

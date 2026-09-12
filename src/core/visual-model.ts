@@ -182,12 +182,17 @@ function buildDictVisual(
 
   const probes = relations
     .filter((relation) =>
-      relation.kind !== "iteration" &&
+      (relation.kind === undefined ||
+        relation.kind === "subscript" ||
+        relation.kind === "membership") &&
       relation.container === container &&
       relationMatchesFrameScope(relation, frame.functionName) &&
       relation.line === runtime.currentLine
     )
     .map((relation) => {
+      if (!("index" in relation)) {
+        return null;
+      }
       const key = frame.locals[relation.index];
       if (!key) {
         return null;

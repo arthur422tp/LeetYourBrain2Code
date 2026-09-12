@@ -66,6 +66,7 @@ export function selectPrimaryContainers(
   const activeLineContainers = relations
     .filter((relation) =>
       relation.kind !== "membership" &&
+      relation.kind !== "matrix_subscript" &&
       state.currentLine !== null &&
       relation.line === state.currentLine &&
       relationMatchesFrameScope(relation, frame.functionName) &&

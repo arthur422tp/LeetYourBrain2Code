@@ -11,6 +11,23 @@ class SubscriptRelation:
 
 
 @dataclass(frozen=True)
+class MatrixIndexOperand:
+    kind: str
+    name: str | None = None
+    value: int | None = None
+
+
+@dataclass(frozen=True)
+class MatrixSubscriptRelation:
+    kind: str
+    scope: str
+    line: int
+    container: str
+    rowIndex: MatrixIndexOperand
+    columnIndex: MatrixIndexOperand
+
+
+@dataclass(frozen=True)
 class IterationRelation:
     kind: str
     scope: str
@@ -127,6 +144,20 @@ class _SubscriptRelationVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Subscript(self, node):
+        if isinstance(node.value, ast.Subscript) and isinstance(node.value.value, ast.Name):
+            row_index = _matrix_index_operand(node.value.slice)
+            column_index = _matrix_index_operand(node.slice)
+            if row_index is not None and column_index is not None:
+                self.relations.append(
+                    MatrixSubscriptRelation(
+                        kind="matrix_subscript",
+                        scope=self._scope_name(),
+                        line=node.lineno,
+                        container=node.value.value.id,
+                        rowIndex=row_index,
+                        columnIndex=column_index,
+                    )
+                )
         if isinstance(node.value, ast.Name) and isinstance(node.slice, ast.Name):
             self.relations.append(
                 SubscriptRelation(
@@ -137,6 +168,22 @@ class _SubscriptRelationVisitor(ast.NodeVisitor):
                 )
             )
         self.generic_visit(node)
+
+
+def _matrix_index_operand(node):
+    if isinstance(node, ast.Name):
+        return MatrixIndexOperand(kind="variable", name=node.id)
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return MatrixIndexOperand(kind="literal", value=node.value)
+    if (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, (ast.USub, ast.UAdd))
+        and isinstance(node.operand, ast.Constant)
+        and type(node.operand.value) is int
+    ):
+        sign = -1 if isinstance(node.op, ast.USub) else 1
+        return MatrixIndexOperand(kind="literal", value=sign * node.operand.value)
+    return None
 
 
 def analyze_subscript_relations(source_code):

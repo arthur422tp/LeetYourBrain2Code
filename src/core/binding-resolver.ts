@@ -45,7 +45,7 @@ export function resolvePointerBindings(
   const bindings: PointerBinding[] = [];
   const seen = new Set<string>();
   for (const relation of relations) {
-    if (relation.kind === "membership") {
+    if (relation.kind === "membership" || relation.kind === "matrix_subscript") {
       continue;
     }
     if (!relationMatchesFrameScope(relation, frame.functionName)) {

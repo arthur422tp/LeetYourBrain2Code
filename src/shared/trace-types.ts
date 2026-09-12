@@ -119,6 +119,19 @@ export interface SubscriptRelation {
   index: string;
 }
 
+export type MatrixIndexOperand =
+  | { kind: "variable"; name: string }
+  | { kind: "literal"; value: number };
+
+export interface MatrixSubscriptRelation {
+  kind: "matrix_subscript";
+  scope: string;
+  line: number;
+  container: string;
+  rowIndex: MatrixIndexOperand;
+  columnIndex: MatrixIndexOperand;
+}
+
 export interface IterationRelation {
   kind: "iteration";
   scope: string;
@@ -139,7 +152,8 @@ export interface MembershipRelation {
 export type StaticRelation =
   | SubscriptRelation
   | IterationRelation
-  | MembershipRelation;
+  | MembershipRelation
+  | MatrixSubscriptRelation;
 
 export type TraceEventType = "call" | "line" | "return" | "exception";
 

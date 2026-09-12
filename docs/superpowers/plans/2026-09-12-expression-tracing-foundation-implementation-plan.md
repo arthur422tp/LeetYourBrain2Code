@@ -4,7 +4,7 @@
 
 **Goal:** Add factual expression-level runtime evidence for supported assignment RHS and return expressions, including nested operand/result trees, safe built-in `min` / `max` selection evidence, step-aligned streaming, and List / Matrix overlays without changing existing runtime-state or mutation authority.
 
-**Architecture:** Keep `sys.settrace` as the authoritative line/state channel and add a separate AST-instrumented expression channel. Python captures static `ExpressionPlan` metadata plus runtime `ExpressionBatch` occurrences; the worker streams the plan once and batches incrementally, the session collector persists them into trace schema v3, and a TypeScript interpreter reconstructs renderer-ready evidence keyed by raw trace `step`. Existing structure visualizers only receive already-resolved expression references; they never infer expression semantics.
+**Architecture:** Keep `sys.settrace` as the authoritative line/state channel and add a separate AST-instrumented expression channel. Python captures one static `ExpressionPlan` plus runtime `ExpressionBatch` occurrences; the worker streams the plan once and batches incrementally, the session collector persists them into trace schema v3, and a TypeScript interpreter reconstructs renderer-ready evidence keyed by raw trace `step`. Existing structure visualizers only render already-resolved expression references and never infer expression semantics.
 
 **Tech Stack:** TypeScript 5.8, Vitest 3.2, Pyodide 0.29.3, Python `ast`, Chrome MV3 Web Worker, JSDOM.
 
@@ -22,44 +22,43 @@
 - Expression instrumentation is fail-open: unsupported or failed expression instrumentation must not prevent ordinary compile/execution/line tracing when the original source itself is valid.
 - Expression budgets are soft limits: exhausting `maxExpressionEvents` or `maxExpressionBytes` marks expression tracing truncated but must not terminate ordinary tracing.
 - Timeout / TLE-like worker termination must preserve any already streamed `ExpressionPlan` and `ExpressionBatch` data.
-- Trace schema advances from v2 to **v3**; older traces without expression fields remain valid and render with no expression evidence.
+- Trace schema advances from v2 to **v3**; older traces without expression fields remain usable.
 - Full regression gates remain `npm test`, `npm run typecheck`, and `npm run build`.
 
 ---
 
 ## File Structure
 
-Create focused files rather than folding the new subsystem into existing large modules:
+Create these focused units:
 
 ```text
 src/shared/expression-types.ts
-    Shared static plan, runtime batch, tracing-status, renderer-evidence and
-    structure-reference contracts.
+    Shared static-plan, runtime-batch, tracing-status, interpreted-evidence,
+    and structure-reference contracts.
 
 src/worker/python/expression_instrumenter.py
-    Parse original AST, choose supported roots, assign stable IDs/source spans,
-    and produce an instrumented AST plus serializable ExpressionPlan.
+    Original-AST root discovery, stable IDs/source spans, static structure hints,
+    and semantics-preserving AST rewriting.
 
 src/worker/python/expression_recorder.py
-    Runtime value recording, per-anchor batching, soft expression limits,
-    built-in min/max selection evidence, and best-effort batch streaming.
+    Runtime value recording, per-anchor batching, soft limits, min/max selection
+    evidence, and best-effort expression-batch streaming.
 
 src/core/expression-interpreter.ts
-    Join ExpressionPlan + ExpressionBatch into per-step evidence trees.
+    ExpressionPlan + ExpressionBatch -> per-trace-step evidence trees.
 
 src/core/expression-structure-projection.ts
-    Resolve supported List / Matrix operand and assignment-target coordinates
-    from expression evidence plus the anchored RuntimeState.
+    Safe List / Matrix coordinate projection from captured expression evidence.
 
 src/sidepanel/components/ExpressionEvidence.ts
-    Render the persistent Expression Evidence panel for the current trace step.
+    Persistent Expression Evidence panel for the selected trace step.
 ```
 
-Existing files change only at their established integration seams: shared protocol/types, runner/tracer, Pyodide bridge, session collector/controller, trace interpreter, visual models/renderers, and sidepanel styles.
+Existing files change only at established integration seams: shared protocol/types, Python runner/tracer, Pyodide bridge, worker protocol, execution session collection, trace interpretation, visual models/renderers, and sidepanel styles.
 
 ---
 
-### Task 1: Define Trace Schema v3 and Expression Protocol Contracts
+### Task 1: Define Trace Schema v3 and Shared Expression Contracts
 
 **Files:**
 - Create: `src/shared/expression-types.ts`
@@ -70,23 +69,19 @@ Existing files change only at their established integration seams: shared protoc
 - Modify: `tests/execution/execution-request.test.ts`
 
 **Interfaces:**
-- Produces shared contracts used by every later task.
-- `ExpressionBatch.batchId` is required so streamed and terminal copies can be de-duplicated deterministically.
-- `expression_plan` is a separate streamed worker message because hard timeout may kill the worker before a terminal result exists.
+- Produces all shared contracts consumed by Tasks 2–8.
+- `ExpressionBatch.batchId` is required for deterministic stream/terminal de-duplication.
+- Worker protocol has separate `expression_plan` and `expression_batch` messages so a hard timeout can preserve both metadata and values.
 
-- [ ] **Step 1: Write failing protocol tests for v3 messages and limits**
+- [ ] **Step 1: Write failing protocol tests**
 
-Add tests that require the worker validator to accept both expression message kinds and reject malformed payloads:
+Add worker-protocol assertions:
 
 ```ts
 expect(isWorkerOutboundMessage({
   type: "expression_plan",
   sessionId: "s1",
-  plan: {
-    version: 1,
-    roots: [],
-    expressions: []
-  }
+  plan: { version: 1, roots: [], expressions: [] }
 })).toBe(true);
 
 expect(isWorkerOutboundMessage({
@@ -102,7 +97,9 @@ expect(isWorkerOutboundMessage({
 })).toBe(true);
 ```
 
-Extend execution-limit expectations so request fixtures include:
+Add negative tests for missing `batchId`, non-integer `anchorStep`, and `plan.version !== 1`.
+
+Extend request fixtures with:
 
 ```ts
 maxExpressionEvents: 20_000,
@@ -115,13 +112,14 @@ Run:
 npm test -- tests/protocol/worker-protocol.test.ts tests/execution/execution-request.test.ts
 ```
 
-Expected: FAIL because expression message types and limits do not exist yet.
+Expected: FAIL because the new protocol does not exist yet.
 
-- [ ] **Step 2: Add shared expression contracts**
+- [ ] **Step 2: Create `src/shared/expression-types.ts`**
 
-Create `src/shared/expression-types.ts` with the exact public shape below:
+Define:
 
 ```ts
+import type { RuntimeState } from "../core/runtime-state";
 import type { ValueSnapshot } from "./trace-types";
 
 export interface SourceSpan {
@@ -258,651 +256,7 @@ export type StructureOperandReference =
       rawColumn: number;
       role: "operand" | "selected_operand" | "assignment_target";
     };
-```
 
-`StaticStructureHint` is static AST metadata only; it is not runtime truth.
-
-- [ ] **Step 3: Advance trace and execution contracts**
-
-In `src/shared/trace-types.ts`:
-
-```ts
-export const TRACE_SCHEMA_VERSION = 3;
-```
-
-Add optional v3 fields to `TraceSession`:
-
-```ts
-expressionPlan?: ExpressionPlan;
-expressionBatches?: ExpressionBatch[];
-expressionTracing?: ExpressionTracingState;
-```
-
-In `src/shared/execution-types.ts`, extend `ExecutionLimits` and defaults:
-
-```ts
-maxExpressionEvents: number;
-maxExpressionBytes: number;
-```
-
-with defaults:
-
-```ts
-maxExpressionEvents: 20_000,
-maxExpressionBytes: 2_000_000
-```
-
-Extend `ExecutionTerminalResult` with the same optional expression plan/batches/status fields so a normally completed Python run can provide a terminal copy.
-
-- [ ] **Step 4: Add worker side-channel message types and validation**
-
-Extend `WorkerOutboundMessage`:
-
-```ts
-| { type: "expression_plan"; sessionId: string; plan: ExpressionPlan }
-| { type: "expression_batch"; sessionId: string; batches: ExpressionBatch[] }
-```
-
-Add structural validators that require integer `batchId`, `anchorStep`, `frameId`, `line`, arrays for roots/expressions, and `plan.version === 1`. Do not silently accept malformed expression messages.
-
-- [ ] **Step 5: Run focused tests and typecheck**
-
-Run:
-
-```bash
-npm test -- tests/protocol/worker-protocol.test.ts tests/execution/execution-request.test.ts
-npm run typecheck
-```
-
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/shared/expression-types.ts src/shared/trace-types.ts src/shared/execution-types.ts src/shared/worker-protocol.ts tests/protocol/worker-protocol.test.ts tests/execution/execution-request.test.ts
-git commit -m "feat: define expression tracing protocol"
-```
-
----
-
-### Task 2: Build the Static Expression Planner and Semantics-Preserving AST Instrumenter
-
-**Files:**
-- Create: `src/worker/python/expression_instrumenter.py`
-- Modify: `src/worker/pyodide-runtime.ts`
-- Modify: `tests/execution/pyodide-runtime.test.ts`
-
-**Interfaces:**
-- Produces Python function:
-
-```python
-instrument_expression_roots(source_code) -> InstrumentationResult
-```
-
-where `InstrumentationResult` exposes:
-
-```python
-.instrumented_tree
-.plan_dict
-.available
-.reason
-```
-
-- Stable IDs use root ordinal + AST child path generated from the original AST before rewrite.
-- Each supported `Subscript` descriptor may carry a static List/Matrix structure hint so the TypeScript projection layer never parses source text to discover a container.
-
-- [ ] **Step 1: Write failing build-script and normalization tests**
-
-Extend `tests/execution/pyodide-runtime.test.ts` so `buildExecutionScript(request)` must load a dedicated module before the runner:
-
-```ts
-expect(script).toContain("leetcode-expression-instrumenter");
-expect(script).toContain('sys.modules["expression_instrumenter"]');
-expect(script).toContain("max_expression_events");
-expect(script).toContain("max_expression_bytes");
-```
-
-Run:
-
-```bash
-npm test -- tests/execution/pyodide-runtime.test.ts
-```
-
-Expected: FAIL.
-
-- [ ] **Step 2: Implement root discovery and fail-closed shape validation**
-
-Create `src/worker/python/expression_instrumenter.py` using `ast.NodeTransformer` plus a separate original-tree metadata walk.
-
-Root selection rules:
-
-```python
-# accepted roots
-x = a + b
-arr[i] = value
-return dp[-1]
-
-# rejected roots when unsupported nodes occur anywhere inside RHS/return
-x = a < b
-x = a and b
-x = [n * 2 for n in nums]
-return a if cond else b
-```
-
-Supported expression node classes for a root are exactly:
-
-```python
-ast.Name        # Load only
-ast.Constant
-ast.Subscript
-ast.Attribute
-ast.UnaryOp
-ast.BinOp
-ast.Call
-```
-
-Allow structural helper nodes needed by those expressions, such as `ast.Load`, operators, and call keyword containers, but do not emit expression descriptors for them.
-
-- [ ] **Step 3: Generate stable metadata from the original AST**
-
-For every supported expression node, capture:
-
-```python
-{
-    "exprId": "r3.0.1",
-    "rootId": "r3",
-    "parentExprId": "r3.0",
-    "kind": "subscript",
-    "span": {
-        "line": node.lineno,
-        "column": node.col_offset,
-        "endLine": node.end_lineno,
-        "endColumn": node.end_col_offset,
-    },
-    "source": ast.get_source_segment(source_code, node),
-    "childExprIds": [...],
-}
-```
-
-Recognize static structure hints without evaluating expressions:
-
-```python
-arr[index_expr]
-# -> {kind:"list_index", variableName:"arr", indexExprId:<id>}
-
-dp[row_expr][column_expr]
-# -> {kind:"matrix_cell", variableName:"dp", rowExprId:<id>, columnExprId:<id>}
-```
-
-For assignment targets, store source/span and only emit target hints for direct Name-rooted list/matrix subscripts.
-
-- [ ] **Step 4: Rewrite supported Load expressions with value-preserving probes**
-
-Wrap supported value expressions using a helper call that preserves source locations:
-
-```python
-__lc_expr_record(root_id, expr_id, original_expression)
-```
-
-Use `ast.copy_location` on replacement nodes and `ast.fix_missing_locations` after transformation.
-
-Do not wrap Store-context target nodes as value expressions.
-
-For direct positional `min(...)` / `max(...)` calls whose callee is an `ast.Name` and whose call contains no starred args and no keywords, route the call through:
-
-```python
-__lc_minmax_call(root_id, call_expr_id, function_object, candidate_expr_ids, candidate_values)
-```
-
-The helper receives the already evaluated runtime callable object and candidate values in Python evaluation order; it invokes the callable exactly once.
-
-All other generic calls retain normal Python call semantics and are only wrapped at the final call-result level after their supported child expressions are instrumented.
-
-- [ ] **Step 5: Make unsupported instrumentation fail open**
-
-`instrument_expression_roots()` must return the original parsed tree plus:
-
-```python
-available = False
-reason = "unsupported_expression_shape"  # or an internal instrumentation reason
-plan_dict = {"version": 1, "roots": [], "expressions": []}
-```
-
-when no safe supported roots exist or instrumentation itself cannot be constructed. Original `SyntaxError` remains a parse error and is not converted into instrumentation unavailability.
-
-- [ ] **Step 6: Load the instrumenter in the Pyodide execution script**
-
-Import the raw module in `src/worker/pyodide-runtime.ts`, register it as `expression_instrumenter`, and pass the new expression limits into `run_request`:
-
-```python
-"max_expression_events": request.limits.maxExpressionEvents,
-"max_expression_bytes": request.limits.maxExpressionBytes,
-```
-
-- [ ] **Step 7: Run focused tests and typecheck**
-
-```bash
-npm test -- tests/execution/pyodide-runtime.test.ts
-npm run typecheck
-```
-
-Expected: PASS.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add src/worker/python/expression_instrumenter.py src/worker/pyodide-runtime.ts tests/execution/pyodide-runtime.test.ts
-git commit -m "feat: instrument expression roots"
-```
-
----
-
-### Task 3: Capture Runtime Expression Evidence Without Changing User Semantics
-
-**Files:**
-- Create: `src/worker/python/expression_recorder.py`
-- Modify: `src/worker/python/tracer.py`
-- Modify: `src/worker/python/runner.py`
-- Modify: `src/worker/pyodide-runtime.ts`
-- Modify: `tests/execution/pyodide-runtime.test.ts`
-
-**Interfaces:**
-- `ExpressionRecorder` consumes `ValueSerializer`, soft limits, and an optional streaming callback.
-- `TraceCollector` exposes line anchors to the recorder and flushes the previous anchor before a new user event closes that execution segment.
-- Python helper functions injected into the user namespace are named with the existing `__lc_` prefix so Locals UI stays clean.
-
-- [ ] **Step 1: Write failing runtime normalization tests for plan, batches, partial roots, and selection**
-
-Extend `tests/execution/pyodide-runtime.test.ts` with a fake Python terminal result containing:
-
-```ts
-expression_plan: {
-  version: 1,
-  roots: [{
-    rootId: "r1",
-    kind: "assignment",
-    expressionExprId: "r1.0",
-    target: {
-      source: "x",
-      span: { line: 3, column: 8, endLine: 3, endColumn: 9 }
-    },
-    span: { line: 3, column: 8, endLine: 3, endColumn: 13 }
-  }],
-  expressions: []
-},
-expression_batches: [{
-  batchId: 1,
-  anchor_step: 4,
-  frame_id: 2,
-  line: 3,
-  roots: [{
-    root_id: "r1",
-    status: "completed",
-    evaluations: [{
-      evaluation_id: 1,
-      expr_id: "r1.0",
-      order: 1,
-      value: { type: "int", value: "11" }
-    }],
-    result_expr_id: "r1.0"
-  }]
-}],
-expression_tracing: { status: "complete" }
-```
-
-Assert that `normalizePythonExecutionResult` produces camelCase typed equivalents.
-
-Run:
-
-```bash
-npm test -- tests/execution/pyodide-runtime.test.ts
-```
-
-Expected: FAIL.
-
-- [ ] **Step 2: Implement `ExpressionRecorder` with soft limits**
-
-Create `src/worker/python/expression_recorder.py` with state equivalent to:
-
-```python
-class ExpressionRecorder:
-    def __init__(self, limits, serializer_factory, session_id="session", emit_batch=None):
-        self.active_anchors = {}          # frame_id -> {step,line}
-        self.pending_roots = {}           # (frame_id, step, root_id) -> root evidence
-        self.completed_batches = []
-        self.next_evaluation_id = 1
-        self.next_batch_id = 1
-        self.expression_event_count = 0
-        self.expression_bytes = 0
-        self.status = "complete"
-        self.reason = None
-```
-
-Required methods:
-
-```python
-set_anchor(frame_id, step, line)
-record_value(root_id, expr_id, value) -> value
-record_minmax_call(root_id, call_expr_id, function_obj, candidate_expr_ids, candidate_values)
-flush_frame(frame_id)
-flush_all()
-result_dict()
-```
-
-When either soft limit is exceeded, set:
-
-```python
-status = "truncated"
-reason = "expression_event_limit"  # or expression_byte_limit
-```
-
-and make further recording a no-op while still returning original values/call results.
-
-- [ ] **Step 3: Preserve ordinary expression semantics in runtime helpers**
-
-`record_value()` must serialize/record and then return the exact original Python value object.
-
-`record_minmax_call()` must:
-
-```python
-result = function_obj(*candidate_values)
-```
-
-exactly once, then record call result and optional selection evidence.
-
-Selection eligibility requires:
-
-```python
-function_obj is builtins.min or function_obj is builtins.max
-len(candidate_values) >= 2
-all candidates + result serialize to eligible primitive snapshots
-```
-
-Eligible selection snapshots are:
-
-```text
-int
-bool
-str
-finite float
-```
-
-`NaN`, infinities, custom objects, containers, unknown values, and unsupported call shape return `selectedCandidateIndex = null` with a non-`resolved` status.
-
-Duplicate winners use the first matching positional candidate.
-
-- [ ] **Step 4: Anchor expression batches to the existing user trace**
-
-Modify `TraceCollector` so `_record()` returns the raw `step` it created.
-
-In `trace()`:
-
-1. before a new `line`, `return`, or `exception` event closes a previous execution segment for the frame, call `expression_recorder.flush_frame(frame_id)`;
-2. record the trace event normally;
-3. after a `line` event is recorded, call `expression_recorder.set_anchor(frame_id, step, frame.f_lineno)`.
-
-This gives expression probes executed after the line event a stable `anchorStep` without creating fake trace steps.
-
-- [ ] **Step 5: Wire instrumented compilation and helper injection in `runner.py`**
-
-Replace direct compilation of `source_code` with:
-
-```python
-instrumentation = instrument_expression_roots(source_code)
-code_tree = instrumentation.instrumented_tree if instrumentation.available else ast.parse(
-    source_code,
-    filename=USER_CODE_FILENAME,
-    mode="exec",
-)
-user_code = compile(code_tree, USER_CODE_FILENAME, "exec")
-```
-
-Create one `ExpressionRecorder`, connect it to the `TraceCollector`, and inject:
-
-```python
-namespace["__lc_expr_record"] = recorder.record_value
-namespace["__lc_minmax_call"] = recorder.record_minmax_call
-```
-
-before `exec(user_code, namespace, namespace)`.
-
-Ensure the tracer's existing `__lc_*` local filter continues to hide helpers.
-
-- [ ] **Step 6: Preserve partial evidence on exceptions**
-
-On runtime exception, trace limit, normal completion, and runner teardown, call:
-
-```python
-recorder.flush_all()
-```
-
-before constructing the terminal result.
-
-A root with child evaluations but no root result must serialize as:
-
-```text
-status = partial
-resultExprId omitted
-```
-
-The original user exception remains unchanged in the terminal result.
-
-- [ ] **Step 7: Normalize Python expression result fields in TypeScript**
-
-In `src/worker/pyodide-runtime.ts`, add dedicated normalizers:
-
-```ts
-normalizeExpressionPlan(value: unknown): ExpressionPlan | undefined
-normalizeExpressionBatch(value: unknown): ExpressionBatch | null
-normalizeExpressionTracingState(value: unknown): ExpressionTracingState | undefined
-```
-
-Do not reuse loose object casts. Normalize snake_case Python fields to camelCase TypeScript fields exactly once at this boundary.
-
-- [ ] **Step 8: Run focused tests and typecheck**
-
-```bash
-npm test -- tests/execution/pyodide-runtime.test.ts
-npm run typecheck
-```
-
-Expected: PASS.
-
-- [ ] **Step 9: Commit**
-
-```bash
-git add src/worker/python/expression_recorder.py src/worker/python/tracer.py src/worker/python/runner.py src/worker/pyodide-runtime.ts tests/execution/pyodide-runtime.test.ts
-git commit -m "feat: capture runtime expression evidence"
-```
-
----
-
-### Task 4: Stream Expression Plan and Batches Through the Worker and Preserve Them on Timeout
-
-**Files:**
-- Modify: `src/worker/python/runner.py`
-- Modify: `src/worker/pyodide-runtime.ts`
-- Modify: `src/worker/pyodide-worker.ts`
-- Modify: `src/execution/trace-session-collector.ts`
-- Modify: `src/execution/execution-controller.ts`
-- Modify: `tests/execution/pyodide-runtime.test.ts`
-- Modify: `tests/execution/pyodide-worker.test.ts`
-- Modify: `tests/execution/trace-session-collector.test.ts`
-- Modify: `tests/execution/execution-controller.test.ts`
-
-**Interfaces:**
-- Pyodide runtime options gain:
-
-```ts
-onExpressionPlan?: (sessionId: string, plan: ExpressionPlan) => void;
-onExpressionBatch?: (sessionId: string, batches: ExpressionBatch[]) => void;
-```
-
-- `TraceSessionCollector` gains:
-
-```ts
-setExpressionPlan(plan: ExpressionPlan): void;
-appendExpressionBatches(batches: ExpressionBatch[]): void;
-setExpressionTracingState(state: ExpressionTracingState): void;
-```
-
-- Collector de-duplicates batches by `batchId`.
-
-- [ ] **Step 1: Write failing timeout-survival tests**
-
-In `tests/execution/trace-session-collector.test.ts`, construct a collector, call:
-
-```ts
-collector.setExpressionPlan(plan);
-collector.appendExpressionBatches([batch]);
-const session = collector.forceTimeout();
-```
-
-Assert:
-
-```ts
-expect(session.status).toBe("timeout");
-expect(session.expressionPlan).toEqual(plan);
-expect(session.expressionBatches).toEqual([batch]);
-```
-
-Also append the same `batchId` twice and assert it appears once.
-
-In `tests/execution/execution-controller.test.ts`, emit `expression_plan` and `expression_batch` messages before advancing the fake timer to hard timeout; assert the resolved session retains both.
-
-Run:
-
-```bash
-npm test -- tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts
-```
-
-Expected: FAIL.
-
-- [ ] **Step 2: Stream the plan before user-code execution begins**
-
-Add a Pyodide global callback:
-
-```text
-__lc_emit_expression_plan
-```
-
-`runner.py` emits the serializable plan immediately after successful instrumentation and before executing user code.
-
-This callback is best effort. Failure to stream the plan must not stop execution.
-
-- [ ] **Step 3: Stream completed expression batches incrementally**
-
-Add a second callback:
-
-```text
-__lc_emit_expression_batch
-```
-
-`ExpressionRecorder.flush_frame()` serializes completed batches and calls the callback with compact JSON.
-
-Keep expression streaming independent from the existing `TRACE_BATCH_MAX_BYTES` trace stream; malformed optional expression JSON must be ignored at the TS bridge rather than failing user execution.
-
-- [ ] **Step 4: Install and remove both callbacks in `createPyodideRuntime()`**
-
-Add runtime callbacks and globals only when corresponding options are present:
-
-```ts
-pyodide.globals.set("__lc_emit_expression_plan", emitExpressionPlan);
-pyodide.globals.set("__lc_emit_expression_batch", emitExpressionBatch);
-```
-
-Remove them in `finally` exactly like `__lc_emit_trace_batch`.
-
-If no expression batches streamed during the run but terminal normalized results contain batches, forward them once after completion as a fallback.
-
-- [ ] **Step 5: Forward expression messages from `pyodide-worker.ts`**
-
-Map runtime callbacks to protocol messages:
-
-```ts
-onExpressionPlan: (sessionId, plan) => {
-  scope.postMessage({ type: "expression_plan", sessionId, plan });
-},
-onExpressionBatch: (sessionId, batches) => {
-  scope.postMessage({ type: "expression_batch", sessionId, batches });
-}
-```
-
-Add worker tests that verify plan arrives before batch and both arrive before `execution_finished` when the fake runtime emits them in that order.
-
-- [ ] **Step 6: Persist expression stream in `TraceSessionCollector`**
-
-Store:
-
-```ts
-private expressionPlan: ExpressionPlan | undefined;
-private readonly expressionBatches: ExpressionBatch[] = [];
-private readonly expressionBatchIds = new Set<number>();
-private expressionTracing: ExpressionTracingState | undefined;
-```
-
-`appendExpressionBatches()` ignores duplicate batch IDs and respects `maxExpressionBytes` without setting the existing `resourceLimitReached` flag. If the expression budget is exceeded, set only:
-
-```ts
-{ status: "truncated", reason: "expression_byte_limit" }
-```
-
-and stop accepting further expression batches.
-
-`createSession()` copies plan/batches/status into the v3 `TraceSession`.
-
-- [ ] **Step 7: Route expression protocol messages in `ExecutionController`**
-
-Add cases before terminal handling:
-
-```ts
-if (message.type === "expression_plan") {
-  if (message.sessionId === request.sessionId) {
-    collector.setExpressionPlan(message.plan);
-  }
-  return;
-}
-
-if (message.type === "expression_batch") {
-  if (message.sessionId === request.sessionId) {
-    collector.appendExpressionBatches(message.batches);
-  }
-  return;
-}
-```
-
-On `execution_finished`, merge any terminal plan/batches/status into the collector before `finish()` so missing stream data is recovered and duplicate `batchId`s remain de-duplicated.
-
-- [ ] **Step 8: Run focused execution tests**
-
-```bash
-npm test -- tests/execution/pyodide-runtime.test.ts tests/execution/pyodide-worker.test.ts tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts
-npm run typecheck
-```
-
-Expected: PASS.
-
-- [ ] **Step 9: Commit**
-
-```bash
-git add src/worker/python/runner.py src/worker/pyodide-runtime.ts src/worker/pyodide-worker.ts src/execution/trace-session-collector.ts src/execution/execution-controller.ts tests/execution/pyodide-runtime.test.ts tests/execution/pyodide-worker.test.ts tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts
-git commit -m "feat: stream expression trace evidence"
-```
-
----
-
-### Task 5: Reconstruct Per-Step Expression Evidence Trees in TypeScript
-
-**Files:**
-- Create: `src/core/expression-interpreter.ts`
-- Create: `tests/core/expression-interpreter.test.ts`
-- Modify: `src/core/trace-interpreter.ts`
-- Modify: `tests/core/trace-interpreter.test.ts`
-
-**Interfaces:**
-- Produces:
-
-```ts
 export interface ExpressionEvidenceNode {
   exprId: string;
   kind: ExpressionKind;
@@ -928,7 +282,644 @@ export interface ExpressionStepEvidence {
 }
 
 export type ExpressionEvidenceByStep = Map<number, ExpressionStepEvidence>;
+```
 
+Do **not** import `RuntimeState` here; shared protocol types must not depend on `src/core`. Remove that import if an editor auto-adds it.
+
+- [ ] **Step 3: Extend trace/execution contracts**
+
+In `src/shared/trace-types.ts`:
+
+```ts
+export const TRACE_SCHEMA_VERSION = 3;
+```
+
+Add optional fields to `TraceSession`:
+
+```ts
+expressionPlan?: ExpressionPlan;
+expressionBatches?: ExpressionBatch[];
+expressionTracing?: ExpressionTracingState;
+```
+
+In `src/shared/execution-types.ts`, extend `ExecutionLimits` and defaults:
+
+```ts
+maxExpressionEvents: number;
+maxExpressionBytes: number;
+```
+
+```ts
+maxExpressionEvents: 20_000,
+maxExpressionBytes: 2_000_000
+```
+
+Extend `ExecutionTerminalResult` with optional `expressionPlan`, `expressionBatches`, and `expressionTracing` so normal completion can carry a terminal copy.
+
+- [ ] **Step 4: Extend worker protocol validation**
+
+Add:
+
+```ts
+| { type: "expression_plan"; sessionId: string; plan: ExpressionPlan }
+| { type: "expression_batch"; sessionId: string; batches: ExpressionBatch[] }
+```
+
+Validate nested expression fields structurally rather than accepting untyped object casts.
+
+- [ ] **Step 5: Run focused verification**
+
+```bash
+npm test -- tests/protocol/worker-protocol.test.ts tests/execution/execution-request.test.ts
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/shared/expression-types.ts src/shared/trace-types.ts src/shared/execution-types.ts src/shared/worker-protocol.ts tests/protocol/worker-protocol.test.ts tests/execution/execution-request.test.ts
+git commit -m "feat: define expression tracing protocol"
+```
+
+---
+
+### Task 2: Build the Static Expression Planner and AST Instrumenter
+
+**Files:**
+- Create: `src/worker/python/expression_instrumenter.py`
+- Create: `tests/fixtures/python/test_expression_instrumenter.py`
+- Modify: `src/worker/pyodide-runtime.ts`
+- Modify: `tests/execution/pyodide-runtime.test.ts`
+
+**Interfaces:**
+
+Python entrypoint:
+
+```python
+instrument_expression_roots(source_code) -> InstrumentationResult
+```
+
+`InstrumentationResult` contains:
+
+```python
+instrumented_tree
+plan_dict
+available
+reason
+```
+
+Stable IDs are generated from the original AST before rewrite using root ordinal + expression-child path.
+
+- [ ] **Step 1: Write failing Python planner tests**
+
+Create `tests/fixtures/python/test_expression_instrumenter.py` using `unittest` and import the module through the same `src/worker/python` path setup used by the existing Python fixture tests.
+
+Required cases:
+
+```python
+# accepted
+x = a + b
+return dp[-1]
+dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]
+
+# unsupported root, omitted fail-closed
+x = a < b
+x = a and b
+x = [n * 2 for n in nums]
+return a if cond else b
+```
+
+Assert one accepted root has deterministic IDs across two calls to `instrument_expression_roots(source)` and that duplicate source text at two AST locations gets different `exprId`s.
+
+Run:
+
+```bash
+python3 -m unittest tests/fixtures/python/test_expression_instrumenter.py
+```
+
+Expected: FAIL because the module does not exist.
+
+- [ ] **Step 2: Implement supported-root discovery**
+
+A root is an assignment RHS or return value. A root is instrumentable only when its expression subtree is composed of:
+
+```python
+ast.Name       # Load only
+ast.Constant
+ast.Subscript
+ast.Attribute
+ast.UnaryOp
+ast.BinOp
+ast.Call
+```
+
+plus operator/context helper nodes needed by those AST expressions.
+
+Reject roots containing `Compare`, `BoolOp`, comprehensions, generator expressions, `Lambda`, `IfExp`, or starred call expansion.
+
+Unsupported roots are absent from `plan_dict`; they do not cause source execution to fail.
+
+- [ ] **Step 3: Capture source metadata from the original AST**
+
+Each descriptor includes:
+
+```python
+{
+    "exprId": "r3.0.1",
+    "rootId": "r3",
+    "parentExprId": "r3.0",
+    "kind": "subscript",
+    "span": {
+        "line": node.lineno,
+        "column": node.col_offset,
+        "endLine": node.end_lineno,
+        "endColumn": node.end_col_offset,
+    },
+    "source": ast.get_source_segment(source_code, node),
+    "childExprIds": [...],
+}
+```
+
+Recognize static structure hints only from direct AST shape:
+
+```python
+arr[index_expr]
+# list_index(variableName="arr", indexExprId=...)
+
+dp[row_expr][column_expr]
+# matrix_cell(variableName="dp", rowExprId=..., columnExprId=...)
+```
+
+Assignment targets capture source/span and direct Name-rooted list/matrix target hints. Do not evaluate target source.
+
+- [ ] **Step 4: Rewrite Load expressions with value-preserving probes**
+
+Wrap supported expressions as:
+
+```python
+__lc_expr_record(root_id, expr_id, original_expression)
+```
+
+Use `ast.copy_location` on replacements and `ast.fix_missing_locations` after transformation.
+
+Do not wrap Store-context target nodes as ordinary value probes.
+
+For direct positional `min(...)` / `max(...)` calls with an `ast.Name` callee, at least two positional arguments, no keywords, and no starred args, route the call through:
+
+```python
+__lc_minmax_call(root_id, call_expr_id, function_object, candidate_expr_ids, candidate_values)
+```
+
+The callee object is evaluated before candidate expressions, candidate expressions remain left-to-right, and the helper invokes the resolved callable exactly once.
+
+Other calls retain ordinary call semantics and are wrapped only at the final call-result level.
+
+- [ ] **Step 5: Verify AST semantics and source fidelity**
+
+Add Python assertions that:
+
+```text
+compile(instrumented_tree, "<leetcode-user-code>", "exec") succeeds
+original lineno / col_offset remain attached to instrumented roots
+Store target source is not converted into a read probe
+i - 1 and j - 1 remain normal binary expression nodes inside probes
+```
+
+Run:
+
+```bash
+python3 -m unittest tests/fixtures/python/test_expression_instrumenter.py
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Load the module from the Pyodide runtime script**
+
+Import the raw Python file in `src/worker/pyodide-runtime.ts`, register it as:
+
+```python
+sys.modules["expression_instrumenter"]
+```
+
+and pass:
+
+```python
+"max_expression_events": request.limits.maxExpressionEvents,
+"max_expression_bytes": request.limits.maxExpressionBytes,
+```
+
+to `run_request`.
+
+Extend `tests/execution/pyodide-runtime.test.ts`:
+
+```ts
+expect(script).toContain("leetcode-expression-instrumenter");
+expect(script).toContain('sys.modules["expression_instrumenter"]');
+expect(script).toContain("max_expression_events");
+expect(script).toContain("max_expression_bytes");
+```
+
+- [ ] **Step 7: Run focused verification**
+
+```bash
+python3 -m unittest tests/fixtures/python/test_expression_instrumenter.py
+npm test -- tests/execution/pyodide-runtime.test.ts
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/worker/python/expression_instrumenter.py tests/fixtures/python/test_expression_instrumenter.py src/worker/pyodide-runtime.ts tests/execution/pyodide-runtime.test.ts
+git commit -m "feat: instrument expression roots"
+```
+
+---
+
+### Task 3: Capture Runtime Expression Evidence and Preserve Python Semantics
+
+**Files:**
+- Create: `src/worker/python/expression_recorder.py`
+- Modify: `src/worker/python/tracer.py`
+- Modify: `src/worker/python/runner.py`
+- Modify: `tests/fixtures/python/test_trace_engine.py`
+- Modify: `src/worker/pyodide-runtime.ts`
+- Modify: `tests/execution/pyodide-runtime.test.ts`
+
+**Interfaces:**
+
+`ExpressionRecorder` methods:
+
+```python
+set_anchor(frame_id, step, line)
+record_value(root_id, expr_id, value) -> value
+record_minmax_call(root_id, call_expr_id, function_obj, candidate_expr_ids, candidate_values)
+flush_frame(frame_id)
+flush_all()
+result_dict()
+```
+
+`TraceCollector._record()` returns the created raw step so the recorder can anchor to it.
+
+- [ ] **Step 1: Write failing Python semantic-preservation tests**
+
+Extend `tests/fixtures/python/test_trace_engine.py` with runner-level cases for:
+
+```python
+# side effects must occur exactly once
+class Solution:
+    def solve(self, arr):
+        x = arr.pop() + arr.pop()
+        return [x, arr]
+
+# duplicate winner
+class Solution:
+    def solve(self):
+        x = min(3, 3, 5)
+        return x
+
+# partial evidence on exception
+class Solution:
+    def solve(self):
+        x = 10 / 0
+        return x
+
+# shadowed builtin
+class Solution:
+    def solve(self):
+        min = lambda a, b: a
+        x = min(7, 2)
+        return x
+```
+
+Required assertions:
+
+```text
+arr.pop() is executed exactly twice
+min(3,3,5) resolves candidate index 0
+ZeroDivisionError remains the user exception and the root is partial
+shadowed min does not produce resolved built-in selection evidence
+```
+
+Run:
+
+```bash
+python3 -m unittest tests/fixtures/python/test_trace_engine.py
+```
+
+Expected: FAIL.
+
+- [ ] **Step 2: Implement `ExpressionRecorder` soft-limit state**
+
+Create state equivalent to:
+
+```python
+class ExpressionRecorder:
+    def __init__(self, limits, serializer_factory, session_id="session", emit_batch=None):
+        self.active_anchors = {}
+        self.pending_roots = {}
+        self.completed_batches = []
+        self.next_evaluation_id = 1
+        self.next_batch_id = 1
+        self.expression_event_count = 0
+        self.expression_bytes = 0
+        self.status = "complete"
+        self.reason = None
+```
+
+When `max_expression_events` or `max_expression_bytes` is exceeded, set:
+
+```text
+status = truncated
+reason = expression_event_limit | expression_byte_limit
+```
+
+and make all later recording operations return original values without recording. Do not raise `TraceLimitExceeded` for expression-only exhaustion.
+
+- [ ] **Step 3: Implement value-preserving probes**
+
+`record_value()` must:
+
+1. serialize the value for evidence;
+2. append one evaluation to the active `(frameId, anchorStep, rootId)` occurrence;
+3. return the exact original Python value object.
+
+No extra comparison, coercion, copy, or user callback is allowed.
+
+- [ ] **Step 4: Implement fail-closed built-in `min` / `max` selection**
+
+`record_minmax_call()` invokes:
+
+```python
+result = function_obj(*candidate_values)
+```
+
+exactly once.
+
+Resolve selection only when:
+
+```text
+function_obj is builtins.min or builtins.max
+candidate count >= 2
+candidate/result snapshots are int, bool, str, or finite float
+```
+
+NaN, infinities, containers, references, custom objects, and unknown values yield `selectedCandidateIndex = None` with non-`resolved` status.
+
+Duplicate snapshot matches choose the first positional candidate.
+
+- [ ] **Step 5: Anchor recorder batches from `TraceCollector`**
+
+Modify `_record()` to return its `step_count`.
+
+For a frame receiving a new `line`, `return`, or `exception` trace event:
+
+```text
+flush previous expression occurrence for that frame
+record the new trace event
+if the event is line: set recorder anchor to that new raw step + source line
+```
+
+This preserves the semantic distinction:
+
+```text
+TraceEvent(step=N) = entry state before source line executes
+ExpressionBatch(anchorStep=N) = expression work performed by that line
+```
+
+- [ ] **Step 6: Compile instrumented AST and inject helpers in `runner.py`**
+
+Parse/instrument the original source before compilation. When instrumentation is unavailable for internal reasons, compile original source and set expression tracing status to `unavailable`; ordinary tracing continues.
+
+Inject only reserved names:
+
+```python
+namespace["__lc_expr_record"] = recorder.record_value
+namespace["__lc_minmax_call"] = recorder.record_minmax_call
+```
+
+Existing `__lc_*` Locals filtering must continue hiding these helpers.
+
+On normal return, user exception, trace limit, and teardown, call `recorder.flush_all()` before final result construction.
+
+- [ ] **Step 7: Normalize terminal expression fields in TypeScript**
+
+Add to `src/worker/pyodide-runtime.ts`:
+
+```ts
+normalizeExpressionPlan(value: unknown): ExpressionPlan | undefined
+normalizeExpressionBatch(value: unknown): ExpressionBatch | null
+normalizeExpressionTracingState(value: unknown): ExpressionTracingState | undefined
+```
+
+Normalize snake_case Python keys at this boundary only.
+
+Extend `tests/execution/pyodide-runtime.test.ts` with one raw terminal result containing plan, completed batch, partial batch, selection evidence, and tracing state; assert exact camelCase output.
+
+- [ ] **Step 8: Run focused verification**
+
+```bash
+python3 -m unittest tests/fixtures/python/test_expression_instrumenter.py tests/fixtures/python/test_trace_engine.py
+npm test -- tests/execution/pyodide-runtime.test.ts
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/worker/python/expression_recorder.py src/worker/python/tracer.py src/worker/python/runner.py tests/fixtures/python/test_trace_engine.py src/worker/pyodide-runtime.ts tests/execution/pyodide-runtime.test.ts
+git commit -m "feat: capture runtime expression evidence"
+```
+
+---
+
+### Task 4: Stream Expression Metadata and Preserve It Through Hard Timeout
+
+**Files:**
+- Modify: `src/worker/python/runner.py`
+- Modify: `src/worker/python/expression_recorder.py`
+- Modify: `src/worker/pyodide-runtime.ts`
+- Modify: `src/worker/pyodide-worker.ts`
+- Modify: `src/execution/trace-session-collector.ts`
+- Modify: `src/execution/execution-controller.ts`
+- Modify: `tests/execution/pyodide-runtime.test.ts`
+- Modify: `tests/execution/pyodide-worker.test.ts`
+- Modify: `tests/execution/trace-session-collector.test.ts`
+- Modify: `tests/execution/execution-controller.test.ts`
+
+**Interfaces:**
+
+`PyodideRuntimeOptions` gains:
+
+```ts
+onExpressionPlan?: (sessionId: string, plan: ExpressionPlan) => void;
+onExpressionBatch?: (sessionId: string, batches: ExpressionBatch[]) => void;
+```
+
+`TraceSessionCollector` gains:
+
+```ts
+setExpressionPlan(plan: ExpressionPlan): void;
+appendExpressionBatches(batches: ExpressionBatch[]): void;
+setExpressionTracingState(state: ExpressionTracingState): void;
+```
+
+- [ ] **Step 1: Write failing timeout-survival tests**
+
+In `tests/execution/trace-session-collector.test.ts`:
+
+```ts
+collector.setExpressionPlan(plan);
+collector.appendExpressionBatches([batch, batch]);
+const session = collector.forceTimeout();
+
+expect(session.status).toBe("timeout");
+expect(session.expressionPlan).toEqual(plan);
+expect(session.expressionBatches).toEqual([batch]);
+```
+
+The duplicate is removed by `batchId`.
+
+In `tests/execution/execution-controller.test.ts`, send `expression_plan` and `expression_batch` before advancing fake time to `hardTimeoutMs`; assert the timeout session retains both.
+
+Run:
+
+```bash
+npm test -- tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts
+```
+
+Expected: FAIL.
+
+- [ ] **Step 2: Stream the static plan before user code runs**
+
+Expose one best-effort callback:
+
+```text
+__lc_emit_expression_plan
+```
+
+`runner.py` emits `plan_dict` after instrumentation succeeds and before `exec(user_code, ...)` begins.
+
+- [ ] **Step 3: Stream completed batches from `ExpressionRecorder.flush_frame()`**
+
+Expose:
+
+```text
+__lc_emit_expression_batch
+```
+
+Serialize batches as compact JSON. Stream failure is swallowed; execution continues.
+
+- [ ] **Step 4: Install callbacks in `createPyodideRuntime()`**
+
+Register callbacks only when supplied:
+
+```ts
+pyodide.globals.set("__lc_emit_expression_plan", emitExpressionPlan);
+pyodide.globals.set("__lc_emit_expression_batch", emitExpressionBatch);
+```
+
+Remove both in `finally`.
+
+If no stream copy was observed but terminal result contains plan/batches, forward the terminal copy once as fallback.
+
+- [ ] **Step 5: Forward expression messages from `pyodide-worker.ts`**
+
+```ts
+onExpressionPlan: (sessionId, plan) => {
+  scope.postMessage({ type: "expression_plan", sessionId, plan });
+},
+onExpressionBatch: (sessionId, batches) => {
+  scope.postMessage({ type: "expression_batch", sessionId, batches });
+}
+```
+
+Extend `tests/execution/pyodide-worker.test.ts` to verify order:
+
+```text
+expression_plan
+expression_batch
+execution_finished
+```
+
+for a fake runtime emitting in that order.
+
+- [ ] **Step 6: Persist stream data in `TraceSessionCollector`**
+
+Store:
+
+```ts
+private expressionPlan: ExpressionPlan | undefined;
+private readonly expressionBatches: ExpressionBatch[] = [];
+private readonly expressionBatchIds = new Set<number>();
+private expressionTracing: ExpressionTracingState | undefined;
+```
+
+Expression bytes are counted separately. Crossing `maxExpressionBytes` sets only:
+
+```ts
+{ status: "truncated", reason: "expression_byte_limit" }
+```
+
+and stops accepting additional expression batches. It must **not** set the collector's existing `resourceLimitReached` flag.
+
+`createSession()` copies plan, de-duplicated batches, and tracing status into schema v3.
+
+- [ ] **Step 7: Route messages in `ExecutionController` and merge terminal fallback**
+
+Handle:
+
+```ts
+case "expression_plan":
+  if (message.sessionId === request.sessionId) {
+    collector.setExpressionPlan(message.plan);
+  }
+  return;
+
+case "expression_batch":
+  if (message.sessionId === request.sessionId) {
+    collector.appendExpressionBatches(message.batches);
+  }
+  return;
+```
+
+Before `collector.finish(message.result)`, merge terminal `expressionPlan`, `expressionBatches`, and `expressionTracing`; batch IDs keep terminal/stream copies from duplicating.
+
+- [ ] **Step 8: Run focused verification**
+
+```bash
+npm test -- tests/execution/pyodide-runtime.test.ts tests/execution/pyodide-worker.test.ts tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/worker/python/runner.py src/worker/python/expression_recorder.py src/worker/pyodide-runtime.ts src/worker/pyodide-worker.ts src/execution/trace-session-collector.ts src/execution/execution-controller.ts tests/execution/pyodide-runtime.test.ts tests/execution/pyodide-worker.test.ts tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts
+git commit -m "feat: stream expression trace evidence"
+```
+
+---
+
+### Task 5: Interpret Expression Batches Into Per-Step Evidence Trees
+
+**Files:**
+- Create: `src/core/expression-interpreter.ts`
+- Create: `tests/core/expression-interpreter.test.ts`
+- Modify: `src/core/trace-interpreter.ts`
+- Modify: `tests/core/trace-interpreter.test.ts`
+
+**Interfaces:**
+
+```ts
 export function buildExpressionEvidence(
   plan: ExpressionPlan | undefined,
   batches: ExpressionBatch[],
@@ -936,15 +927,21 @@ export function buildExpressionEvidence(
 ): ExpressionEvidenceByStep;
 ```
 
-- [ ] **Step 1: Write failing tree-reconstruction tests**
+`TraceInterpretation` gains:
 
-In `tests/core/expression-interpreter.test.ts`, build a static plan for:
+```ts
+expressionEvidence: ExpressionEvidenceByStep;
+```
+
+- [ ] **Step 1: Write failing tree reconstruction tests**
+
+Create a plan/batch for:
 
 ```python
 x = max(dp[i - 1], dp[i - 2] + nums[i])
 ```
 
-and one completed batch. Assert:
+Assert:
 
 ```ts
 expect(root.tree.source).toBe("max(dp[i - 1], dp[i - 2] + nums[i])");
@@ -952,9 +949,11 @@ expect(root.tree.children).toHaveLength(2);
 expect(root.selections[0]?.selectedCandidateIndex).toBe(1);
 ```
 
-Add a partial-root case with child evaluations but no root-result evaluation and assert `status === "partial"` with no fabricated root value.
+Add:
 
-Add two batches with the same static `exprId` but different `anchorStep` values and assert they remain separate runtime occurrences.
+- partial root with children but no root-result evaluation;
+- same static `exprId` on two different `anchorStep`s;
+- unknown root/expr IDs, which are skipped instead of crashing interpretation.
 
 Run:
 
@@ -964,33 +963,29 @@ npm test -- tests/core/expression-interpreter.test.ts
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 2: Build deterministic descriptor indexes**
+- [ ] **Step 2: Build static and runtime indexes once**
 
-Inside `buildExpressionEvidence()` create maps once:
+Use:
 
 ```ts
-const expressionById = new Map(plan.expressions.map((expression) => [expression.exprId, expression]));
-const rootById = new Map(plan.roots.map((root) => [root.rootId, root]));
+const expressionById = new Map(plan.expressions.map((item) => [item.exprId, item]));
+const rootById = new Map(plan.roots.map((item) => [item.rootId, item]));
 const runtimeByStep = new Map(runtimeStates.map((state) => [state.step, state]));
 ```
 
-Unknown `exprId`, unknown `rootId`, or a batch whose `anchorStep` does not exist in captured runtime states must be skipped fail-closed rather than throwing the whole interpretation.
+A batch whose `anchorStep` is absent from `runtimeByStep` is ignored fail-closed.
 
-- [ ] **Step 3: Rebuild the visual tree from static parent/child metadata**
+- [ ] **Step 3: Reconstruct visual hierarchy from static AST metadata**
 
-For one root occurrence, index runtime evaluations by `exprId` using the last evaluation for that expr within the occurrence and recursively construct children in static `childExprIds` order.
+Within one root occurrence, map runtime evaluations by `exprId` and recursively construct children in `childExprIds` order.
 
-The UI hierarchy comes from AST metadata; `ExpressionEvaluation.order` remains available as factual runtime order but does not reorder the tree.
+`ExpressionEvaluation.order` remains factual runtime-order metadata but does not reorder the AST tree.
 
-- [ ] **Step 4: Attach selection evidence without inventing semantics**
+Do not recompute `min` / `max` selection in TypeScript; copy captured `SelectionEvidence` only.
 
-Copy only selection evidence already captured by Python. Do not recompute `min` / `max` selection in TypeScript.
+- [ ] **Step 4: Integrate with `interpretTrace()` without breaking old callers**
 
-Mark selected structure references later by matching `callExprId + candidateExprIds[selectedCandidateIndex]`; if selected index is null, no selected role is produced.
-
-- [ ] **Step 5: Integrate expression evidence into `interpretTrace()`**
-
-Change the signature to accept optional expression inputs without breaking existing callers:
+Change signature to:
 
 ```ts
 export function interpretTrace(
@@ -1001,17 +996,9 @@ export function interpretTrace(
 ): TraceInterpretation
 ```
 
-Add:
+Existing `interpretTrace(events, relations)` tests must continue to produce an empty expression-evidence map.
 
-```ts
-expressionEvidence: ExpressionEvidenceByStep;
-```
-
-to `TraceInterpretation`.
-
-Existing tests that call `interpretTrace(events, relations)` must continue to pass with an empty map.
-
-- [ ] **Step 6: Run focused core tests**
+- [ ] **Step 5: Run focused verification**
 
 ```bash
 npm test -- tests/core/expression-interpreter.test.ts tests/core/trace-interpreter.test.ts
@@ -1020,7 +1007,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/core/expression-interpreter.ts src/core/trace-interpreter.ts tests/core/expression-interpreter.test.ts tests/core/trace-interpreter.test.ts
@@ -1029,7 +1016,7 @@ git commit -m "feat: interpret expression evidence"
 
 ---
 
-### Task 6: Resolve Safe List / Matrix Structure References and Feed Them Into Visual Models
+### Task 6: Project Safe Expression References Into List and Matrix Models
 
 **Files:**
 - Create: `src/core/expression-structure-projection.ts`
@@ -1041,7 +1028,6 @@ git commit -m "feat: interpret expression evidence"
 - Modify: `tests/core/matrix-interpreter.test.ts`
 
 **Interfaces:**
-- Produces:
 
 ```ts
 export function projectStructureReferences(
@@ -1052,9 +1038,15 @@ export function projectStructureReferences(
 ): StructureOperandReference[];
 ```
 
-- `ListVisualModel` and `MatrixVisualModel` gain `expressionReferences: StructureOperandReference[]` filtered to their own `variableName` and structure kind.
+`ListVisualModel` and `MatrixVisualModel` gain:
 
-- [ ] **Step 1: Write failing projection tests for List, Matrix, negative indices, selected operand, and target**
+```ts
+expressionReferences: StructureOperandReference[];
+```
+
+filtered to their own `variableName` and matching structure kind.
+
+- [ ] **Step 1: Write failing projection tests**
 
 Cover:
 
@@ -1064,24 +1056,16 @@ dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]
 return nums[-1]
 ```
 
-Assert the projector emits factual coordinates such as:
+Assert:
 
-```ts
-{
-  exprId: "r1.0.0",
-  variableName: "dp",
-  kind: "matrix_cell",
-  row: 1,
-  column: 3,
-  rawRow: 1,
-  rawColumn: 3,
-  role: "operand"
-}
+```text
+list index resolves from captured integer expression
+matrix row/column resolve from captured integer expressions
+negative indices normalize but preserve raw index
+selected min/max candidate upgrades matching reference to selected_operand
+dp[i][j] assignment target resolves from anchored locals
+out-of-bounds/unresolved expressions produce no fake reference
 ```
-
-and normalizes `-1` while preserving `rawIndex: -1`.
-
-Add an unresolved/out-of-bounds case and assert no fake reference is emitted.
 
 Run:
 
@@ -1091,69 +1075,67 @@ npm test -- tests/core/expression-structure-projection.test.ts
 
 Expected: FAIL.
 
-- [ ] **Step 2: Resolve operand coordinates from captured expression evaluations**
+- [ ] **Step 2: Resolve read coordinates only from captured facts**
 
-For `StaticStructureHint`:
+For `StaticStructureHint`, read referenced index-expression snapshots from the root's evaluations.
 
-```text
-list_index  → read index expression's captured ValueSnapshot
-matrix_cell → read row + column expression snapshots
+Accept an index only when:
+
+```ts
+snapshot.type === "int" && /^-?\d+$/.test(snapshot.value)
 ```
 
-Accept an index only when the snapshot is an integer matching `/^-?\d+$/` and converts to a safe integer.
+and the converted number is a safe integer.
 
-Use the anchored `RuntimeState` local snapshot to determine current sequence/matrix dimensions for Python negative-index normalization.
+Use the anchored `RuntimeState` local snapshot only to obtain sequence dimensions for Python negative-index normalization.
 
-Do not parse descriptor `source` to recover coordinates.
+Never parse descriptor `source` to infer runtime coordinates.
 
-- [ ] **Step 3: Mark selected operand roles from captured `SelectionEvidence`**
+- [ ] **Step 3: Upgrade selected operand roles only from captured selection evidence**
 
-Start all safe read references as `operand`.
-
-For each resolved selection:
+Read:
 
 ```ts
 const selectedExprId = selection.candidateExprIds[selection.selectedCandidateIndex!];
 ```
 
-upgrade the reference for that expression to `selected_operand`.
+Only the structure reference whose own `exprId` equals `selectedExprId` becomes `selected_operand`. Do not recursively mark descendants of a selected arithmetic candidate as if one sub-read alone caused the choice.
 
-If no structure reference corresponds to the selected candidate expression, do nothing rather than climbing descendants and guessing which nested read was causal.
+- [ ] **Step 4: Resolve assignment targets conservatively**
 
-- [ ] **Step 4: Resolve assignment-target coordinates conservatively**
+For target hints, support only:
 
-Use only direct static assignment-target hints.
+```text
+integer literal index
+simple local-variable index
+```
 
-For target index source:
+at each dimension.
 
-- integer literal: parse directly;
-- simple variable name: resolve from the anchored active-frame local snapshot;
-- any other target index expression: omit target structure reference in v0.1.
+Use anchored active-frame locals for variable values. Complex target index source such as `i + 1` remains visible as target source text in the Expression panel but receives no structure coordinate in v0.1.
 
-This safely covers the intended `dp[i][j]` and `arr[i]` cases without evaluating target source text.
-
-Use a synthetic target `exprId`:
+Use synthetic renderer identity:
 
 ```text
 <rootId>:target
 ```
 
-for renderer identity.
+for target references.
 
-- [ ] **Step 5: Feed references into existing visual-model construction**
+- [ ] **Step 5: Feed references into `VisualState` construction**
 
-Before building each `VisualState`, obtain:
+After `buildExpressionEvidence()`, for each runtime state:
 
 ```ts
-const stepEvidence = expressionEvidence.get(runtime.step);
-const references = stepEvidence?.roots.flatMap((root) => root.structureReferences) ?? [];
+const refs = expressionEvidence.get(runtime.step)?.roots
+  .flatMap((root) => root.structureReferences) ?? [];
 ```
 
-Extend `buildVisualState()` with a final optional parameter defaulting to `[]` so older callers/tests remain source-compatible.
+Pass `refs` into `buildVisualState()` using a new final optional argument defaulting to `[]`.
 
-Filter references into List and Matrix models by `variableName` and `kind`.
+Matrix/List models filter to their variable/kind. Other visual kinds ignore the references in v0.1.
 
-- [ ] **Step 6: Run focused projection and visual-model tests**
+- [ ] **Step 6: Run focused verification**
 
 ```bash
 npm test -- tests/core/expression-structure-projection.test.ts tests/core/matrix-interpreter.test.ts tests/core/trace-interpreter.test.ts
@@ -1171,17 +1153,20 @@ git commit -m "feat: project expression structure references"
 
 ---
 
-### Task 7: Render a Persistent Expression Evidence Panel
+### Task 7: Render the Expression Evidence Panel and Structure Overlays
 
 **Files:**
 - Create: `src/sidepanel/components/ExpressionEvidence.ts`
 - Create: `tests/sidepanel/expression-evidence.test.ts`
 - Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `src/sidepanel/components/ListVisualizer.ts`
+- Modify: `src/sidepanel/components/MatrixVisualizer.ts`
 - Modify: `src/sidepanel/styles.css`
-- Modify: `tests/sidepanel/trace-visualizer.test.ts` if present; otherwise extend the existing TraceVisualizer coverage file returned by `tests/sidepanel/` listing before implementation.
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+- Modify: `tests/sidepanel/list-visualizer.test.ts`
+- Modify: `tests/sidepanel/matrix-visualizer.test.ts`
 
 **Interfaces:**
-- Produces:
 
 ```ts
 export function createExpressionEvidence(
@@ -1190,22 +1175,22 @@ export function createExpressionEvidence(
 ): HTMLElement;
 ```
 
-- Panel remains mounted on every trace step; only body content changes.
+Structure renderers consume `model.expressionReferences` only; they do not inspect raw selections or parse expression source.
 
-- [ ] **Step 1: Write failing DOM tests for completed, partial, selected, empty, and truncated states**
+- [ ] **Step 1: Write failing Expression panel tests**
 
-Create `tests/sidepanel/expression-evidence.test.ts` with JSDOM assertions for:
+Create DOM cases for:
 
 ```text
-Target: dp[i][j]
-Result: 7
-selected
-partial
-No expression evidence for this step.
-Expression tracing truncated
+completed assignment root
+return root
+partial root
+resolved selected operand
+no evidence
+truncated expression tracing
 ```
 
-Use exact `data-*` hooks rather than fragile CSS text matching:
+Use stable hooks:
 
 ```ts
 expect(element.querySelector('[data-expression-root="r1"]')).not.toBeNull();
@@ -1222,23 +1207,15 @@ Expected: FAIL.
 
 - [ ] **Step 2: Implement recursive factual tree rendering**
 
-Render every `ExpressionEvidenceNode` with:
+Render node source + captured value via existing `formatValue()`.
 
-```text
-source
-=
-formatted value, when one exists
-```
+A partial root without a root result explicitly displays `partial`; it must not render a fabricated `undefined`/`null` result.
 
-Use existing `formatValue()` for `ValueSnapshot` formatting.
+Selected marking comes only from captured `SelectionEvidence`.
 
-A partial root with no root value must display an explicit `partial` status; do not show `undefined`, `null`, or a fabricated result.
+- [ ] **Step 3: Add a persistent panel to `TraceVisualizer`**
 
-Selected candidate marking comes only from `SelectionEvidence` already resolved in the interpreter.
-
-- [ ] **Step 3: Integrate the panel into `TraceVisualizer`**
-
-Change the interpretation call to:
+Interpret with:
 
 ```ts
 interpretTrace(
@@ -1249,7 +1226,7 @@ interpretTrace(
 )
 ```
 
-Create a persistent details panel:
+Create once:
 
 ```ts
 const expressionPanel = createPanel(
@@ -1258,7 +1235,7 @@ const expressionPanel = createPanel(
 );
 ```
 
-On `setStep`, look up by raw event step:
+For current event:
 
 ```ts
 const evidence = event
@@ -1266,98 +1243,35 @@ const evidence = event
   : undefined;
 ```
 
-and replace only the panel body with `createExpressionEvidence(...)`.
+Replace the panel body with `createExpressionEvidence(evidence, session.expressionTracing)`.
 
-The panel must remain present even when `evidence` is undefined.
-
-- [ ] **Step 4: Add restrained factual styles**
-
-In `src/sidepanel/styles.css`, add styles for:
+The panel remains mounted on steps with no evidence and displays exactly:
 
 ```text
-.expression-evidence
-.expression-evidence__root
-.expression-evidence__node
-.expression-evidence__children
-.is-selected-operand
-.is-partial
+No expression evidence for this step.
 ```
 
-Do not introduce semantic heatmaps or success/error colors that imply correctness.
+- [ ] **Step 4: Write failing List / Matrix overlay tests**
 
-- [ ] **Step 5: Run panel tests and typecheck**
+For List, provide `selected_operand` at one index and `assignment_target` at another.
 
-```bash
-npm test -- tests/sidepanel/expression-evidence.test.ts
-npm run typecheck
-```
-
-Also run the existing TraceVisualizer-sidepanel test file after locating it in `tests/sidepanel/` before implementation.
-
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/sidepanel/components/ExpressionEvidence.ts src/sidepanel/components/TraceVisualizer.ts src/sidepanel/styles.css tests/sidepanel/expression-evidence.test.ts tests/sidepanel
-git commit -m "feat: render expression evidence panel"
-```
-
----
-
-### Task 8: Add Expression Operand / Selected / Target Overlays to List and Matrix Visuals
-
-**Files:**
-- Modify: `src/sidepanel/components/ListVisualizer.ts`
-- Modify: `src/sidepanel/components/MatrixVisualizer.ts`
-- Modify: `src/sidepanel/styles.css`
-- Modify: `tests/sidepanel/list-visualizer.test.ts`
-- Modify: `tests/sidepanel/matrix-visualizer.test.ts`
-
-**Interfaces:**
-- Both renderers consume `model.expressionReferences` only.
-- They do not inspect `SelectionEvidence`, parse source strings, or infer recurrence semantics.
-
-- [ ] **Step 1: Write failing List overlay tests**
-
-Construct a `ListVisualModel` with references:
-
-```ts
-expressionReferences: [
-  {
-    exprId: "r1.0",
-    variableName: "dp",
-    kind: "list_index",
-    index: 3,
-    rawIndex: 3,
-    role: "selected_operand"
-  },
-  {
-    exprId: "r1:target",
-    variableName: "dp",
-    kind: "list_index",
-    index: 4,
-    rawIndex: 4,
-    role: "assignment_target"
-  }
-]
-```
-
-Assert the corresponding list items expose:
+For Matrix, provide:
 
 ```text
-data-expression-operand
- data-expression-selected
- data-expression-target
+operand at (1,3)
+selected_operand at (2,2)
+assignment_target at (2,3)
 ```
 
-only on matching indexes.
+Assert the matching cells/items expose:
 
-- [ ] **Step 2: Write failing Matrix overlay tests**
+```text
+data-expression-operand="true"
+data-expression-selected="true"
+data-expression-target="true"
+```
 
-Construct a `MatrixVisualModel` with an operand at `(1, 3)`, selected operand at `(2, 2)`, and assignment target at `(2, 3)`.
-
-Assert classes/data attributes coexist with existing focus/change state and do not alter cell text values.
+and coexist with current `focus`, `changed`, pointer, viewport, and inspector state.
 
 Run:
 
@@ -1367,9 +1281,9 @@ npm test -- tests/sidepanel/list-visualizer.test.ts tests/sidepanel/matrix-visua
 
 Expected: FAIL.
 
-- [ ] **Step 3: Render List reference roles as orthogonal UI state**
+- [ ] **Step 5: Render overlay roles as orthogonal UI state**
 
-For each visible item index, collect matching references and toggle:
+Add classes:
 
 ```text
 is-expression-operand
@@ -1377,64 +1291,59 @@ is-expression-selected
 is-expression-target
 ```
 
-with matching `data-*` attributes.
+Do not alter values, pointer movement, Matrix focus auto-follow, viewport position, change status, or inspector selection.
 
-Do not alter existing pointer, changed-index, inspector, or animation logic.
+Expression references outside the Matrix viewport do not auto-pan the viewport and do not create synthetic notices.
 
-- [ ] **Step 4: Render Matrix reference roles without changing viewport semantics**
+- [ ] **Step 6: Add restrained factual styles**
 
-In `renderGrid()` and update paths, find references by row/column and apply the same three orthogonal roles.
+Style panel hierarchy and overlay roles in `src/sidepanel/styles.css` using borders/markers/labels only. Do not introduce correctness colors, heatmaps, or success/failure semantics.
 
-Do not auto-pan to expression operands in v0.1. Existing Matrix focus auto-follow remains the only automatic viewport navigation rule.
+- [ ] **Step 7: Extend TraceVisualizer integration coverage**
 
-If an expression reference falls outside the current viewport, it simply is not visible until the user pans/focus changes; do not synthesize a notice or move the viewport.
-
-- [ ] **Step 5: Add visual styles that distinguish roles without implying correctness**
-
-Use borders/markers/labels that visually distinguish:
+In `tests/sidepanel/trace-visualizer.test.ts`, add one schema-v3 session with expression evidence at step 1 and none at step 2. Assert:
 
 ```text
-operand
-selected operand
-assignment target
+panel exists at both steps
+step 1 shows the expression tree
+step 2 shows the no-evidence message
+existing Visual State / What Changed / Behavioral panels remain present
 ```
 
-while keeping `focus`, `changed`, and user inspector selection intact.
-
-- [ ] **Step 6: Run focused visualizer tests**
+- [ ] **Step 8: Run focused verification**
 
 ```bash
-npm test -- tests/sidepanel/list-visualizer.test.ts tests/sidepanel/matrix-visualizer.test.ts
+npm test -- tests/sidepanel/expression-evidence.test.ts tests/sidepanel/trace-visualizer.test.ts tests/sidepanel/list-visualizer.test.ts tests/sidepanel/matrix-visualizer.test.ts
 npm run typecheck
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/sidepanel/components/ListVisualizer.ts src/sidepanel/components/MatrixVisualizer.ts src/sidepanel/styles.css tests/sidepanel/list-visualizer.test.ts tests/sidepanel/matrix-visualizer.test.ts
-git commit -m "feat: overlay expression operands on structures"
+git add src/sidepanel/components/ExpressionEvidence.ts src/sidepanel/components/TraceVisualizer.ts src/sidepanel/components/ListVisualizer.ts src/sidepanel/components/MatrixVisualizer.ts src/sidepanel/styles.css tests/sidepanel/expression-evidence.test.ts tests/sidepanel/trace-visualizer.test.ts tests/sidepanel/list-visualizer.test.ts tests/sidepanel/matrix-visualizer.test.ts
+git commit -m "feat: render expression evidence"
 ```
 
 ---
 
-### Task 9: Validate Real DP Execution, Fail-Open Behavior, Backward Compatibility, and Full Regression Gates
+### Task 8: Validate #64-Like DP Execution, Fail-Open Behavior, Compatibility, and Full Gates
 
 **Files:**
-- Create: `tests/fixtures/expression-minimum-path-sum.ts` or use the repository's existing fixture convention discovered in `tests/fixtures/` before implementation; keep the fixture source equivalent to the code below.
-- Modify: `tests/core/trace-interpreter.test.ts`
-- Modify: `tests/execution/trace-session-collector.test.ts`
+- Modify: `tests/fixtures/python/test_trace_engine.py`
 - Modify: `tests/execution/pyodide-runtime.test.ts`
-- Modify: `tests/sidepanel/expression-evidence.test.ts`
+- Modify: `tests/core/trace-interpreter.test.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
 - Modify: `README.md`
+- Modify: `README.zh-TW.md`
 
 **Interfaces:**
-- This task adds no new runtime API; it proves the complete protocol against the approved spec.
+- Adds no runtime API. This task proves end-to-end behavior against the approved spec.
 
-- [ ] **Step 1: Add the Minimum Path Sum acceptance fixture**
+- [ ] **Step 1: Add representative Minimum Path Sum execution coverage**
 
-Use this exact runtime shape:
+Use exactly:
 
 ```python
 class Solution:
@@ -1454,97 +1363,112 @@ class Solution:
         return dp[-1][-1]
 ```
 
-The integration assertion for an `else` iteration must prove all of these simultaneously:
+with input:
 
 ```text
-Expression root = assignment
-min(...) has two candidate values
-selectedCandidateIndex is factual and resolved for primitive ints
+[[1,3,1],[1,5,1],[4,2,1]]
+```
+
+At an `else` iteration, assert all channels independently:
+
+```text
+Expression root kind = assignment
+min has two candidate values
+selectedCandidateIndex is resolved for primitive ints
 binary + result is captured
-assignment target source is dp[i][j]
-Matrix structure references contain operand / selected_operand / assignment_target
-RuntimeMutation remains independently present for the resulting dp cell change
+assignment target source = dp[i][j]
+structure references include operand / selected_operand / assignment_target
+RuntimeMutation independently reports the resulting dp cell change
 ```
 
-- [ ] **Step 2: Add semantic-preservation regression cases**
+- [ ] **Step 2: Add fail-open unsupported-root coverage**
 
-Add execution-level coverage for these exact source snippets:
+Use a normally executable assignment containing comparison:
 
 ```python
-# side effects execute once
-x = arr.pop() + arr.pop()
-
-# duplicate min winner follows first positional result match
-x = min(3, 3, 5)
-
-# runtime exception preserves partial expression evidence
-x = 10 / 0
-
-# shadowed min must not claim built-in selection
-min = lambda a, b: a
-x = min(7, 2)
+flag = a < b
 ```
 
-Assertions:
+Assert:
 
 ```text
-arr mutates exactly twice, not four times
-selectedCandidateIndex = 0 for min(3,3,5)
-ZeroDivisionError remains the runtime exception; root is partial
-shadowed min has no resolved built-in selection evidence
-```
-
-- [ ] **Step 3: Add fail-open unsupported-root regression**
-
-Use:
-
-```python
-x = a < b
-```
-
-or another v0.1 unsupported root in a normally executable solution and assert:
-
-```text
-ordinary trace events still exist
 execution completes normally
-expression evidence for the unsupported root is absent
-expression tracing is unavailable/empty rather than a user runtime error
+ordinary TraceEvent data exists
+unsupported expression root is absent from ExpressionPlan/evidence
+no instrumentation error is reported as a user runtime error
 ```
 
-- [ ] **Step 4: Add backward-compatibility coverage for v2-style sessions**
+- [ ] **Step 3: Add expression-soft-limit coverage**
 
-Construct a `TraceSession` object without `expressionPlan`, `expressionBatches`, or `expressionTracing` and verify:
+Run a loop with enough supported assignments to exceed a deliberately tiny `maxExpressionEvents` while leaving `maxTraceSteps` large.
+
+Assert:
 
 ```text
-TraceVisualizer still renders
-Expression Evidence panel says "No expression evidence for this step."
-existing List/Matrix/Behavioral panels still work
+execution status is not trace_limit because of expression exhaustion
+expressionTracing.status = truncated
+ordinary trace events continue after expression recording stops
 ```
 
-Do not require rewriting stored v2 data to v3 before rendering.
+- [ ] **Step 4: Add backward-compatibility coverage**
 
-- [ ] **Step 5: Document the new capability without presenting it as a solver**
-
-Update `README.md` feature description with concise wording equivalent to:
+In `tests/sidepanel/trace-visualizer.test.ts`, keep one v2-style session with no expression fields and assert:
 
 ```text
-Expression Evidence — for supported assignment and return expressions, inspect
-captured operand/intermediate/result values and factual min/max candidate
-selection. This visualizes executed computation; it does not infer the correct
-algorithm or solution.
+TraceVisualizer renders normally
+Expression Evidence panel exists
+panel says "No expression evidence for this step."
+List/Matrix/Behavioral rendering remains unchanged
 ```
 
-Mention that comparison / branch evidence remains future work.
+Do not require migration of stored v2 data before rendering.
 
-- [ ] **Step 6: Run all targeted expression tests**
+- [ ] **Step 5: Document capability and explicit boundary in both READMEs**
+
+Add wording equivalent to:
+
+```text
+Expression Evidence — inspect captured operand, intermediate, and result values
+for supported assignment/return expressions, including factual min/max candidate
+selection when it can be proven safely. This visualizes executed computation; it
+does not infer the correct recurrence, algorithm, or fix.
+```
+
+Document that comparison / boolean / branch evidence remains future Condition / Decision Tracing work.
+
+- [ ] **Step 6: Run all Python semantic tests**
 
 ```bash
-npm test -- tests/core/expression-interpreter.test.ts tests/core/expression-structure-projection.test.ts tests/core/trace-interpreter.test.ts tests/execution/pyodide-runtime.test.ts tests/execution/pyodide-worker.test.ts tests/execution/trace-session-collector.test.ts tests/execution/execution-controller.test.ts tests/protocol/worker-protocol.test.ts tests/sidepanel/expression-evidence.test.ts tests/sidepanel/list-visualizer.test.ts tests/sidepanel/matrix-visualizer.test.ts
+python3 -m unittest \
+  tests/fixtures/python/test_expression_instrumenter.py \
+  tests/fixtures/python/test_trace_engine.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Run full repository gates**
+- [ ] **Step 7: Run all focused TypeScript tests**
+
+```bash
+npm test -- \
+  tests/protocol/worker-protocol.test.ts \
+  tests/execution/execution-request.test.ts \
+  tests/execution/pyodide-runtime.test.ts \
+  tests/execution/pyodide-worker.test.ts \
+  tests/execution/trace-session-collector.test.ts \
+  tests/execution/execution-controller.test.ts \
+  tests/core/expression-interpreter.test.ts \
+  tests/core/expression-structure-projection.test.ts \
+  tests/core/trace-interpreter.test.ts \
+  tests/core/matrix-interpreter.test.ts \
+  tests/sidepanel/expression-evidence.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts \
+  tests/sidepanel/list-visualizer.test.ts \
+  tests/sidepanel/matrix-visualizer.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Run full repository gates**
 
 ```bash
 npm test
@@ -1554,42 +1478,73 @@ npm run build
 
 Expected: all PASS.
 
-- [ ] **Step 8: Review generated behavior against the spec invariants**
-
-Manually inspect the #64-like fixture output and verify:
-
-```text
-line trace answers where execution is
-runtime state shows the entry-state Matrix/List values
-mutation evidence shows what changed
-expression panel shows how the value was computed
-structure overlays do not overwrite cell/list values
-no text claims recurrence correctness or recommends a fix
-```
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 9: Audit factual UI wording**
 
 ```bash
-git add tests README.md
+grep -RniE "correct recurrence|wrong recurrence|root cause|should use|fix by|optimal path" \
+  src/core/expression-interpreter.ts \
+  src/core/expression-structure-projection.ts \
+  src/sidepanel/components/ExpressionEvidence.ts \
+  src/sidepanel/components/ListVisualizer.ts \
+  src/sidepanel/components/MatrixVisualizer.ts
+```
+
+Expected: no expression-tracing UI claim that infers correctness or recommends a solution.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add tests/fixtures/python/test_trace_engine.py tests/execution/pyodide-runtime.test.ts tests/core/trace-interpreter.test.ts tests/sidepanel/trace-visualizer.test.ts README.md README.zh-TW.md
 git commit -m "test: validate expression tracing end to end"
 ```
 
 ---
 
-## Implementation Order and Review Gates
+## Final Acceptance Checklist
 
-Execute tasks strictly in order:
+- [ ] Trace schema is v3 and v2-style sessions still render.
+- [ ] Assignment RHS and return expressions are the only v0.1 roots.
+- [ ] Static expression IDs are deterministic and distinct from runtime occurrences.
+- [ ] Original source spans/snippets come from the unmodified Python AST.
+- [ ] Unsupported root shapes fail open to ordinary tracing.
+- [ ] Supported user expressions execute at most once for tracing.
+- [ ] Side-effecting expressions such as `arr.pop() + arr.pop()` preserve ordinary Python behavior.
+- [ ] Expression batches align to the line execution using `anchorStep + frameId`.
+- [ ] Exceptions preserve already captured partial expression evidence.
+- [ ] Shadowed `min` / `max` names never receive false built-in selection semantics.
+- [ ] Duplicate primitive min/max winners resolve to the first matching positional candidate.
+- [ ] NaN/custom/container candidates fail closed with no selected candidate claim.
+- [ ] Expression event/byte exhaustion truncates only expression evidence.
+- [ ] ExpressionPlan is streamed before user execution so hard timeout retains interpretable metadata.
+- [ ] Streamed and terminal batches de-duplicate by `batchId`.
+- [ ] TypeScript builds expression hierarchy from static AST metadata, not probe order.
+- [ ] List/Matrix coordinates are derived only from captured integer evidence or conservative target locals/literals.
+- [ ] Expression overlays never overwrite entry-state structure values.
+- [ ] Matrix expression references do not change existing focus auto-follow / viewport behavior.
+- [ ] Expression Evidence panel remains mounted even on steps with no evidence.
+- [ ] RuntimeMutation remains the sole mutation authority.
+- [ ] Behavioral Analysis remains independent of expression evidence in v0.1.
+- [ ] No UI text infers recurrence correctness, algorithm intent, root cause, or fixes.
+- [ ] Python expression fixture tests pass.
+- [ ] `npm test` passes.
+- [ ] `npm run typecheck` passes.
+- [ ] `npm run build` passes.
+
+---
+
+## Execution Order
+
+Execute strictly in this order:
 
 ```text
 1. Shared protocol + schema v3
 2. Static AST plan + instrumentation
-3. Runtime recorder + semantics
+3. Runtime recorder + semantic preservation
 4. Streaming + timeout/session persistence
-5. TypeScript expression interpretation
+5. TypeScript evidence reconstruction
 6. Structure-reference projection
-7. Expression Evidence panel
-8. List / Matrix overlays
-9. End-to-end acceptance + regressions
+7. Evidence panel + structure overlays
+8. End-to-end DP/compatibility/regression gates
 ```
 
-Do not begin UI work before Task 5's evidence interpreter is stable. Do not add Condition / Decision Tracing (`Compare`, `BoolOp`, branch outcomes) while implementing this plan; that is the next architectural phase and should receive its own spec/plan.
+Do not add `Compare`, `BoolOp`, short-circuit behavior, `if` / `while` branch outcomes, or Behavioral Debugging v2 while executing this plan. Those belong to the next Condition / Decision Tracing design cycle.

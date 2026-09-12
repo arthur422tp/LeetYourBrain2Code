@@ -245,6 +245,46 @@ describe("ExecutionController", () => {
     expect(worker.terminateCount).toBe(1);
   });
 
+  it("ignores malformed expression-only messages while collecting ordinary trace events", async () => {
+    const worker = new ControlledWorker();
+    const controller = new ExecutionController({ workerFactory: () => worker });
+
+    const execution = controller.execute(request("malformed-expression"));
+    worker.emit({ type: "ready" });
+    await Promise.resolve();
+    worker.emit({
+      type: "expression_batch",
+      sessionId: "malformed-expression",
+      batches: [{ anchorStep: 1, frameId: 1, line: 2, roots: [] }]
+    });
+    worker.emit({
+      type: "trace_batch",
+      sessionId: "malformed-expression",
+      events: [{
+        step: 1,
+        event: "line",
+        frameId: 1,
+        parentFrameId: null,
+        function: "one",
+        line: 2,
+        callDepth: 1,
+        locals: { value: { type: "int", value: "1" } },
+        stdoutDelta: ""
+      }]
+    });
+    worker.emit({
+      type: "execution_finished",
+      sessionId: "malformed-expression",
+      result: completed
+    });
+
+    await expect(execution).resolves.toEqual(expect.objectContaining({
+      status: "completed",
+      events: [expect.objectContaining({ step: 1 })]
+    }));
+    expect(worker.terminateCount).toBe(0);
+  });
+
   it("keeps the worker after an ordinary Python runtime exception", async () => {
     const worker = new ControlledWorker();
     const workerFactory = vi.fn(() => worker);

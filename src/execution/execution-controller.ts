@@ -34,6 +34,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isExpressionMessage(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "type" in value &&
+    (value.type === "expression_plan" || value.type === "expression_batch")
+  );
+}
+
 function internalErrorResult(
   message: string,
   duringInitialization = false
@@ -210,6 +220,9 @@ export class ExecutionController {
 
           onMessage = (event: MessageEvent): void => {
             if (!isWorkerOutboundMessage(event.data)) {
+              if (isExpressionMessage(event.data)) {
+                return;
+              }
               fail("Worker sent malformed protocol message");
               return;
             }

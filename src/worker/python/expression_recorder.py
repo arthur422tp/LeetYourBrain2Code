@@ -34,8 +34,36 @@ class ExpressionRecorder:
         )))
 
     def _serialize(self, value):
+        if not self._is_builtin_snapshot_value(value, set()):
+            return {
+                "type": "unknown",
+                "className": "unsupported",
+                "repr": "<unsupported expression value>",
+            }
         serializer = self.serializer_factory()
         return serializer.serialize(value) if hasattr(serializer, "serialize") else serializer(value)
+
+    @classmethod
+    def _is_builtin_snapshot_value(cls, value, active_ids):
+        value_type = type(value)
+        if value_type in {type(None), bool, int, float, str}:
+            return True
+        if value_type not in {list, tuple, dict, set, frozenset}:
+            return False
+        value_id = id(value)
+        if value_id in active_ids:
+            return True
+        active_ids.add(value_id)
+        try:
+            if value_type is dict:
+                return all(
+                    cls._is_builtin_snapshot_value(key, active_ids)
+                    and cls._is_builtin_snapshot_value(item, active_ids)
+                    for key, item in value.items()
+                )
+            return all(cls._is_builtin_snapshot_value(item, active_ids) for item in value)
+        finally:
+            active_ids.discard(value_id)
 
     @staticmethod
     def _encoded_size(value):

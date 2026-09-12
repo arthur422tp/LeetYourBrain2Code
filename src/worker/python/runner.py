@@ -41,23 +41,40 @@ class _LeetCodeNullTransformer(ast.NodeTransformer):
 
 
 class _ExpressionHelperLookupTransformer(ast.NodeTransformer):
-    _HELPER_NAMES = {"__lc_expr_record", "__lc_minmax_call"}
+    _HELPER_BINDINGS = {
+        "__lc_expr_record": "__lc_<expr_record>",
+        "__lc_minmax_call": "__lc_<minmax_call>",
+    }
+    _HELPER_NAMESPACE = "<lc_expression_helpers>"
 
     def visit_Name(self, node):
-        if not isinstance(node.ctx, ast.Load) or node.id not in self._HELPER_NAMES:
+        if not isinstance(node.ctx, ast.Load) or node.id not in self._HELPER_BINDINGS:
             return node
         return ast.copy_location(
-            ast.Subscript(
-                value=ast.Call(
-                    func=ast.Name(id="globals", ctx=ast.Load()),
-                    args=[],
-                    keywords=[],
-                ),
-                slice=ast.Constant(value=node.id),
-                ctx=ast.Load(),
-            ),
-            node,
+            ast.Name(id=self._HELPER_BINDINGS[node.id], ctx=ast.Load()), node
         )
+
+    def _bind_helpers(self, node):
+        node = self.generic_visit(node)
+        binding_names = set(self._HELPER_BINDINGS.values())
+        if not any(
+            isinstance(descendant, ast.Name) and descendant.id in binding_names
+            for descendant in ast.walk(node)
+        ):
+            return node
+        for helper_name, binding_name in self._HELPER_BINDINGS.items():
+            node.args.kwonlyargs.append(ast.arg(arg=binding_name))
+            node.args.kw_defaults.append(
+                ast.Subscript(
+                    value=ast.Name(id=self._HELPER_NAMESPACE, ctx=ast.Load()),
+                    slice=ast.Constant(value=helper_name),
+                    ctx=ast.Load(),
+                )
+            )
+        return node
+
+    visit_FunctionDef = _bind_helpers
+    visit_AsyncFunctionDef = _bind_helpers
 
 
 def _literal_eval_argument(line, parameter_kind):
@@ -282,12 +299,16 @@ def run_request(
     subscript_relations = relations_as_dicts(analyze_subscript_relations(source_code))
 
     namespace = runtime_globals if runtime_globals is not None else {}
-    baseline_global_names = set(namespace)
-    stdout_buffer = io.StringIO()
     recorder = ExpressionRecorder(limits, lambda: None, session_id=session_id)
     if not instrumentation.available:
         recorder.status = "unavailable"
         recorder.reason = instrumentation.reason
+    namespace["<lc_expression_helpers>"] = {
+        "__lc_expr_record": recorder.record_value,
+        "__lc_minmax_call": recorder.record_minmax_call,
+    }
+    baseline_global_names = set(namespace)
+    stdout_buffer = io.StringIO()
     collector = TraceCollector(
         limits,
         stdout_buffer,

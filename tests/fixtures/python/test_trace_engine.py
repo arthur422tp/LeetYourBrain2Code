@@ -745,6 +745,56 @@ def test_expression_recording_does_not_resolve_shadowed_min():
     assert all(evidence["status"] != "resolved" for evidence in selections)
 
 
+def test_expression_recording_ignores_user_shadowed_globals_lookup():
+    result = request(
+        """globals = lambda: {}
+
+class Solution:
+    def solve(self):
+        value = 1 + 2
+        return value
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "3"}
+
+
+def test_expression_recording_does_not_invoke_custom_repr_for_intermediate_values():
+    result = request(
+        """repr_calls = []
+
+class Value:
+    __slots__ = ("marker",)
+
+    def __init__(self):
+        self.marker = 7
+
+    def __repr__(self):
+        repr_calls.append("called")
+        return "Value()"
+
+class Solution:
+    def solve(self):
+        return Value().marker + len(repr_calls)
+""",
+        "solve",
+        0,
+        "",
+    )
+
+    assert result["status"] == "completed"
+    assert result["return_value"] == {"type": "int", "value": "10"}
+    assert result["expression_batches"]
+    assert all(
+        not any("lc_expr_record" in name or "lc_minmax_call" in name for name in event["locals"])
+        for event in result["events"]
+    )
+
+
 class ExpressionTracingRunnerTests(unittest.TestCase):
     def test_pop_side_effect_order_and_count(self):
         test_expression_recording_preserves_pop_side_effect_order_and_count()
@@ -757,3 +807,9 @@ class ExpressionTracingRunnerTests(unittest.TestCase):
 
     def test_shadowed_min_is_not_resolved(self):
         test_expression_recording_does_not_resolve_shadowed_min()
+
+    def test_shadowed_globals_lookup(self):
+        test_expression_recording_ignores_user_shadowed_globals_lookup()
+
+    def test_custom_repr_is_not_invoked(self):
+        test_expression_recording_does_not_invoke_custom_repr_for_intermediate_values()

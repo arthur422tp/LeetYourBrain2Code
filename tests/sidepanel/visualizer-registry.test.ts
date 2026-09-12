@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TreeVisualModel } from "../../src/core/tree-interpreter";
+import type { GraphVisualModel } from "../../src/core/graph-interpreter";
 import type { ListVisualModel } from "../../src/core/visual-model";
 import {
   createVisualizer,
@@ -51,6 +52,29 @@ function listModel(): ListVisualModel {
   };
 }
 
+function graphModel(objectId: string): GraphVisualModel {
+  return {
+    kind: "graph",
+    visualId: "graph:Node",
+    nodes: [{
+      objectId,
+      className: "Node",
+      label: int(1),
+      neighbors: [],
+      status: "unchanged"
+    }],
+    edges: [],
+    components: [{
+      componentId: `graph-component:${objectId}`,
+      nodeIds: [objectId],
+      pointerCount: 0,
+      role: "main"
+    }],
+    pointers: [],
+    truncated: false
+  };
+}
+
 describe("visualizer registry", () => {
   it("creates and updates Tree through the generic registry", () => {
     const first = treeModel("obj-1");
@@ -65,5 +89,24 @@ describe("visualizer registry", () => {
   it("rejects cross-kind updates", () => {
     const handle = createVisualizer(treeModel("obj-1"));
     expect(() => updateVisualizer(handle, listModel())).toThrow(/Cannot update tree visualizer with list/);
+  });
+
+  it("creates and updates Graph through the generic registry", () => {
+    const first = graphModel("obj-1");
+    const second = graphModel("obj-2");
+    const handle = createVisualizer(first);
+
+    expect(handle.kind).toBe("graph");
+    expect(handle.element.dataset.visualId).toBe("graph:Node");
+    updateVisualizer(handle, second);
+    expect(handle.element.dataset.visualId).toBe("graph:Node");
+    expect(handle.element.querySelector('[data-node-id="obj-2"]')).not.toBeNull();
+  });
+
+  it("rejects updating a Graph visualizer with a Tree model", () => {
+    const handle = createVisualizer(graphModel("obj-1"));
+    expect(() => updateVisualizer(handle, treeModel("obj-2"))).toThrow(
+      /Cannot update graph visualizer with tree/
+    );
   });
 });

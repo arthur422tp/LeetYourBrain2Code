@@ -5,6 +5,7 @@ import { relationMatchesFrameScope, type StaticRelation } from "./ast-relations"
 import type { ObjectDiff } from "./object-diff";
 import { buildLinkedListVisuals, type LinkedListVisualModel } from "./linked-list-interpreter";
 import { buildTreeVisuals, type TreeVisualModel } from "./tree-interpreter";
+import { buildGraphVisuals, type GraphVisualModel } from "./graph-interpreter";
 import type { FrameDiff } from "./state-diff";
 import type { RuntimeState } from "./runtime-state";
 import type {
@@ -50,7 +51,11 @@ export interface DictVisualModel {
 
 export type ContainerVisualModel = ListVisualModel | DictVisualModel;
 
-export type StructureVisualModel = ContainerVisualModel | LinkedListVisualModel | TreeVisualModel;
+export type StructureVisualModel =
+  | ContainerVisualModel
+  | LinkedListVisualModel
+  | TreeVisualModel
+  | GraphVisualModel;
 
 export interface CallStackEntry {
   frameId: number;
@@ -313,6 +318,29 @@ function treeWasMutated(
   });
 }
 
+function graphWasMutated(
+  visual: GraphVisualModel,
+  frameId: number,
+  mutations: RuntimeMutation[]
+): boolean {
+  const objectIds = new Set(visual.nodes.map((node) => node.objectId));
+  const pointerNames = new Set(visual.pointers.map((pointer) => pointer.variableName));
+
+  return mutations.some((mutation) => {
+    if (mutation.kind === "reference") {
+      if (mutation.owner.scope === "local") {
+        return mutation.owner.frameId === frameId &&
+          pointerNames.has(mutation.owner.variableName);
+      }
+      return objectIds.has(mutation.owner.objectId);
+    }
+    if (mutation.kind === "object_attribute" || mutation.kind === "object_visibility") {
+      return objectIds.has(mutation.objectId);
+    }
+    return false;
+  });
+}
+
 export function buildVisualState(
   runtime: RuntimeState,
   diff: FrameDiff | null,
@@ -334,10 +362,12 @@ export function buildVisualState(
     .filter((visual): visual is ContainerVisualModel => visual !== null);
   const linkedListVisuals = buildLinkedListVisuals(runtime, mutations);
   const treeVisuals = buildTreeVisuals(runtime, mutations);
+  const graphVisuals = buildGraphVisuals(runtime, mutations);
   const allVisuals: StructureVisualModel[] = [
     ...containerVisuals,
     ...linkedListVisuals,
-    ...treeVisuals
+    ...treeVisuals,
+    ...graphVisuals
   ];
   const candidateVisuals = allVisuals.filter(isSpecializedListCandidate);
   const activeFrameId = frame?.frameId ?? -1;
@@ -352,6 +382,15 @@ export function buildVisualState(
       .map((relation) => relation.container)
   );
   const visualCandidates: VisualCandidate[] = candidateVisuals.map((visual) => {
+    if (visual.kind === "graph") {
+      const pointerRelevant = visual.pointers.length > 0;
+      const mutated = graphWasMutated(visual, activeFrameId, mutations);
+      return {
+        visualId: visual.visualId,
+        kind: visual.kind,
+        priority: [false, mutated, pointerRelevant, visual.pointers.length] as const
+      };
+    }
     if (visual.kind === "linked_list") {
       const pointerRelevant = visual.pointers.length > 0;
       const mutated = linkedListWasMutated(visual, activeFrameId, mutations);

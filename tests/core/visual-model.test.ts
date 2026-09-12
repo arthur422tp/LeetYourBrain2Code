@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { FrameDiff } from "../../src/core/state-diff";
 import type { RuntimeState } from "../../src/core/runtime-state";
 import type { SubscriptRelation } from "../../src/core/ast-relations";
-import type { ValueSnapshot } from "../../src/shared/trace-types";
+import type { ObjectSnapshot, ValueSnapshot } from "../../src/shared/trace-types";
 import type { RuntimeMutation } from "../../src/core/runtime-mutation";
 import { buildVisualState } from "../../src/core/visual-model";
 
@@ -17,6 +17,11 @@ const treeRef = (objectId: string): ValueSnapshot => ({
   type: "reference",
   objectId,
   className: "TreeNode"
+});
+const graphRef = (objectId: string): ValueSnapshot => ({
+  type: "reference",
+  objectId,
+  className: "Node"
 });
 
 function list(values: number[]): ValueSnapshot {
@@ -72,6 +77,39 @@ function treeRuntime(extraLocals: Record<string, ValueSnapshot> = {}): RuntimeSt
           right: { type: "none", value: null }
         }
       }]]),
+      truncated: false
+    }
+  };
+}
+
+function graphNodeObject(
+  objectId: string,
+  value: number,
+  neighbors: string[]
+): ObjectSnapshot {
+  return {
+    objectId,
+    className: "Node",
+    attributes: {
+      val: int(value),
+      neighbors: {
+        type: "list",
+        length: neighbors.length,
+        items: neighbors.map(graphRef),
+        truncated: false
+      }
+    }
+  };
+}
+
+function graphRuntime(extraLocals: Record<string, ValueSnapshot> = {}): RuntimeState {
+  return {
+    ...runtime({ root: graphRef("graph-1"), ...extraLocals }),
+    objectTopology: {
+      objects: new Map([
+        ["graph-1", graphNodeObject("graph-1", 1, ["graph-2"])],
+        ["graph-2", graphNodeObject("graph-2", 2, [])]
+      ]),
       truncated: false
     }
   };
@@ -467,6 +505,66 @@ describe("buildVisualState", () => {
         after: int(11)
       }]
     );
+    expect(state.primaryVisualId).toBe("dict:seen");
+  });
+
+  it("builds Graph through the visual state path", () => {
+    const state = buildVisualState(graphRuntime(), null, [], null, []);
+
+    expect(state.visuals.find((visual) => visual.kind === "graph")).toMatchObject({
+      kind: "graph",
+      visualId: "graph:Node"
+    });
+    expect(state.primaryVisualId).toBe("graph:Node");
+  });
+
+  it("prioritizes a mutated Graph over a pointer-relevant list", () => {
+    const state = buildVisualState(
+      graphRuntime({ nums: list([1, 2, 3]), i: int(1) }),
+      null,
+      [{ ...relation("i"), line: 99 }],
+      null,
+      [{
+        kind: "object_attribute",
+        origin: "transition",
+        objectId: "graph-1",
+        attribute: "neighbors",
+        action: "changed",
+        before: {
+          type: "list",
+          length: 1,
+          items: [graphRef("graph-2")],
+          truncated: false
+        },
+        after: {
+          type: "list",
+          length: 0,
+          items: [],
+          truncated: false
+        }
+      }]
+    );
+
+    expect(state.primaryVisualId).toBe("graph:Node");
+  });
+
+  it("does not hard-code Graph primary over a higher-priority existing candidate", () => {
+    const state = buildVisualState(
+      graphRuntime({ seen: dict([[1, 10]]) }),
+      null,
+      [],
+      null,
+      [{
+        kind: "mapping_entry",
+        origin: "transition",
+        frameId: 4,
+        containerName: "seen",
+        key: int(2),
+        action: "added",
+        after: int(11)
+      }]
+    );
+
     expect(state.primaryVisualId).toBe("dict:seen");
   });
 });

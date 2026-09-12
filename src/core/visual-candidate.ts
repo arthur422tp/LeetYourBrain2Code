@@ -1,4 +1,4 @@
-export type VisualKind = "list" | "dict" | "linked_list" | "tree";
+export type VisualKind = "list" | "dict" | "linked_list" | "tree" | "graph";
 
 export type VisualPriority = readonly [
   activeLineRelevant: boolean,

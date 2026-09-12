@@ -7,6 +7,7 @@ import { createLinkedListVisualizer } from "./LinkedListVisualizer";
 import { createDictVisualizer } from "./DictVisualizer";
 import { createListVisualizer } from "./ListVisualizer";
 import { createTreeVisualizer } from "./TreeVisualizer";
+import { createGraphVisualizer } from "./GraphVisualizer";
 
 export interface VisualizerHandle {
   element: HTMLElement;
@@ -49,7 +50,9 @@ const registry = {
   linked_list: (model: ModelOf<"linked_list">) =>
     withVisualId(model, createLinkedListVisualizer(model), "linked_list"),
   tree: (model: ModelOf<"tree">) =>
-    withVisualId(model, createTreeVisualizer(model), "tree")
+    withVisualId(model, createTreeVisualizer(model), "tree"),
+  graph: (model: ModelOf<"graph">) =>
+    withVisualId(model, createGraphVisualizer(model), "graph")
 } satisfies VisualizerRegistry;
 
 export function createVisualizer(model: StructureVisualModel): VisualizerHandle {

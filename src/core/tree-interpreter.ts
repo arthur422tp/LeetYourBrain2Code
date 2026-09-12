@@ -5,6 +5,15 @@ import type {
   RuntimeMutation
 } from "./runtime-mutation";
 import type { RuntimeState } from "./runtime-state";
+import {
+  connectedComponents,
+  type TopologyEdge
+} from "./topology/components";
+import {
+  buildActiveObjectPointers,
+  type ObjectPointerVisual
+} from "./topology/pointers";
+import { rankComponentsByPointerCoverage } from "./topology/ranking";
 import { cloneValueSnapshot } from "./value-snapshot";
 
 export type TreeTargetKind = "none" | "tree_node" | "external" | "unresolved";
@@ -23,11 +32,7 @@ export interface TreeNodeVisual {
   rightStatus: "unchanged" | "added" | "removed" | "changed";
 }
 
-export interface TreePointerVisual {
-  variableName: string;
-  objectId: ObjectId | null;
-  status: "unchanged" | "moved" | "added" | "removed";
-}
+export type TreePointerVisual = ObjectPointerVisual;
 
 export interface TreeComponent {
   componentId: string;
@@ -153,45 +158,29 @@ function componentData(
   candidates: Map<ObjectId, ObjectSnapshot>,
   targets: TreeTargets
 ): { components: Array<Omit<TreeComponent, "role" | "pointerCount">>; incoming: Map<ObjectId, number> } {
-  const adjacency = new Map<ObjectId, Set<ObjectId>>();
   const incoming = new Map<ObjectId, number>();
   const directed = internalTargets(targets);
 
   for (const objectId of candidates.keys()) {
-    adjacency.set(objectId, new Set());
     incoming.set(objectId, 0);
   }
 
+  const edges: TopologyEdge[] = [];
   for (const [objectId, targetIds] of directed) {
     for (const targetId of targetIds) {
-      adjacency.get(objectId)!.add(targetId);
-      adjacency.get(targetId)!.add(objectId);
+      edges.push({ fromObjectId: objectId, toObjectId: targetId });
       incoming.set(targetId, (incoming.get(targetId) ?? 0) + 1);
     }
   }
 
-  const visited = new Set<ObjectId>();
-  const components: Array<Omit<TreeComponent, "role" | "pointerCount">> = [];
-  for (const start of sortedObjectIds(candidates)) {
-    if (visited.has(start)) {
-      continue;
-    }
-    const queue = [start];
-    const nodeIds: ObjectId[] = [];
-    visited.add(start);
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      nodeIds.push(current);
-      for (const neighbor of [...adjacency.get(current)!].sort((left, right) => left.localeCompare(right))) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor);
-          queue.push(neighbor);
-        }
-      }
-    }
-    nodeIds.sort((left, right) => left.localeCompare(right));
+  const components = connectedComponents(
+    sortedObjectIds(candidates),
+    edges,
+    "tree-component"
+  ).map((component): Omit<TreeComponent, "role" | "pointerCount"> => {
+    const { nodeIds } = component;
     const componentNodeIds = new Set(nodeIds);
-    components.push({
+    return {
       componentId: `tree-component:${nodeIds[0]!}`,
       nodeIds,
       entryNodeIds: nodeIds.filter((objectId) => incoming.get(objectId) === 0),
@@ -203,46 +192,9 @@ function componentData(
         ]))
       ),
       sharedChildNodeIds: nodeIds.filter((objectId) => (incoming.get(objectId) ?? 0) > 1)
-    });
-  }
-
-  components.sort((left, right) => left.componentId.localeCompare(right.componentId));
+    };
+  });
   return { components, incoming };
-}
-
-function activeFrame(runtime: RuntimeState) {
-  return runtime.activeFrameId === null
-    ? undefined
-    : runtime.frames.get(runtime.activeFrameId);
-}
-
-function localReferenceMutation(
-  mutations: RuntimeMutation[],
-  frameId: number,
-  variableName: string
-): ReferenceMutation | undefined {
-  return mutations.find((mutation): mutation is ReferenceMutation =>
-    mutation.kind === "reference" &&
-    mutation.owner.scope === "local" &&
-    mutation.owner.frameId === frameId &&
-    mutation.owner.variableName === variableName
-  );
-}
-
-function pointerStatus(
-  mutation: ReferenceMutation | undefined
-): TreePointerVisual["status"] {
-  if (!mutation) {
-    return "unchanged";
-  }
-  switch (mutation.action) {
-    case "bound":
-      return "added";
-    case "unbound":
-      return "removed";
-    case "redirected":
-      return "moved";
-  }
 }
 
 function buildPointers(
@@ -250,46 +202,7 @@ function buildPointers(
   candidates: Map<ObjectId, ObjectSnapshot>,
   mutations: RuntimeMutation[]
 ): TreePointerVisual[] {
-  const frame = activeFrame(runtime);
-  if (!frame) {
-    return [];
-  }
-  const pointers: TreePointerVisual[] = Object.entries(frame.locals)
-    .filter(([, value]) => isReference(value) && candidates.has(value.objectId))
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([variableName, value]) => ({
-      variableName,
-      objectId: (value as Extract<ValueSnapshot, { type: "reference" }>).objectId,
-      status: pointerStatus(localReferenceMutation(mutations, frame.frameId, variableName))
-    }));
-
-  for (const mutation of mutations) {
-    if (mutation.kind !== "reference" || mutation.owner.scope !== "local") {
-      continue;
-    }
-    if (
-      mutation.owner.frameId !== frame.frameId ||
-      mutation.action !== "unbound" ||
-      mutation.beforeObjectId === null ||
-      !candidates.has(mutation.beforeObjectId)
-    ) {
-      continue;
-    }
-    const variableName = mutation.owner.variableName;
-    if (pointers.some((pointer) => pointer.variableName === variableName)) {
-      continue;
-    }
-    pointers.push({
-      variableName,
-      objectId: null,
-      status: "removed"
-    });
-  }
-
-  return pointers.sort((left, right) =>
-    left.variableName.localeCompare(right.variableName) ||
-    (left.objectId ?? "").localeCompare(right.objectId ?? "")
-  );
+  return buildActiveObjectPointers(runtime, new Set(candidates.keys()), mutations);
 }
 
 function objectAttributeMutation(
@@ -387,42 +300,16 @@ function rankComponents(
   components: Array<Omit<TreeComponent, "role" | "pointerCount">>,
   pointers: TreePointerVisual[]
 ): TreeComponent[] {
-  const componentByNode = new Map<ObjectId, string>();
-  for (const component of components) {
-    for (const nodeId of component.nodeIds) {
-      componentByNode.set(nodeId, component.componentId);
-    }
-  }
-  const pointerCounts = new Map<string, number>();
-  for (const pointer of pointers) {
-    if (pointer.objectId === null) {
-      continue;
-    }
-    const componentId = componentByNode.get(pointer.objectId);
-    if (componentId) {
-      pointerCounts.set(componentId, (pointerCounts.get(componentId) ?? 0) + 1);
-    }
-  }
-
-  const ranked = components.map((component): TreeComponent => ({
-    ...component,
-    pointerCount: pointerCounts.get(component.componentId) ?? 0,
-    role: "detached"
-  })).sort((left, right) =>
-    right.pointerCount - left.pointerCount ||
-    right.nodeIds.length - left.nodeIds.length ||
-    left.componentId.localeCompare(right.componentId)
+  const ranked = rankComponentsByPointerCoverage(
+    components.map(({ componentId, nodeIds }) => ({ componentId, nodeIds })),
+    pointers
   );
-  const mainId = ranked[0]?.componentId ?? null;
-  return ranked
-    .map((component): TreeComponent => ({
-      ...component,
-      role: component.componentId === mainId ? "main" : "detached"
-    }))
-    .sort((left, right) =>
-      (left.role === "main" ? -1 : 1) - (right.role === "main" ? -1 : 1) ||
-      left.componentId.localeCompare(right.componentId)
-    );
+  const componentById = new Map(components.map((component) => [component.componentId, component]));
+  return ranked.map((rankedComponent): TreeComponent => ({
+    ...componentById.get(rankedComponent.componentId)!,
+    pointerCount: rankedComponent.pointerCount,
+    role: rankedComponent.role === "main" ? "main" : "detached"
+  }));
 }
 
 export function buildTreeVisuals(

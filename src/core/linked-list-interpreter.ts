@@ -5,6 +5,14 @@ import type {
   ReferenceMutation,
   RuntimeMutation
 } from "./runtime-mutation";
+import {
+  connectedComponents,
+  type TopologyEdge
+} from "./topology/components";
+import {
+  buildActiveObjectPointers,
+  type ObjectPointerVisual
+} from "./topology/pointers";
 import { cloneValueSnapshot } from "./value-snapshot";
 
 export interface LinkedListNodeVisual {
@@ -16,11 +24,7 @@ export interface LinkedListNodeVisual {
   nextStatus: "unchanged" | "changed" | "added" | "removed";
 }
 
-export interface LinkedListPointerVisual {
-  variableName: string;
-  objectId: ObjectId | null;
-  status: "unchanged" | "moved" | "added" | "removed";
-}
+export type LinkedListPointerVisual = ObjectPointerVisual;
 
 export interface LinkedListComponent {
   componentId: string;
@@ -36,12 +40,6 @@ export interface LinkedListVisualModel {
   pointers: LinkedListPointerVisual[];
   cyclic: boolean;
   truncated: boolean;
-}
-
-function activeFrame(runtime: RuntimeState) {
-  return runtime.activeFrameId === null
-    ? undefined
-    : runtime.frames.get(runtime.activeFrameId);
 }
 
 function isReference(snapshot: ValueSnapshot | undefined): snapshot is Extract<ValueSnapshot, { type: "reference" }> {
@@ -83,50 +81,28 @@ function componentData(
   candidates: Map<ObjectId, ObjectSnapshot>,
   nextTargets: Map<ObjectId, ObjectId | null>
 ): { components: LinkedListComponent[]; incoming: Map<ObjectId, number> } {
-  const adjacency = new Map<ObjectId, Set<ObjectId>>();
   const incoming = new Map<ObjectId, number>();
   for (const objectId of candidates.keys()) {
-    adjacency.set(objectId, new Set());
     incoming.set(objectId, 0);
   }
 
+  const edges: TopologyEdge[] = [];
   for (const [objectId, target] of nextTargets) {
     if (target === null || !candidates.has(target)) {
       continue;
     }
-    adjacency.get(objectId)!.add(target);
-    adjacency.get(target)!.add(objectId);
+    edges.push({ fromObjectId: objectId, toObjectId: target });
     incoming.set(target, (incoming.get(target) ?? 0) + 1);
   }
 
-  const visited = new Set<ObjectId>();
-  const components: LinkedListComponent[] = [];
-  for (const start of sortedObjectIds(candidates)) {
-    if (visited.has(start)) {
-      continue;
-    }
-    const queue = [start];
-    const nodeIds: ObjectId[] = [];
-    visited.add(start);
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      nodeIds.push(current);
-      for (const neighbor of [...adjacency.get(current)!].sort()) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor);
-          queue.push(neighbor);
-        }
-      }
-    }
-    nodeIds.sort((left, right) => left.localeCompare(right));
-    components.push({
-      componentId: `component:${nodeIds[0]}`,
-      nodeIds,
-      entryNodeIds: nodeIds.filter((objectId) => incoming.get(objectId) === 0)
-    });
-  }
-
-  components.sort((left, right) => left.componentId.localeCompare(right.componentId));
+  const components = connectedComponents(
+    sortedObjectIds(candidates),
+    edges,
+    "component"
+  ).map((component): LinkedListComponent => ({
+    ...component,
+    entryNodeIds: component.nodeIds.filter((objectId) => incoming.get(objectId) === 0)
+  }));
   return { components, incoming };
 }
 
@@ -188,87 +164,12 @@ function detachedObjectIds(
   return detached;
 }
 
-function localReferenceMutation(
-  mutations: RuntimeMutation[],
-  frameId: number,
-  variableName: string
-): ReferenceMutation | undefined {
-  return mutations.find((mutation): mutation is ReferenceMutation =>
-    mutation.kind === "reference" &&
-    mutation.owner.scope === "local" &&
-    mutation.owner.frameId === frameId &&
-    mutation.owner.variableName === variableName
-  );
-}
-
-function pointerStatus(
-  variableName: string,
-  frameId: number,
-  mutations: RuntimeMutation[]
-): LinkedListPointerVisual["status"] {
-  const mutation = localReferenceMutation(mutations, frameId, variableName);
-  if (!mutation) {
-    return "unchanged";
-  }
-  switch (mutation.action) {
-    case "bound":
-      return "added";
-    case "unbound":
-      return "removed";
-    case "redirected":
-      return "moved";
-  }
-}
-
 function buildPointers(
   runtime: RuntimeState,
   candidates: Map<ObjectId, ObjectSnapshot>,
   mutations: RuntimeMutation[]
 ): LinkedListPointerVisual[] {
-  const frame = activeFrame(runtime);
-  if (!frame) {
-    return [];
-  }
-
-  const pointers: LinkedListPointerVisual[] = [];
-  for (const [variableName, snapshot] of Object.entries(frame.locals).sort(([left], [right]) => left.localeCompare(right))) {
-    if (!isReference(snapshot) || !candidates.has(snapshot.objectId)) {
-      continue;
-    }
-    pointers.push({
-      variableName,
-      objectId: snapshot.objectId,
-      status: pointerStatus(variableName, frame.frameId, mutations)
-    });
-  }
-
-  for (const mutation of mutations) {
-    if (mutation.kind !== "reference" || mutation.owner.scope !== "local") {
-      continue;
-    }
-    if (
-      mutation.owner.frameId !== frame.frameId ||
-      mutation.action !== "unbound" ||
-      mutation.beforeObjectId === null ||
-      !candidates.has(mutation.beforeObjectId)
-    ) {
-      continue;
-    }
-    const variableName = mutation.owner.variableName;
-    if (pointers.some((pointer) => pointer.variableName === variableName)) {
-      continue;
-    }
-    pointers.push({
-      variableName,
-      objectId: null,
-      status: "removed"
-    });
-  }
-
-  return pointers.sort((left, right) =>
-    left.variableName.localeCompare(right.variableName) ||
-    (left.objectId ?? "").localeCompare(right.objectId ?? "")
-  );
+  return buildActiveObjectPointers(runtime, new Set(candidates.keys()), mutations);
 }
 
 function objectAttributeMutation(

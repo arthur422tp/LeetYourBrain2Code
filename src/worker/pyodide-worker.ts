@@ -36,6 +36,12 @@ export function createWorkerRuntime(
     onTraceBatch: (sessionId, events) => {
       scope.postMessage({ type: "trace_batch", sessionId, events });
     },
+    onExpressionPlan: (sessionId, plan) => {
+      scope.postMessage({ type: "expression_plan", sessionId, plan });
+    },
+    onExpressionBatch: (sessionId, batches) => {
+      scope.postMessage({ type: "expression_batch", sessionId, batches });
+    },
     onFinished: (result) => {
       const sessionId = activeSessionId();
       if (!sessionId) {

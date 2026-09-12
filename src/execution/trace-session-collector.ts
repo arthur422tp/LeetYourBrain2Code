@@ -9,6 +9,11 @@ import {
   type TraceEvent,
   type TraceSession
 } from "../shared/trace-types";
+import type {
+  ExpressionBatch,
+  ExpressionPlan,
+  ExpressionTracingState
+} from "../shared/expression-types";
 
 export interface TraceSessionCollectorOptions {
   sessionId: string;
@@ -26,6 +31,11 @@ export class TraceSessionCollector {
   private stdout = "";
   private lastStep: number | null = null;
   private resourceLimitReached = false;
+  private expressionPlan: ExpressionPlan | undefined;
+  private readonly expressionBatches: ExpressionBatch[] = [];
+  private readonly expressionBatchIds = new Set<number>();
+  private expressionTracing: ExpressionTracingState | undefined;
+  private expressionBytes = 0;
   private terminalSession: TraceSession | null = null;
 
   public constructor(options: TraceSessionCollectorOptions) {
@@ -53,6 +63,40 @@ export class TraceSessionCollector {
       this.lastStep = event.step;
       this.stdout += event.stdoutDelta;
     }
+  }
+
+  public setExpressionPlan(plan: ExpressionPlan): void {
+    if (!this.terminalSession) {
+      this.expressionPlan = plan;
+    }
+  }
+
+  public appendExpressionBatches(batches: ExpressionBatch[]): void {
+    if (this.terminalSession || this.expressionTracing?.status === "truncated") {
+      return;
+    }
+
+    for (const batch of batches) {
+      if (this.expressionBatchIds.has(batch.batchId)) continue;
+      const batchBytes = this.encodedEventBytes.encode(JSON.stringify(batch)).byteLength;
+      if (this.expressionBytes + batchBytes > this.options.limits.maxExpressionBytes) {
+        this.expressionTracing = {
+          status: "truncated",
+          reason: "expression_byte_limit"
+        };
+        return;
+      }
+      this.expressionBytes += batchBytes;
+      this.expressionBatchIds.add(batch.batchId);
+      this.expressionBatches.push(batch);
+    }
+  }
+
+  public setExpressionTracingState(state: ExpressionTracingState): void {
+    if (this.terminalSession || this.expressionTracing?.status === "truncated") {
+      return;
+    }
+    this.expressionTracing = state;
   }
 
   public finish(result: ExecutionTerminalResult): TraceSession {
@@ -105,7 +149,12 @@ export class TraceSessionCollector {
         ? { subscriptRelations: result.subscriptRelations.map((relation) => ({ ...relation })) }
         : {}),
       ...(result.returnValue !== undefined ? { returnValue: result.returnValue } : {}),
-      ...(result.exception ? { exception: result.exception } : {})
+      ...(result.exception ? { exception: result.exception } : {}),
+      ...(this.expressionPlan ? { expressionPlan: this.expressionPlan } : {}),
+      ...(this.expressionBatches.length > 0
+        ? { expressionBatches: [...this.expressionBatches] }
+        : {}),
+      ...(this.expressionTracing ? { expressionTracing: this.expressionTracing } : {})
     };
   }
 }

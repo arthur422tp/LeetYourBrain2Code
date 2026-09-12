@@ -1,6 +1,7 @@
 import ast
 import contextlib
 import io
+import json
 import secrets
 import time
 import traceback
@@ -232,6 +233,15 @@ def _truncate_stdout(stdout, limits):
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
+def _emit_expression_plan(emit_plan, session_id, plan):
+    if emit_plan is None:
+        return
+    try:
+        emit_plan(session_id, json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        pass
+
+
 def run_request(
     source_code,
     raw_testcase,
@@ -240,6 +250,8 @@ def run_request(
     runtime_globals=None,
     session_id="session",
     emit_batch=None,
+    emit_expression_plan=None,
+    emit_expression_batch=None,
 ):
     started_at = time.monotonic()
     lines = _argument_lines(raw_testcase)
@@ -266,7 +278,12 @@ def run_request(
     if len(arguments) != parameter_count:
         return _empty_result("input_error", "unsupported_testcase_format")
 
-    recorder = ExpressionRecorder(limits, lambda: None, session_id=session_id)
+    recorder = ExpressionRecorder(
+        limits,
+        lambda: None,
+        session_id=session_id,
+        emit_batch=emit_expression_batch,
+    )
     instrumentation = instrument_expression_roots(source_code)
     expression_plan = instrumentation.plan_dict
     try:
@@ -322,6 +339,9 @@ def run_request(
     namespace["__lc_expr_record"] = recorder.record_value
     namespace["__lc_minmax_call"] = recorder.record_minmax_call
     return_value = None
+
+    if instrumentation.available:
+        _emit_expression_plan(emit_expression_plan, session_id, expression_plan)
 
     collector.start()
     try:

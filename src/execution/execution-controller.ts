@@ -235,8 +235,29 @@ export class ExecutionController {
               }
               return;
             }
+            if (message.type === "expression_plan") {
+              if (message.sessionId === request.sessionId) {
+                collector.setExpressionPlan(message.plan);
+              }
+              return;
+            }
+            if (message.type === "expression_batch") {
+              if (message.sessionId === request.sessionId) {
+                collector.appendExpressionBatches(message.batches);
+              }
+              return;
+            }
             if (message.type === "execution_finished") {
               if (message.sessionId === request.sessionId) {
+                if (message.result.expressionPlan) {
+                  collector.setExpressionPlan(message.result.expressionPlan);
+                }
+                if (message.result.expressionBatches) {
+                  collector.appendExpressionBatches(message.result.expressionBatches);
+                }
+                if (message.result.expressionTracing) {
+                  collector.setExpressionTracingState(message.result.expressionTracing);
+                }
                 finish(
                   collector.finish(message.result),
                   message.result.terminationReason === "hard_timeout"

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ExecutionRequest, ExecutionTerminalResult } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
+import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import {
   buildExecutionScript,
   createPyodideRuntime,
@@ -36,6 +37,20 @@ const request: ExecutionRequest = {
     maxExpressionEvents: 20_000,
     maxExpressionBytes: 2_000_000
   }
+};
+
+const streamedExpressionPlan: ExpressionPlan = {
+  version: 1,
+  roots: [],
+  expressions: []
+};
+
+const streamedExpressionBatch: ExpressionBatch = {
+  batchId: 1,
+  anchorStep: 1,
+  frameId: 1,
+  line: 3,
+  roots: []
 };
 
 describe("Pyodide runtime", () => {
@@ -413,6 +428,91 @@ describe("Pyodide runtime", () => {
         }
       ]
     ]);
+  });
+
+  it("streams expression plan and batches before finishing and cleans up callbacks", async () => {
+    const callbackNames: string[] = [];
+    const deletedNames: string[] = [];
+    let emitPlan: ((sessionId: string, planJson: string) => void) | undefined;
+    let emitBatch: ((sessionId: string, batchesJson: string) => void) | undefined;
+    const order: string[] = [];
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        globals: {
+          set: (name, value) => {
+            callbackNames.push(name);
+            if (name === "__lc_emit_expression_plan") {
+              emitPlan = value as (sessionId: string, planJson: string) => void;
+            }
+            if (name === "__lc_emit_expression_batch") {
+              emitBatch = value as (sessionId: string, batchesJson: string) => void;
+            }
+          },
+          delete: (name) => deletedNames.push(name)
+        },
+        runPythonAsync: async () => {
+          emitPlan?.("runtime-session", JSON.stringify(streamedExpressionPlan));
+          emitBatch?.("runtime-session", JSON.stringify([streamedExpressionBatch]));
+          return {
+            status: "completed",
+            termination_reason: "normal_return",
+            stdout: "",
+            events: []
+          };
+        }
+      }),
+      onExpressionPlan: (_sessionId, plan) => {
+        expect(plan).toEqual(streamedExpressionPlan);
+        order.push("plan");
+      },
+      onExpressionBatch: (_sessionId, batches) => {
+        expect(batches).toEqual([streamedExpressionBatch]);
+        order.push("batch");
+      },
+      onFinished: () => order.push("finished")
+    });
+
+    await runtime.execute(request);
+
+    expect(callbackNames).toEqual(expect.arrayContaining([
+      "__lc_emit_expression_plan",
+      "__lc_emit_expression_batch"
+    ]));
+    expect(order).toEqual(["plan", "batch", "finished"]);
+    expect(deletedNames).toEqual(expect.arrayContaining([
+      "__lc_emit_expression_plan",
+      "__lc_emit_expression_batch"
+    ]));
+  });
+
+  it("forwards terminal expression evidence only when no stream copy arrived", async () => {
+    const plans: ExpressionPlan[] = [];
+    const batches: ExpressionBatch[][] = [];
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => ({
+          status: "completed",
+          termination_reason: "normal_return",
+          stdout: "",
+          events: [],
+          expression_plan: streamedExpressionPlan,
+          expression_batches: [{
+            batch_id: 1,
+            anchor_step: 1,
+            frame_id: 1,
+            line: 3,
+            roots: []
+          }]
+        })
+      }),
+      onExpressionPlan: (_sessionId, plan) => plans.push(plan),
+      onExpressionBatch: (_sessionId, values) => batches.push(values)
+    });
+
+    await runtime.execute(request);
+
+    expect(plans).toEqual([streamedExpressionPlan]);
+    expect(batches).toEqual([[streamedExpressionBatch]]);
   });
 
   it("rejects trace events whose locals contain a raw non-snapshot value", () => {

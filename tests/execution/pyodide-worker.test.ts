@@ -5,6 +5,7 @@ import type {
   ExecutionTerminalResult
 } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
+import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type {
   PyodideRuntime,
   PyodideRuntimeOptions
@@ -39,6 +40,15 @@ const request: ExecutionRequest = {
     maxExpressionEvents: 20_000,
     maxExpressionBytes: 2_000_000
   }
+};
+
+const expressionPlan: ExpressionPlan = { version: 1, roots: [], expressions: [] };
+const expressionBatch: ExpressionBatch = {
+  batchId: 1,
+  anchorStep: 1,
+  frameId: 1,
+  line: 1,
+  roots: []
 };
 
 describe("Pyodide worker", () => {
@@ -93,7 +103,7 @@ describe("Pyodide worker", () => {
     expect(posted).toEqual([{ type: "worker_error", message: "cannot initialize" }]);
   });
 
-  it("forwards runtime trace batches and terminal results to the worker scope", () => {
+  it("forwards expression evidence before terminal results to the worker scope", () => {
     const posted: unknown[] = [];
     const scope: WorkerScopeLike = {
       addEventListener: () => undefined,
@@ -133,10 +143,14 @@ describe("Pyodide worker", () => {
       },
       () => "worker-session"
     );
+    callbacks?.onExpressionPlan?.("worker-session", expressionPlan);
+    callbacks?.onExpressionBatch?.("worker-session", [expressionBatch]);
     callbacks?.onTraceBatch?.("worker-session", [trace]);
     callbacks?.onFinished?.(result);
 
     expect(posted).toEqual([
+      { type: "expression_plan", sessionId: "worker-session", plan: expressionPlan },
+      { type: "expression_batch", sessionId: "worker-session", batches: [expressionBatch] },
       { type: "trace_batch", sessionId: "worker-session", events: [trace] },
       { type: "execution_finished", sessionId: "worker-session", result }
     ]);

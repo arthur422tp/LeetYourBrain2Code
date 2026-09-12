@@ -7,6 +7,7 @@ import type {
   ExecutionTerminalResult
 } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
+import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import {
   TraceSessionCollector,
   type TraceSessionCollectorOptions
@@ -82,6 +83,20 @@ function createCollectorOptions(): TraceSessionCollectorOptions {
     limits
   };
 }
+
+const expressionPlan: ExpressionPlan = {
+  version: 1,
+  roots: [],
+  expressions: []
+};
+
+const expressionBatch: ExpressionBatch = {
+  batchId: 1,
+  anchorStep: 1,
+  frameId: 1,
+  line: 1,
+  roots: []
+};
 
 class FakeWorker implements WorkerLike {
   readonly posted: unknown[] = [];
@@ -270,6 +285,18 @@ describe("TraceSessionCollector", () => {
     expect(session.events[0]?.objectsTruncated).toBe(true);
     expect(session.status).toBe("timeout");
     expect(session.terminationReason).toBe("hard_timeout");
+  });
+
+  it("preserves streamed expression evidence without duplicate batches on timeout", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+
+    collector.setExpressionPlan(expressionPlan);
+    collector.appendExpressionBatches([expressionBatch, expressionBatch]);
+    const session = collector.forceTimeout();
+
+    expect(session.status).toBe("timeout");
+    expect(session.expressionPlan).toEqual(expressionPlan);
+    expect(session.expressionBatches).toEqual([expressionBatch]);
   });
 
   it("keeps all received batches when the controller hard-times out", async () => {

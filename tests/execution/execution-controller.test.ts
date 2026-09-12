@@ -5,6 +5,7 @@ import type {
   ExecutionTerminalResult
 } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
+import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import {
   ExecutionController,
   type WorkerLike
@@ -43,6 +44,20 @@ const completed: ExecutionTerminalResult = {
   terminationReason: "normal_return",
   stdout: "",
   durationMs: 1
+};
+
+const expressionPlan: ExpressionPlan = {
+  version: 1,
+  roots: [],
+  expressions: []
+};
+
+const expressionBatch: ExpressionBatch = {
+  batchId: 1,
+  anchorStep: 1,
+  frameId: 1,
+  line: 2,
+  roots: []
 };
 
 class ControlledWorker implements WorkerLike {
@@ -176,6 +191,36 @@ describe("ExecutionController", () => {
         terminationReason: "hard_timeout"
       }));
       expect(result.events).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains streamed expression evidence when a running request reaches hard timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new ControlledWorker();
+      const controller = new ExecutionController({ workerFactory: () => worker });
+      const pending = controller.execute(request("expression-timeout", 20));
+
+      worker.emit({ type: "ready" });
+      await Promise.resolve();
+      worker.emit({ type: "expression_plan", sessionId: "expression-timeout", plan: expressionPlan });
+      worker.emit({
+        type: "expression_batch",
+        sessionId: "expression-timeout",
+        batches: [expressionBatch]
+      });
+
+      await vi.advanceTimersByTimeAsync(20);
+      const result = await pending;
+
+      expect(result).toEqual(expect.objectContaining({
+        status: "timeout",
+        terminationReason: "hard_timeout",
+        expressionPlan,
+        expressionBatches: [expressionBatch]
+      }));
     } finally {
       vi.useRealTimers();
     }

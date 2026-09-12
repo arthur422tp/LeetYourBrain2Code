@@ -44,6 +44,8 @@ export interface PyodideRuntimeOptions {
   indexURL?: string;
   loadPyodide?: PyodideLoader;
   onTraceBatch?: (sessionId: string, events: TraceEvent[]) => void;
+  onExpressionPlan?: (sessionId: string, plan: ExpressionPlan) => void;
+  onExpressionBatch?: (sessionId: string, batches: ExpressionBatch[]) => void;
   onFinished?: (result: ExecutionTerminalResult) => void;
 }
 
@@ -127,6 +129,8 @@ __lc_runner_module.run_request(
     runtime_globals=__lc_runtime_namespace,
     session_id=${quotePython(request.sessionId)},
     emit_batch=globals().get("__lc_emit_trace_batch"),
+    emit_expression_plan=globals().get("__lc_emit_expression_plan"),
+    emit_expression_batch=globals().get("__lc_emit_expression_batch"),
 )
 `;
 }
@@ -651,7 +655,11 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
 
       const startedAt = Date.now();
       let streamedEventCount = 0;
-      let callbackInstalled = false;
+      let traceCallbackInstalled = false;
+      let expressionPlanCallbackInstalled = false;
+      let expressionBatchCallbackInstalled = false;
+      let streamedExpressionPlan = false;
+      let streamedExpressionBatches = false;
       const emitTraceBatch = (sessionId: string, eventsJson: string): void => {
         if (sessionId !== request.sessionId) {
           return;
@@ -672,11 +680,46 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
           // A malformed optional stream must not interrupt the Python run.
         }
       };
+      const emitExpressionPlan = (sessionId: string, planJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const plan = normalizeExpressionPlan(JSON.parse(planJson) as unknown);
+          if (!plan) return;
+          streamedExpressionPlan = true;
+          options.onExpressionPlan?.(sessionId, plan);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
+      const emitExpressionBatch = (sessionId: string, batchesJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const parsed = JSON.parse(batchesJson) as unknown;
+          const batches = Array.isArray(parsed)
+            ? parsed
+                .map((batch) => normalizeExpressionBatch(batch))
+                .filter((batch): batch is ExpressionBatch => batch !== null)
+            : [];
+          if (batches.length === 0) return;
+          streamedExpressionBatches = true;
+          options.onExpressionBatch?.(sessionId, batches);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
 
       try {
         if (options.onTraceBatch && typeof pyodide.globals?.set === "function") {
           pyodide.globals.set("__lc_emit_trace_batch", emitTraceBatch);
-          callbackInstalled = true;
+          traceCallbackInstalled = true;
+        }
+        if (options.onExpressionPlan && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_expression_plan", emitExpressionPlan);
+          expressionPlanCallbackInstalled = true;
+        }
+        if (options.onExpressionBatch && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_expression_batch", emitExpressionBatch);
+          expressionBatchCallbackInstalled = true;
         }
         const rawResult = await pyodide.runPythonAsync(buildExecutionScript(request));
         const normalized = normalizePythonExecutionResult(
@@ -692,12 +735,24 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
             );
           }
         }
+        if (!streamedExpressionPlan && normalized.result.expressionPlan) {
+          options.onExpressionPlan?.(request.sessionId, normalized.result.expressionPlan);
+        }
+        if (!streamedExpressionBatches && normalized.result.expressionBatches) {
+          options.onExpressionBatch?.(request.sessionId, normalized.result.expressionBatches);
+        }
         options.onFinished?.(normalized.result);
       } catch (error) {
         options.onFinished?.(errorResult(error, Date.now() - startedAt));
       } finally {
-        if (callbackInstalled) {
+        if (traceCallbackInstalled) {
           pyodide.globals?.delete?.("__lc_emit_trace_batch");
+        }
+        if (expressionPlanCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_expression_plan");
+        }
+        if (expressionBatchCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_expression_batch");
         }
       }
     }

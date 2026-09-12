@@ -209,14 +209,23 @@ class ExpressionRecorder:
                 roots.append(self.pending_roots.pop(key))
         if not roots:
             return
-        self.completed_batches.append({
+        batch = {
             "batch_id": self.next_batch_id,
             "anchor_step": anchor["step"],
             "frame_id": frame_id,
             "line": anchor["line"],
             "roots": roots,
-        })
+        }
+        self.completed_batches.append(batch)
         self.next_batch_id += 1
+        if self.emit_batch is not None:
+            try:
+                self.emit_batch(
+                    self.session_id,
+                    json.dumps([batch], ensure_ascii=False, separators=(",", ":")),
+                )
+            except Exception:
+                pass
 
     def flush_all(self):
         for frame_id in list(self.active_anchors):

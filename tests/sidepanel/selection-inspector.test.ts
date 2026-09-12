@@ -67,6 +67,29 @@ describe("selection details across visualizers", () => {
     inspector.dispose();
   });
 
+  it("retains an approved selection while its DOM target is outside a virtualized viewport", () => {
+    const section = document.createElement("section");
+    const cell = inspectionTarget(
+      document.createElement("button"),
+      "cell:4:7",
+      "Inspect cell 4, 7"
+    );
+    section.append(cell);
+    const inspector = createSelectionInspector(
+      section,
+      (key) => ({ title: key, fields: [["value", "42"]] }),
+      { retainMissingSelection: (key) => key === "cell:4:7" }
+    );
+
+    cell.click();
+    cell.remove();
+    inspector.refresh();
+
+    expect(inspector.selectedKey()).toBe("cell:4:7");
+    expect(details(section)).toContain("42");
+    inspector.dispose();
+  });
+
   it("retains a selected list index through mutation and rebuild, and clears stale details on empty", () => {
     const handle = createListVisualizer(list);
     select(handle.element,1);

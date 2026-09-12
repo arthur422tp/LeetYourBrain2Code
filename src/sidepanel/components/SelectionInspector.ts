@@ -31,7 +31,10 @@ export function inspectionButton(key: string, label: string): HTMLButtonElement 
 export function createSelectionInspector(
   section: HTMLElement,
   getDetails: (key: string) => InspectionDetails | null,
-  options: { preferredFallbackKey?: () => string | undefined } = {}
+  options: {
+    preferredFallbackKey?: () => string | undefined;
+    retainMissingSelection?: (key: string) => boolean;
+  } = {}
 ): {
   refresh(): void;
   select(key: string | undefined): void;
@@ -48,7 +51,10 @@ export function createSelectionInspector(
   panel.setAttribute("aria-label", "Selected item details");
   const refresh = (): void => {
     const targets = [...section.querySelectorAll<InspectableElement>("[data-inspect-key]")];
-    if (!targets.some((target) => target.dataset.inspectKey === selectedKey)) {
+    const selectedTargetExists = targets.some((target) => target.dataset.inspectKey === selectedKey);
+    const retainMissingSelection = selectedKey !== undefined &&
+      options.retainMissingSelection?.(selectedKey) === true;
+    if (!selectedTargetExists && !retainMissingSelection) {
       const preferred = options.preferredFallbackKey?.();
       selectedKey = preferred && targets.some((target) => target.dataset.inspectKey === preferred)
         ? preferred

@@ -9,6 +9,10 @@ import {
   type TreeComponentLayout,
   type TreeLayoutEdge
 } from "./tree-layout";
+import {
+  createSelectionInspector,
+  inspectionTarget
+} from "./SelectionInspector";
 
 export interface TreeVisualizerHandle {
   element: HTMLElement;
@@ -86,10 +90,12 @@ function renderNode(
   item.dataset.nodeId = node.objectId;
   item.dataset.nodeStatus = node.status;
 
-  const button = createTextElement("button", "tree-visualizer__node-button", formatValue(node.label ?? undefined));
+  const button = inspectionTarget(
+    createTextElement("button", "tree-visualizer__node-button", formatValue(node.label ?? undefined)),
+    `node:${node.objectId}`,
+    `Inspect TreeNode ${node.objectId}, value ${formatValue(node.label ?? undefined)}`
+  );
   button.type = "button";
-  button.setAttribute("aria-label", `Inspect TreeNode ${node.objectId}, value ${formatValue(node.label ?? undefined)}`);
-  button.setAttribute("aria-pressed", "false");
   button.dataset.valueStatus = node.valueStatus;
   const hasTerminal = (["left", "right"] as const).some((field) =>
     fieldTargetKind(node, field) === "external" || fieldTargetKind(node, field) === "unresolved" ||
@@ -304,7 +310,7 @@ function renderNotices(model: TreeVisualModel): HTMLDivElement | null {
   return notices.childElementCount > 0 ? notices : null;
 }
 
-function render(model: TreeVisualModel, selectedId?: string): HTMLElement {
+function render(model: TreeVisualModel): HTMLElement {
   const section = document.createElement("section");
   section.className = "tree-visualizer";
   section.dataset.visualId = model.visualId;
@@ -347,30 +353,7 @@ function render(model: TreeVisualModel, selectedId?: string): HTMLElement {
     viewport.append(removed);
   }
 
-  const inspector = createTextElement("div", "tree-visualizer__inspector", "");
-  inspector.setAttribute("aria-label", "Selected TreeNode details");
-  const selectNode = (nodeId: string): void => {
-    viewport.dataset.selectedNodeId = nodeId;
-    for (const item of viewport.querySelectorAll<HTMLElement>("[data-node-id]")) {
-      const selected = item.dataset.nodeId === nodeId;
-      item.querySelector("button")!.setAttribute("aria-pressed", String(selected));
-      if (selected) {
-        const details = item.querySelector<HTMLElement>(".tree-visualizer__node-details")!;
-        inspector.replaceChildren(
-          item.querySelector(".tree-visualizer__pointers")!.cloneNode(true),
-          ...Array.from(details.children).map((child) => child.cloneNode(true))
-        );
-      }
-    }
-  };
-  for (const item of viewport.querySelectorAll<HTMLElement>("[data-node-id]")) {
-    item.querySelector("button")!.addEventListener("click", () => selectNode(item.dataset.nodeId!));
-  }
-  const initialSelection = model.nodes.some((node) => node.objectId === selectedId)
-    ? selectedId : model.components.find((component) => component.role === "main")?.entryNodeIds[0] ?? model.nodes[0]?.objectId;
-  if (initialSelection) selectNode(initialSelection);
-  const hint = createTextElement("p", "tree-visualizer__hint", "Select a node to inspect · Left / right follow the branches");
-  section.append(title, viewport, hint, inspector);
+  section.append(title, viewport);
   centerMainEntry(viewport, model, layouts);
   const notices = renderNotices(model);
   if (notices) {
@@ -389,6 +372,39 @@ function centerRenderedMainEntry(section: HTMLElement, model: TreeVisualModel): 
 export function createTreeVisualizer(initialModel: TreeVisualModel): TreeVisualizerHandle {
   const section = render(initialModel);
   let currentModel = initialModel;
+  const inspector = createSelectionInspector(
+    section,
+    (key) => {
+      if (!key.startsWith("node:")) {
+        return null;
+      }
+      const objectId = key.slice("node:".length);
+      const node = currentModel.nodes.find((candidate) => candidate.objectId === objectId);
+      if (!node) {
+        return null;
+      }
+      const pointers = currentModel.pointers.filter((pointer) => pointer.objectId === objectId);
+      return {
+        title: node.className,
+        fields: [
+          ["val", formatValue(node.label ?? undefined)],
+          ["object ID", node.objectId],
+          ["status", node.status],
+          ["pointers", pointers.map((pointer) => `${pointer.variableName} (${pointer.status})`).join(", ") || "None"],
+          ["left", node.leftObjectId ?? "None"],
+          ["right", node.rightObjectId ?? "None"]
+        ]
+      };
+    },
+    {
+      preferredFallbackKey: () => {
+        const main = currentModel.components.find((component) => component.role === "main");
+        const objectId = main?.entryNodeIds[0] ?? main?.nodeIds[0] ?? currentModel.nodes[0]?.objectId;
+        return objectId ? `node:${objectId}` : undefined;
+      }
+    }
+  );
+  section.querySelector(".visualizer-inspector")?.classList.add("tree-visualizer__inspector");
   let centeringFrame: number | null = null;
 
   const centerAfterMount = (): void => {
@@ -413,23 +429,24 @@ export function createTreeVisualizer(initialModel: TreeVisualModel): TreeVisuali
     element: section,
     update(model) {
       currentModel = model;
-      const selectedId = section.querySelector<HTMLElement>(".tree-visualizer__viewport")?.dataset.selectedNodeId;
       const previousViewport = section.querySelector<HTMLElement>(".tree-visualizer__viewport");
       const scrollLeft = previousViewport?.scrollLeft ?? 0;
       const scrollTop = previousViewport?.scrollTop ?? 0;
-      const replacement = render(model, selectedId);
+      const replacement = render(model);
       section.dataset.visualId = model.visualId;
       section.setAttribute("aria-label", "TreeNode visualization");
       section.replaceChildren(...Array.from(replacement.children));
       const viewport = section.querySelector<HTMLElement>(".tree-visualizer__viewport")!;
       viewport.scrollLeft = scrollLeft;
       viewport.scrollTop = scrollTop;
+      inspector.refresh();
     },
     dispose() {
       if (centeringFrame !== null) {
         window.cancelAnimationFrame(centeringFrame);
         centeringFrame = null;
       }
+      inspector.dispose();
     }
   };
 }

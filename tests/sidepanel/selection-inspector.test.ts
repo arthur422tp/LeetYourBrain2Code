@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createListVisualizer } from "../../src/sidepanel/components/ListVisualizer";
 import { createDictVisualizer } from "../../src/sidepanel/components/DictVisualizer";
 import { createLinkedListVisualizer } from "../../src/sidepanel/components/LinkedListVisualizer";
+import {
+  createSelectionInspector,
+  inspectionTarget
+} from "../../src/sidepanel/components/SelectionInspector";
 import type { DictVisualModel, ListVisualModel } from "../../src/core/visual-model";
 import type { LinkedListVisualModel } from "../../src/core/linked-list-interpreter";
 const int = (n: number) => ({type: "int" as const, value: String(n)});
@@ -16,6 +20,53 @@ function select(element: HTMLElement, index: number) {
   expect(button!.getAttribute("aria-pressed")).toBe("true");
 }
 describe("selection details across visualizers", () => {
+  it("selects an SVG inspect target with keyboard activation", () => {
+    const section = document.createElement("section");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const path = inspectionTarget(
+      document.createElementNS("http://www.w3.org/2000/svg", "path"),
+      "edge:a→b",
+      "Inspect connection a to b"
+    );
+    svg.append(path);
+    section.append(svg);
+    const inspector = createSelectionInspector(section, (key) => ({
+      title: key,
+      fields: [["kind", "connection"]]
+    }));
+
+    path.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(path.getAttribute("aria-pressed")).toBe("true");
+    expect(inspector.selectedKey()).toBe("edge:a→b");
+    inspector.dispose();
+  });
+
+  it("uses a preferred fallback before DOM order and falls back when it disappears", () => {
+    const section = document.createElement("section");
+    const secondary = inspectionTarget(
+      document.createElement("button"),
+      "node:secondary",
+      "Inspect secondary"
+    );
+    const main = inspectionTarget(
+      document.createElement("button"),
+      "node:main",
+      "Inspect main"
+    );
+    section.append(secondary, main);
+    const inspector = createSelectionInspector(
+      section,
+      (key) => ({ title: key, fields: [] }),
+      { preferredFallbackKey: () => "node:main" }
+    );
+
+    expect(inspector.selectedKey()).toBe("node:main");
+    main.remove();
+    inspector.refresh();
+    expect(inspector.selectedKey()).toBe("node:secondary");
+    inspector.dispose();
+  });
+
   it("retains a selected list index through mutation and rebuild, and clears stale details on empty", () => {
     const handle = createListVisualizer(list);
     select(handle.element,1);

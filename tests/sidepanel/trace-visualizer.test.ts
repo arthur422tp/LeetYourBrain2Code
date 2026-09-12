@@ -96,7 +96,9 @@ function session(): TraceSession {
       hardTimeoutMs: 1000,
       maxObjectNodes: 200,
       maxObjectAttributes: 20,
-      maxObjectDepth: 32
+      maxObjectDepth: 32,
+      maxExpressionEvents: 20_000,
+      maxExpressionBytes: 2_000_000
     },
     subscriptRelations: relations,
     returnValue: null

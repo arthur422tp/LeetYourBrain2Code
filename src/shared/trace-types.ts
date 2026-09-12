@@ -5,8 +5,13 @@ import type {
   ExecutionTerminalResult,
   TraceSessionStatus
 } from "./execution-types";
+import type {
+  ExpressionBatch,
+  ExpressionPlan,
+  ExpressionTracingState
+} from "./expression-types";
 
-export const TRACE_SCHEMA_VERSION = 2;
+export const TRACE_SCHEMA_VERSION = 3;
 
 export type ObjectId = string;
 
@@ -194,6 +199,9 @@ export interface TraceSession {
   stdout: string;
   limits: ExecutionLimits;
   subscriptRelations?: StaticRelation[];
+  expressionPlan?: ExpressionPlan;
+  expressionBatches?: ExpressionBatch[];
+  expressionTracing?: ExpressionTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

@@ -27,6 +27,8 @@ describe("createExecutionRequest", () => {
         parameterKinds: ["value", "value"]
       });
       expect(result.request.limits.maxTraceSteps).toBeGreaterThan(0);
+      expect(result.request.limits.maxExpressionEvents).toBe(20_000);
+      expect(result.request.limits.maxExpressionBytes).toBe(2_000_000);
     }
   });
 

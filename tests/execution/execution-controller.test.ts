@@ -31,7 +31,9 @@ function request(sessionId: string, hardTimeoutMs = 1_000): ExecutionRequest {
       hardTimeoutMs,
       maxObjectNodes: 200,
       maxObjectAttributes: 20,
-      maxObjectDepth: 32
+      maxObjectDepth: 32,
+      maxExpressionEvents: 20_000,
+      maxExpressionBytes: 2_000_000
     }
   };
 }

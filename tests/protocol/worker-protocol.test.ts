@@ -119,4 +119,64 @@ describe("worker protocol", () => {
 
     expect(isWorkerOutboundMessage(traceBatch)).toBe(true);
   });
+
+  it("accepts expression plans and batches with deterministic batch ids", () => {
+    expect(
+      isWorkerOutboundMessage({
+        type: "expression_plan",
+        sessionId: "s1",
+        plan: { version: 1, roots: [], expressions: [] }
+      })
+    ).toBe(true);
+
+    expect(
+      isWorkerOutboundMessage({
+        type: "expression_batch",
+        sessionId: "s1",
+        batches: [
+          {
+            batchId: 1,
+            anchorStep: 4,
+            frameId: 2,
+            line: 9,
+            roots: []
+          }
+        ]
+      })
+    ).toBe(true);
+  });
+
+  it("rejects malformed expression plans and batches", () => {
+    expect(
+      isWorkerOutboundMessage({
+        type: "expression_batch",
+        sessionId: "s1",
+        batches: [{ anchorStep: 4, frameId: 2, line: 9, roots: [] }]
+      })
+    ).toBe(false);
+
+    expect(
+      isWorkerOutboundMessage({
+        type: "expression_batch",
+        sessionId: "s1",
+        batches: [
+          {
+            batchId: 1,
+            anchorStep: 4.5,
+            frameId: 2,
+            line: 9,
+            roots: []
+          }
+        ]
+      })
+    ).toBe(false);
+
+    expect(
+      isWorkerOutboundMessage({
+        type: "expression_plan",
+        sessionId: "s1",
+        plan: { version: 2, roots: [], expressions: [] }
+      })
+    ).toBe(false);
+  });
 });

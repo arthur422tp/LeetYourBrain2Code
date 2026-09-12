@@ -1,4 +1,9 @@
 import type { StaticRelation, ValueSnapshot } from "./trace-types";
+import type {
+  ExpressionBatch,
+  ExpressionPlan,
+  ExpressionTracingState
+} from "./expression-types";
 
 export const TRACE_SESSION_STATUSES = [
   "running",
@@ -50,6 +55,8 @@ export interface ExecutionLimits {
   maxObjectNodes: number;
   maxObjectAttributes: number;
   maxObjectDepth: number;
+  maxExpressionEvents: number;
+  maxExpressionBytes: number;
 }
 
 export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
@@ -62,7 +69,9 @@ export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
   hardTimeoutMs: 5_000,
   maxObjectNodes: 200,
   maxObjectAttributes: 20,
-  maxObjectDepth: 32
+  maxObjectDepth: 32,
+  maxExpressionEvents: 20_000,
+  maxExpressionBytes: 2_000_000
 };
 
 export interface ExecutionRequest {
@@ -89,6 +98,9 @@ export interface ExecutionTerminalResult {
   stdout: string;
   durationMs: number;
   subscriptRelations?: StaticRelation[];
+  expressionPlan?: ExpressionPlan;
+  expressionBatches?: ExpressionBatch[];
+  expressionTracing?: ExpressionTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

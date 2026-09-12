@@ -26,7 +26,9 @@ const limits: ExecutionLimits = {
   hardTimeoutMs: 20,
   maxObjectNodes: 200,
   maxObjectAttributes: 20,
-  maxObjectDepth: 32
+  maxObjectDepth: 32,
+  maxExpressionEvents: 20_000,
+  maxExpressionBytes: 2_000_000
 };
 
 const entrypoint: EntryPoint = {

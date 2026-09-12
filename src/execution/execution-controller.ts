@@ -231,7 +231,10 @@ export class ExecutionController {
               }
               return;
             }
-            if (!message.sessionId || message.sessionId === request.sessionId) {
+            if (
+              message.type === "worker_error" &&
+              (!message.sessionId || message.sessionId === request.sessionId)
+            ) {
               fail(message.message);
             }
           };

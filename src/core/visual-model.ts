@@ -361,13 +361,15 @@ export function buildVisualState(
   relations: StaticRelation[],
   objectDiff: ObjectDiff | null = null,
   mutations: RuntimeMutation[] = [],
-  expressionReferences: StructureOperandReference[] = []
+  expressionReferences: StructureOperandReference[] = [],
+  annotateMatrices?: (matrices: MatrixVisualModel[]) => void
 ): VisualState {
   const frame = runtime.activeFrameId === null
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const bindings = resolvePointerBindings(relations, runtime);
   const matrixVisuals = buildMatrixVisuals(runtime, relations, mutations, expressionReferences);
+  annotateMatrices?.(matrixVisuals);
   const matrixVariables = new Set(matrixVisuals.map((visual) => visual.variableName));
   const containerNames = frame
     ? Object.entries(frame.locals)

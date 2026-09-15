@@ -4,6 +4,8 @@ import type {
   MatrixVisualModel
 } from "../../core/matrix-interpreter";
 import { formatValue } from "./value-format";
+import { matrixPathTo } from "../../core/matrix-path";
+import { renderMatrixPathOverlay, type MatrixPathSelection } from "./matrix-path-overlay";
 import {
   createSelectionInspector,
   inspectionButton,
@@ -256,7 +258,9 @@ function renderGrid(model: MatrixVisualModel, viewport: MatrixViewport): HTMLEle
       if (focuses.length > 0 && change) {
         target.classList.add("is-focus-and-changed");
       }
-      applyExpressionOverlays(target, expressionReferencesAt(model, row, column));
+      // Expression batches describe evaluation of the current line; path overlays
+      // describe committed assignments. Do not mix the two moments in one grid.
+      if (!model.path) applyExpressionOverlays(target, expressionReferencesAt(model, row, column));
       grid.append(target);
     }
   }
@@ -297,6 +301,7 @@ export function createMatrixVisualizer(initialModel: MatrixVisualModel): MatrixV
   let currentModel = initialModel;
   let viewport = initialMatrixViewport(initialModel.rowCount, initialModel.columnCount);
   let autoFollowEnabled = true;
+  let pathEndpoint: CellCoordinate | undefined;
 
   const revealCurrentFocus = (): void => {
     const focus = inBoundsFocus(currentModel);
@@ -343,6 +348,13 @@ export function createMatrixVisualizer(initialModel: MatrixVisualModel): MatrixV
       fields.push(["row binding", focusBinding(focuses, "row")]);
       fields.push(["column binding", focusBinding(focuses, "column")]);
     }
+    if (currentModel.path) {
+      const route = matrixPathTo(currentModel.path, coordinate);
+      const last = route.at(-1);
+      fields.push(["recorded path", !last ? "not captured" : last.complete ? `${route.length} cell${route.length === 1 ? "" : "s"}` : "incomplete"]);
+      if (last) fields.push(["path value", formatValue(last.value)]);
+      if (last?.previous) fields.push(["chosen source", `${currentModel.path.tableVariable}[${last.previous.row}][${last.previous.column}]`]);
+    }
     return {
       title: `${currentModel.variableName}[${coordinate.row}][${coordinate.column}]`,
       fields
@@ -358,15 +370,52 @@ export function createMatrixVisualizer(initialModel: MatrixVisualModel): MatrixV
 
   const render = (): void => {
     renderContents(section, currentModel, viewport, autoFollowEnabled);
+    renderMatrixPathOverlay(section, currentModel, pathEndpoint);
     inspector.refresh();
   };
 
+  const selectPath = (coordinate?: CellCoordinate, broadcast = true): void => {
+    if (!currentModel.path) return;
+    pathEndpoint = coordinate;
+    render();
+    if (coordinate) inspector.select(cellKey(coordinate.row, coordinate.column));
+    if (broadcast) {
+      section.dispatchEvent(new CustomEvent<MatrixPathSelection>("matrix-path-select", {
+        bubbles: true, detail: { groupId: currentModel.path.groupId, coordinate }
+      }));
+    }
+  };
+
+  const onPathSync = (event: Event): void => {
+    const detail = (event as CustomEvent<MatrixPathSelection>).detail;
+    if (detail.groupId === currentModel.path?.groupId) selectPath(detail.coordinate, false);
+  };
+
+  const onPathKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const cell = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-matrix-cell]") : null;
+    if (!cell || !currentModel.path) return;
+    event.preventDefault();
+    const coordinate = { row: Number(cell.dataset.cellRow), column: Number(cell.dataset.cellColumn) };
+    selectPath(coordinate);
+    section.querySelector<HTMLElement>(`[data-inspect-key="${cellKey(coordinate.row, coordinate.column)}"]`)?.focus();
+  };
+
   const onClick = (event: MouseEvent): void => {
+    const cell = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-matrix-cell]") : null;
+    if (cell && currentModel.path) {
+      selectPath({ row: Number(cell.dataset.cellRow), column: Number(cell.dataset.cellColumn) });
+      return;
+    }
     const target = event.target instanceof Element
       ? event.target.closest<HTMLElement>("[data-matrix-action]")
       : null;
     const action = target?.dataset.matrixAction;
     if (!action) {
+      return;
+    }
+    if (action === "follow-path") {
+      selectPath();
       return;
     }
     if (action === "follow-current") {
@@ -387,11 +436,14 @@ export function createMatrixVisualizer(initialModel: MatrixVisualModel): MatrixV
     }
   };
   section.addEventListener("click", onClick);
+  section.addEventListener("keydown", onPathKeyDown);
+  section.addEventListener("matrix-path-sync", onPathSync);
 
   render();
   return {
     element: section,
     update(model) {
+      if (model.path?.groupId !== currentModel.path?.groupId) pathEndpoint = undefined;
       currentModel = model;
       viewport = revealMatrixCell(
         viewport,
@@ -407,6 +459,8 @@ export function createMatrixVisualizer(initialModel: MatrixVisualModel): MatrixV
     },
     dispose() {
       section.removeEventListener("click", onClick);
+      section.removeEventListener("keydown", onPathKeyDown);
+      section.removeEventListener("matrix-path-sync", onPathSync);
       inspector.dispose();
     }
   };

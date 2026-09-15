@@ -101,6 +101,24 @@ Supported:
 - Expression Evidence overlays for captured List / Matrix operands, selected
   `min` / `max` candidates, and assignment targets.
 
+### Recorded matrix paths
+
+For explicit assignments such as `dp[i][j] = min(dp[i-1][j], dp[i][j-1]) + grid[i][j]`,
+the visualizer records the selected predecessor after the assignment appears in
+the runtime snapshot. Direct boundary additions and source-cell copies are also
+supported, including zero-valued writes. Matrix names need not be `dp` or `grid`.
+
+- Orange cells and arrows show the accumulated route on both the table and its source grid.
+- Dashed borders mark candidates; a blue border marks the selected predecessor.
+- Select a cell to inspect its route in both matrices. **Follow current path** resumes following execution.
+- The returned cell's route remains visible at completion. Missing or ambiguous evidence produces an incomplete or unavailable path, without inventing earlier choices.
+
+Path recognition currently requires a separate source matrix and direct numeric
+cell copies or additions from an upper/left neighbor (including captured `min` /
+`max` choices). In-place updates, arbitrary recurrences and traversal paths are
+not reconstructed. The displayed route represents captured choices, not a proof
+that the algorithm found an optimal path.
+
 Not yet supported:
 
 - ragged, 3D, sparse, or NumPy matrix visualization;

@@ -8,6 +8,7 @@ import { relationMatchesFrameScope } from "./ast-relations";
 import type { RuntimeMutation } from "./runtime-mutation";
 import type { RuntimeState } from "./runtime-state";
 import { cloneValueSnapshot, valueSnapshotsEqual } from "./value-snapshot";
+import type { MatrixPathModel } from "./matrix-path";
 
 export interface MatrixCellChange {
   row: number;
@@ -40,6 +41,7 @@ export interface MatrixVisualModel {
   expressionReferences: StructureOperandReference[];
   focuses: MatrixFocus[];
   changedCells: MatrixCellChange[];
+  path?: MatrixPathModel;
 }
 
 function isCompleteScalar(snapshot: ValueSnapshot): boolean {

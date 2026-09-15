@@ -4,6 +4,7 @@ import type { ExecutionRequest, ExecutionTerminalResult } from "../../src/shared
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import { interpretTrace } from "../../src/core/trace-interpreter";
+import { createTraceVisualizer } from "../../src/sidepanel/components/TraceVisualizer";
 import {
   buildExecutionScript,
   createPyodideRuntime,
@@ -658,7 +659,7 @@ describe("Pyodide runtime", () => {
     }));
   });
 
-  it("captures Minimum Path Sum expression choices independently from runtime mutations", async () => {
+  it.each([false, true])("captures Minimum Path Sum choices and paths with hidden matrices: %s", async (hideMatrices) => {
     const finished: ExecutionTerminalResult[] = [];
     const traceBatches: TraceEvent[][] = [];
     const expressionPlans: ExpressionPlan[] = [];
@@ -676,6 +677,7 @@ describe("Pyodide runtime", () => {
     def minPathSum(self, grid):
         m, n = len(grid), len(grid[0])
         dp = [[0] * n for _ in range(m)]
+${hideMatrices ? "        aa, bb, cc = [1], [2], [3]\n" : ""}\
         for i in range(m):
             for j in range(n):
                 if i == 0 and j == 0:
@@ -686,6 +688,7 @@ describe("Pyodide runtime", () => {
                     dp[i][j] = dp[i - 1][j] + grid[i][j]
                 else:
                     dp[i][j] = min(dp[i - 1][j], dp[i][j - 1]) + grid[i][j]
+${hideMatrices ? "        del aa, bb, cc\n" : ""}\
         return dp[-1][-1]
 `,
       rawTestcase: "[[1,3,1],[1,5,1],[4,2,1]]",
@@ -753,6 +756,43 @@ describe("Pyodide runtime", () => {
     const evidenceRoot = interpretation.expressionEvidence
       .get(matchingBatch!.batch.anchorStep)?.roots
       .find((root) => root.rootId === targetRoot?.rootId);
+    const finalMatrices = interpretation.visualStates.at(-1)!.visuals
+      .filter((visual) => visual.kind === "matrix");
+    for (const name of ["grid", "dp"]) {
+      const path = finalMatrices.find((visual) => visual.variableName === name)?.path;
+      expect(path, `${name} keeps its recorded path on return`).toBeDefined();
+      const coordinates: number[][] = [];
+      let node = path?.nodes.get("2:2");
+      expect(node?.complete).toBe(true);
+      while (node) {
+        coordinates.unshift([node.row, node.column]);
+        node = node.previous;
+      }
+      expect(coordinates).toEqual([[0, 0], [0, 1], [0, 2], [1, 2], [2, 2]]);
+    }
+    const beforeLastWrite = interpretation.visualStates.find((state) => state.step === matchingBatch!.batch.anchorStep)!;
+    const earlyDp = beforeLastWrite.visuals.find((visual) => visual.kind === "matrix" && visual.variableName === "dp");
+    expect(earlyDp?.kind === "matrix" && earlyDp.path?.nodes.has("2:2")).not.toBe(true);
+    const view = createTraceVisualizer({
+      schemaVersion: 2, sessionId: "matrix-path-ui", sourceCode: "", rawTestcase: "",
+      entrypoint: request.entrypoint, executionEnvironment: { runtime: "pyodide", pythonVersion: "3.13" },
+      status: "completed", terminationReason: "normal_return", events: traceEvents,
+      stdout: "", limits: request.limits, expressionPlan: plan,
+      expressionBatches: terminal.expressionBatches, subscriptRelations: terminal.subscriptRelations
+    });
+    view.setStep(traceEvents.length - 1);
+    const gridView = () => view.element.querySelector<HTMLElement>('[data-variable-name="grid"]')!;
+    const dpView = () => view.element.querySelector<HTMLElement>('[data-variable-name="dp"]')!;
+    expect(gridView().querySelectorAll("[data-path-cell]")).toHaveLength(5);
+    gridView().querySelector<HTMLElement>('[data-cell-row="0"][data-cell-column="1"]')!.click();
+    expect(dpView().querySelectorAll("[data-path-cell]")).toHaveLength(2);
+    dpView().querySelector<HTMLElement>('[data-matrix-action="follow-path"]')!.click();
+    expect(gridView().querySelectorAll("[data-path-cell]")).toHaveLength(5);
+    view.setStep(traceEvents.findIndex((event) => event.step === matchingBatch!.batch.anchorStep));
+    if (earlyDp?.kind === "matrix") {
+      expect(dpView().querySelector('[data-cell-row="2"][data-cell-column="2"][data-path-cell]')).toBeNull();
+    }
+    view.dispose();
     expect(evidenceRoot?.structureReferences).toEqual(expect.arrayContaining([
       expect.objectContaining({
         variableName: "dp",

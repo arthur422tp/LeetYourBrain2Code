@@ -20,6 +20,7 @@ import {
   type TraceOutlineHandle
 } from "./TraceOutline";
 import { formatValue } from "./value-format";
+import type { MatrixPathSelection } from "./matrix-path-overlay";
 import {
   createVisualizer,
   updateVisualizer,
@@ -109,6 +110,15 @@ function createVisualStateRenderer(): {
   body.append(stateMeta, visualsHost);
 
   const handles = new Map<string, VisualizerHandle>();
+  const onPathSelection = (event: Event): void => {
+    const detail = (event as CustomEvent<MatrixPathSelection>).detail;
+    for (const handle of handles.values()) {
+      if (handle.kind === "matrix" && handle.element !== event.target) {
+        handle.element.dispatchEvent(new CustomEvent("matrix-path-sync", { detail }));
+      }
+    }
+  };
+  visualsHost.addEventListener("matrix-path-select", onPathSelection);
   // Runtime ranking controls visibility, but a visible visual should not jump
   // to a different vertical slot just because another visual became relevant.
   const visualOrder = new Map<string, number>();
@@ -181,7 +191,10 @@ function createVisualStateRenderer(): {
   return {
     body,
     setState,
-    dispose: disposeHandles
+    dispose() {
+      visualsHost.removeEventListener("matrix-path-select", onPathSelection);
+      disposeHandles();
+    }
   };
 }
 

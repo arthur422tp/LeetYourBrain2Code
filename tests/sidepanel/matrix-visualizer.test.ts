@@ -7,6 +7,7 @@ import type {
 } from "../../src/core/matrix-interpreter";
 import type { ValueSnapshot } from "../../src/shared/trace-types";
 import { createMatrixVisualizer } from "../../src/sidepanel/components/MatrixVisualizer";
+import type { MatrixPathModel, MatrixPathNode } from "../../src/core/matrix-path";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
 
@@ -58,6 +59,54 @@ function cell(element: HTMLElement, row: number, column: number): HTMLElement | 
 }
 
 describe("MatrixVisualizer", () => {
+  it("shows the recorded path, arrows and candidates, and clears future cells when stepping back", () => {
+    const start: MatrixPathNode = { row: 0, column: 0, value: int(1), complete: true };
+    const right: MatrixPathNode = { row: 0, column: 1, value: int(4), complete: true, previous: start };
+    const down: MatrixPathNode = { row: 1, column: 1, value: int(7), complete: true, previous: right };
+    const path: MatrixPathModel = {
+      groupId: "4:dp:grid", tableVariable: "dp", sourceVariable: "grid",
+      nodes: new Map([["0:0", start], ["0:1", right], ["1:1", down]]),
+      endpoint: { row: 1, column: 1 },
+      decision: { target: down, candidates: [right, { row: 1, column: 0 }], selected: right }
+    };
+    const handle = createMatrixVisualizer(model({ path, expressionReferences: [{
+      exprId: "upcoming-choice", variableName: "dp", kind: "matrix_cell",
+      row: 0, column: 2, rawRow: 0, rawColumn: 2, role: "selected_operand"
+    }] }));
+    expect(cell(handle.element, 0, 2)?.classList.contains("is-expression-selected")).toBe(false);
+    expect(handle.element.querySelectorAll("[data-path-cell]")).toHaveLength(3);
+    expect(cell(handle.element, 0, 0)?.querySelector("[data-path-direction]")?.textContent).toBe("→");
+    expect(cell(handle.element, 0, 1)?.querySelector("[data-path-direction]")?.textContent).toBe("↓");
+    expect(cell(handle.element, 1, 0)?.dataset.pathCandidate).toBe("true");
+    expect(handle.element.querySelector("[data-path-summary]")?.textContent).toContain("7");
+    cell(handle.element, 0, 1)!.click();
+    expect(handle.element.querySelectorAll("[data-path-cell]")).toHaveLength(2);
+    handle.update(model({ path: { ...path, nodes: new Map([["0:0", start]]), endpoint: start, decision: undefined } }));
+    expect(handle.element.querySelectorAll("[data-path-cell]")).toHaveLength(0);
+    expect(handle.element.querySelector("[data-path-summary]")?.textContent).toContain("not captured");
+    handle.element.querySelector<HTMLButtonElement>('[data-matrix-action="follow-path"]')!.click();
+    expect(handle.element.querySelectorAll("[data-path-cell]")).toHaveLength(1);
+    handle.update(model());
+    expect(handle.element.querySelectorAll("[data-path-cell]")).toHaveLength(0);
+    handle.dispose();
+  });
+
+  it("supports keyboard path selection, synchronized selection, and incomplete path notices", () => {
+    const node: MatrixPathNode = { row: 1, column: 1, value: int(7), complete: false, reason: "Earlier choices missing." };
+    const path: MatrixPathModel = {
+      groupId: "4:dp:grid", tableVariable: "dp", sourceVariable: "grid",
+      nodes: new Map([["1:1", node]]), endpoint: node
+    };
+    const handle = createMatrixVisualizer(model({ path }));
+    expect(handle.element.querySelector("[data-path-summary]")?.textContent).toContain("Incomplete");
+    let selected: unknown;
+    handle.element.addEventListener("matrix-path-select", (event) => { selected = (event as CustomEvent).detail; });
+    cell(handle.element, 0, 0)!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(selected).toEqual({ groupId: path.groupId, coordinate: { row: 0, column: 0 } });
+    handle.element.dispatchEvent(new CustomEvent("matrix-path-sync", { detail: { groupId: path.groupId, coordinate: node } }));
+    expect(cell(handle.element, 1, 1)?.dataset.pathCell).toBe("true");
+    handle.dispose();
+  });
   it("renders cells with independent focus/change states and factual inspection details", () => {
     const changed: MatrixCellChange = {
       row: 1,

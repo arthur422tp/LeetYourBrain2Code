@@ -16,6 +16,7 @@ import {
 } from "./behavioral-observation";
 import type { BehavioralAnalysis } from "./behavioral-pattern";
 import { buildExpressionEvidence } from "./expression-interpreter";
+import { createMatrixPathTracker } from "./matrix-path";
 import type {
   ExpressionBatch,
   ExpressionEvidenceByStep,
@@ -90,17 +91,24 @@ export function interpretTrace(
     mutationBatches
   );
   const behavioralAnalysis = analyzeBehavioralPatternsSafely(behavioralObservations);
-  const visualStates = runtimeStates.map((runtime, index) =>
-    buildVisualState(
+  const pathTracker = createMatrixPathTracker();
+  const visualStates = runtimeStates.map((runtime, index) => {
+    const visualState = buildVisualState(
       runtime,
       frameDiffs[index] ?? null,
       relations,
       objectDiffs[index] ?? null,
       mutationBatches[index]!.mutations,
       expressionEvidence.get(runtime.step)?.roots
-        .flatMap((root) => root.structureReferences) ?? []
-    )
-  );
+        .flatMap((root) => root.structureReferences) ?? [],
+      (matrices) => {
+        if (runtime.activeFrameId !== null) {
+          pathTracker.update(runtime.activeFrameId, matrices, expressionEvidence.get(runtime.step)?.roots ?? []);
+        }
+      }
+    );
+    return visualState;
+  });
 
   return {
     runtimeStates,

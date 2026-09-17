@@ -8,6 +8,7 @@ import type {
 } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
+import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
 import {
   TraceSessionCollector,
   type TraceSessionCollectorOptions
@@ -76,13 +77,14 @@ function terminalResult(
   };
 }
 
-function createCollectorOptions(): TraceSessionCollectorOptions {
+function createCollectorOptions(overrides: Partial<TraceSessionCollectorOptions> = {}): TraceSessionCollectorOptions {
   return {
     sessionId: request.sessionId,
     sourceCode: request.sourceCode,
     rawTestcase: request.rawTestcase,
     entrypoint,
-    limits
+    limits,
+    ...overrides
   };
 }
 
@@ -98,6 +100,30 @@ const expressionBatch: ExpressionBatch = {
   frameId: 1,
   line: 1,
   roots: []
+};
+
+const conditionPlan: ConditionPlan = {
+  version: 1,
+  sites: [],
+  conditions: [],
+  operands: [],
+  chains: []
+};
+
+const decisionBatch: DecisionBatch = {
+  batchId: 4,
+  anchorStep: 2,
+  frameId: 1,
+  siteId: "d1",
+  occurrence: 1,
+  status: "completed",
+  condition: {
+    conditionId: "d1.c0",
+    evaluations: [],
+    conditionResults: [{ conditionId: "d1.c0", order: 1, truth: false }],
+    truth: false
+  },
+  outcome: "branch_not_entered"
 };
 
 class FakeWorker implements WorkerLike {
@@ -299,6 +325,32 @@ describe("TraceSessionCollector", () => {
     expect(session.status).toBe("timeout");
     expect(session.expressionPlan).toEqual(expressionPlan);
     expect(session.expressionBatches).toEqual([expressionBatch]);
+  });
+
+  it("preserves streamed decision evidence and de-duplicates terminal copies on timeout", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+
+    collector.setConditionPlan(conditionPlan);
+    collector.appendDecisionBatches([decisionBatch, decisionBatch]);
+    const session = collector.finish(terminalResult({
+      conditionPlan,
+      decisionBatches: [decisionBatch]
+    }));
+
+    expect(session.conditionPlan).toEqual(conditionPlan);
+    expect(session.decisionBatches).toEqual([decisionBatch]);
+  });
+
+  it("truncates decision evidence independently from the ordinary session resource limit", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions({
+      limits: { ...limits, maxDecisionBytes: 1 }
+    }));
+    collector.appendDecisionBatches([decisionBatch]);
+    const session = collector.finish(terminalResult());
+
+    expect(session.decisionBatches).toBeUndefined();
+    expect(session.decisionTracing).toEqual({ status: "truncated", reason: "decision_byte_limit" });
+    expect(session.status).toBe("completed");
   });
 
   it("keeps all received batches when the controller hard-times out", async () => {

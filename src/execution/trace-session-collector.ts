@@ -14,6 +14,11 @@ import type {
   ExpressionPlan,
   ExpressionTracingState
 } from "../shared/expression-types";
+import type {
+  ConditionPlan,
+  DecisionBatch,
+  DecisionTracingState
+} from "../shared/decision-types";
 
 export interface TraceSessionCollectorOptions {
   sessionId: string;
@@ -36,6 +41,11 @@ export class TraceSessionCollector {
   private readonly expressionBatchIds = new Set<number>();
   private expressionTracing: ExpressionTracingState | undefined;
   private expressionBytes = 0;
+  private conditionPlan: ConditionPlan | undefined;
+  private readonly decisionBatches: DecisionBatch[] = [];
+  private readonly decisionBatchIds = new Set<number>();
+  private decisionTracing: DecisionTracingState | undefined;
+  private decisionBytes = 0;
   private terminalSession: TraceSession | null = null;
 
   public constructor(options: TraceSessionCollectorOptions) {
@@ -99,6 +109,34 @@ export class TraceSessionCollector {
     this.expressionTracing = state;
   }
 
+  public setConditionPlan(plan: ConditionPlan): void {
+    if (!this.terminalSession) {
+      this.conditionPlan = plan;
+    }
+  }
+
+  public appendDecisionBatches(batches: DecisionBatch[]): void {
+    if (this.terminalSession || this.decisionTracing?.status === "truncated") {
+      return;
+    }
+    for (const batch of batches) {
+      if (this.decisionBatchIds.has(batch.batchId)) continue;
+      const batchBytes = this.encodedEventBytes.encode(JSON.stringify(batch)).byteLength;
+      if (this.decisionBytes + batchBytes > this.options.limits.maxDecisionBytes) {
+        this.decisionTracing = { status: "truncated", reason: "decision_byte_limit" };
+        return;
+      }
+      this.decisionBytes += batchBytes;
+      this.decisionBatchIds.add(batch.batchId);
+      this.decisionBatches.push(batch);
+    }
+  }
+
+  public setDecisionTracingState(state: DecisionTracingState): void {
+    if (this.terminalSession || this.decisionTracing?.status === "truncated") return;
+    this.decisionTracing = state;
+  }
+
   public finish(result: ExecutionTerminalResult): TraceSession {
     if (this.terminalSession) {
       return this.terminalSession;
@@ -154,7 +192,10 @@ export class TraceSessionCollector {
       ...(this.expressionBatches.length > 0
         ? { expressionBatches: [...this.expressionBatches] }
         : {}),
-      ...(this.expressionTracing ? { expressionTracing: this.expressionTracing } : {})
+      ...(this.expressionTracing ? { expressionTracing: this.expressionTracing } : {}),
+      ...(this.conditionPlan ? { conditionPlan: this.conditionPlan } : {}),
+      ...(this.decisionBatches.length > 0 ? { decisionBatches: [...this.decisionBatches] } : {}),
+      ...(this.decisionTracing ? { decisionTracing: this.decisionTracing } : {})
     };
   }
 }

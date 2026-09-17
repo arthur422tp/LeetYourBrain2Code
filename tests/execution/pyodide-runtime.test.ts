@@ -94,6 +94,45 @@ describe("Pyodide runtime", () => {
     expect(script).not.toContain(`${JSON.stringify(request.sourceCode)} +`);
   });
 
+  it("normalizes and forwards decision plan and batch callback payloads", async () => {
+    const callbacks: string[] = [];
+    const globals: Record<string, (sessionId: string, payload: string) => void> = {};
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => {
+          globals.__lc_emit_condition_plan!("runtime-session", JSON.stringify({
+            version: 1, sites: [], conditions: [], operands: [], chains: []
+          }));
+          globals.__lc_emit_decision_batch!("runtime-session", JSON.stringify([{
+            batch_id: 1,
+            anchor_step: 1,
+            frame_id: 1,
+            site_id: "d1",
+            occurrence: 1,
+            status: "completed",
+            condition: {
+              condition_id: "d1.c0",
+              evaluations: [],
+              condition_results: [{ condition_id: "d1.c0", order: 1, truth: true }],
+              truth: true
+            },
+            outcome: "branch_entered"
+          }]));
+          return { status: "completed", termination_reason: "normal_return", stdout: "", duration_ms: 1, events: [] };
+        },
+        globals: {
+          set: (name, value) => { globals[name] = value as (sessionId: string, payload: string) => void; },
+          delete: () => undefined
+        }
+      }),
+      onConditionPlan: (_sessionId, plan) => callbacks.push(`plan:${plan.version}`),
+      onDecisionBatch: (_sessionId, batches) => callbacks.push(`batch:${batches[0]!.siteId}`)
+    });
+
+    await runtime.execute(request);
+    expect(callbacks).toEqual(["plan:1", "batch:d1"]);
+  });
+
   it("normalizes object references and bounded topology fields", () => {
     const event = normalizePythonTraceEvent({
       step: 1,

@@ -6,6 +6,7 @@ import type {
 } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
+import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
 import {
   ExecutionController,
   type WorkerLike
@@ -60,6 +61,30 @@ const expressionBatch: ExpressionBatch = {
   frameId: 1,
   line: 2,
   roots: []
+};
+
+const conditionPlan: ConditionPlan = {
+  version: 1,
+  sites: [],
+  conditions: [],
+  operands: [],
+  chains: []
+};
+
+const decisionBatch: DecisionBatch = {
+  batchId: 4,
+  anchorStep: 1,
+  frameId: 1,
+  siteId: "d1",
+  occurrence: 1,
+  status: "completed",
+  condition: {
+    conditionId: "d1.c0",
+    evaluations: [],
+    conditionResults: [{ conditionId: "d1.c0", order: 1, truth: false }],
+    truth: false
+  },
+  outcome: "branch_not_entered"
 };
 
 class ControlledWorker implements WorkerLike {
@@ -222,6 +247,31 @@ describe("ExecutionController", () => {
         terminationReason: "hard_timeout",
         expressionPlan,
         expressionBatches: [expressionBatch]
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains streamed decision evidence when a running request reaches hard timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new ControlledWorker();
+      const controller = new ExecutionController({ workerFactory: () => worker });
+      const pending = controller.execute(request("decision-timeout", 20));
+
+      worker.emit({ type: "ready" });
+      await Promise.resolve();
+      worker.emit({ type: "condition_plan", sessionId: "decision-timeout", plan: conditionPlan });
+      worker.emit({ type: "decision_batch", sessionId: "decision-timeout", batches: [decisionBatch] });
+
+      await vi.advanceTimersByTimeAsync(20);
+      const result = await pending;
+
+      expect(result).toEqual(expect.objectContaining({
+        status: "timeout",
+        conditionPlan,
+        decisionBatches: [decisionBatch]
       }));
     } finally {
       vi.useRealTimers();

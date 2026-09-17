@@ -6,6 +6,7 @@ import type {
 } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
+import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
 import type {
   PyodideRuntime,
   PyodideRuntimeOptions
@@ -51,6 +52,12 @@ const expressionBatch: ExpressionBatch = {
   frameId: 1,
   line: 1,
   roots: []
+};
+const conditionPlan: ConditionPlan = { version: 1, sites: [], conditions: [], operands: [], chains: [] };
+const decisionBatch: DecisionBatch = {
+  batchId: 1, anchorStep: 1, frameId: 1, siteId: "d1", occurrence: 1, status: "completed",
+  condition: { conditionId: "d1.c0", evaluations: [], conditionResults: [{ conditionId: "d1.c0", order: 1, truth: true }], truth: true },
+  outcome: "branch_entered"
 };
 
 describe("Pyodide worker", () => {
@@ -147,12 +154,16 @@ describe("Pyodide worker", () => {
     );
     callbacks?.onExpressionPlan?.("worker-session", expressionPlan);
     callbacks?.onExpressionBatch?.("worker-session", [expressionBatch]);
+    callbacks?.onConditionPlan?.("worker-session", conditionPlan);
+    callbacks?.onDecisionBatch?.("worker-session", [decisionBatch]);
     callbacks?.onTraceBatch?.("worker-session", [trace]);
     callbacks?.onFinished?.(result);
 
     expect(posted).toEqual([
       { type: "expression_plan", sessionId: "worker-session", plan: expressionPlan },
       { type: "expression_batch", sessionId: "worker-session", batches: [expressionBatch] },
+      { type: "condition_plan", sessionId: "worker-session", plan: conditionPlan },
+      { type: "decision_batch", sessionId: "worker-session", batches: [decisionBatch] },
       { type: "trace_batch", sessionId: "worker-session", events: [trace] },
       { type: "execution_finished", sessionId: "worker-session", result }
     ]);

@@ -44,6 +44,16 @@ function isExpressionMessage(value: unknown): boolean {
   );
 }
 
+function isDecisionMessage(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "type" in value &&
+    (value.type === "condition_plan" || value.type === "decision_batch")
+  );
+}
+
 function internalErrorResult(
   message: string,
   duringInitialization = false
@@ -220,7 +230,7 @@ export class ExecutionController {
 
           onMessage = (event: MessageEvent): void => {
             if (!isWorkerOutboundMessage(event.data)) {
-              if (isExpressionMessage(event.data)) {
+              if (isExpressionMessage(event.data) || isDecisionMessage(event.data)) {
                 return;
               }
               fail("Worker sent malformed protocol message");
@@ -247,6 +257,18 @@ export class ExecutionController {
               }
               return;
             }
+            if (message.type === "condition_plan") {
+              if (message.sessionId === request.sessionId) {
+                collector.setConditionPlan(message.plan);
+              }
+              return;
+            }
+            if (message.type === "decision_batch") {
+              if (message.sessionId === request.sessionId) {
+                collector.appendDecisionBatches(message.batches);
+              }
+              return;
+            }
             if (message.type === "execution_finished") {
               if (message.sessionId === request.sessionId) {
                 if (message.result.expressionPlan) {
@@ -257,6 +279,15 @@ export class ExecutionController {
                 }
                 if (message.result.expressionTracing) {
                   collector.setExpressionTracingState(message.result.expressionTracing);
+                }
+                if (message.result.conditionPlan) {
+                  collector.setConditionPlan(message.result.conditionPlan);
+                }
+                if (message.result.decisionBatches) {
+                  collector.appendDecisionBatches(message.result.decisionBatches);
+                }
+                if (message.result.decisionTracing) {
+                  collector.setDecisionTracingState(message.result.decisionTracing);
                 }
                 finish(
                   collector.finish(message.result),

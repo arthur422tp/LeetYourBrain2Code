@@ -12,10 +12,17 @@ import type {
   ExpressionPlan,
   ExpressionTracingState
 } from "../shared/expression-types";
+import type {
+  ConditionPlan,
+  DecisionBatch,
+  DecisionTracingState
+} from "../shared/decision-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
 import astAnalyzerSource from "./python/ast_analyzer.py?raw";
 import expressionInstrumenterSource from "./python/expression_instrumenter.py?raw";
 import expressionRecorderSource from "./python/expression_recorder.py?raw";
+import conditionInstrumenterSource from "./python/condition_instrumenter.py?raw";
+import decisionRecorderSource from "./python/decision_recorder.py?raw";
 import runnerSource from "./python/runner.py?raw";
 import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
@@ -46,6 +53,8 @@ export interface PyodideRuntimeOptions {
   onTraceBatch?: (sessionId: string, events: TraceEvent[]) => void;
   onExpressionPlan?: (sessionId: string, plan: ExpressionPlan) => void;
   onExpressionBatch?: (sessionId: string, batches: ExpressionBatch[]) => void;
+  onConditionPlan?: (sessionId: string, plan: ConditionPlan) => void;
+  onDecisionBatch?: (sessionId: string, batches: DecisionBatch[]) => void;
   onFinished?: (result: ExecutionTerminalResult) => void;
 }
 
@@ -101,6 +110,14 @@ __lc_expression_recorder_module = types.ModuleType("expression_recorder")
 sys.modules["expression_recorder"] = __lc_expression_recorder_module
 exec(compile(${quotePython(expressionRecorderSource)}, "<leetcode-expression-recorder>", "exec"), vars(__lc_expression_recorder_module), vars(__lc_expression_recorder_module))
 
+__lc_condition_instrumenter_module = types.ModuleType("condition_instrumenter")
+sys.modules["condition_instrumenter"] = __lc_condition_instrumenter_module
+exec(compile(${quotePython(conditionInstrumenterSource)}, "<leetcode-condition-instrumenter>", "exec"), vars(__lc_condition_instrumenter_module), vars(__lc_condition_instrumenter_module))
+
+__lc_decision_recorder_module = types.ModuleType("decision_recorder")
+sys.modules["decision_recorder"] = __lc_decision_recorder_module
+exec(compile(${quotePython(decisionRecorderSource)}, "<leetcode-decision-recorder>", "exec"), vars(__lc_decision_recorder_module), vars(__lc_decision_recorder_module))
+
 __lc_runner_module = types.ModuleType("runner")
 exec(compile(${quotePython(runnerSource)}, "<leetcode-runner>", "exec"), vars(__lc_runner_module), vars(__lc_runner_module))
 
@@ -125,12 +142,16 @@ __lc_runner_module.run_request(
         "max_object_depth": ${request.limits.maxObjectDepth},
         "max_expression_events": ${request.limits.maxExpressionEvents},
         "max_expression_bytes": ${request.limits.maxExpressionBytes},
+        "max_decision_events": ${request.limits.maxDecisionEvents},
+        "max_decision_bytes": ${request.limits.maxDecisionBytes},
     },
     runtime_globals=__lc_runtime_namespace,
     session_id=${quotePython(request.sessionId)},
     emit_batch=globals().get("__lc_emit_trace_batch"),
     emit_expression_plan=globals().get("__lc_emit_expression_plan"),
     emit_expression_batch=globals().get("__lc_emit_expression_batch"),
+    emit_condition_plan=globals().get("__lc_emit_condition_plan"),
+    emit_decision_batch=globals().get("__lc_emit_decision_batch"),
 )
 `;
 }
@@ -457,6 +478,146 @@ function normalizeExpressionTracingState(value: unknown): ExpressionTracingState
   };
 }
 
+function rawField(value: Record<string, unknown>, snake: string, camel: string): unknown {
+  return value[snake] ?? value[camel];
+}
+
+function normalizeSourceSpan(value: unknown): { line: number; column: number; endLine: number; endColumn: number } | undefined {
+  if (!isRecord(value)) return undefined;
+  const line = rawField(value, "line", "line");
+  const column = rawField(value, "column", "column");
+  const endLine = rawField(value, "end_line", "endLine");
+  const endColumn = rawField(value, "end_column", "endColumn");
+  if (typeof line !== "number" || typeof column !== "number" || typeof endLine !== "number" || typeof endColumn !== "number" ||
+    ![line, column, endLine, endColumn].every((item) => Number.isInteger(item) && item >= 0)) {
+    return undefined;
+  }
+  return { line, column, endLine, endColumn };
+}
+
+function normalizeConditionStructureHint(value: unknown): ConditionPlan["operands"][number]["structureHint"] | undefined {
+  if (!isRecord(value) || typeof value.kind !== "string" || typeof value.variableName !== "string") return undefined;
+  if (value.kind === "list_index") {
+    const indexOperandId = rawField(value, "index_operand_id", "indexOperandId");
+    return typeof indexOperandId === "string" ? { kind: "list_index", variableName: value.variableName, indexOperandId } : undefined;
+  }
+  if (value.kind === "matrix_cell") {
+    const rowOperandId = rawField(value, "row_operand_id", "rowOperandId");
+    const columnOperandId = rawField(value, "column_operand_id", "columnOperandId");
+    return typeof rowOperandId === "string" && typeof columnOperandId === "string"
+      ? { kind: "matrix_cell", variableName: value.variableName, rowOperandId, columnOperandId }
+      : undefined;
+  }
+  return undefined;
+}
+
+export function normalizeConditionPlan(value: unknown): ConditionPlan | undefined {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.sites) || !Array.isArray(value.conditions) ||
+    !Array.isArray(value.operands) || !Array.isArray(value.chains)) return undefined;
+  const sites = value.sites.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const siteId = rawField(raw, "site_id", "siteId");
+    const conditionId = rawField(raw, "condition_id", "conditionId");
+    const span = normalizeSourceSpan(raw.span);
+    const chainId = rawField(raw, "chain_id", "chainId");
+    const branchIndex = rawField(raw, "branch_index", "branchIndex");
+    return typeof siteId === "string" && (raw.kind === "if" || raw.kind === "elif" || raw.kind === "while") &&
+      typeof conditionId === "string" && span && (chainId === undefined || typeof chainId === "string") &&
+      (branchIndex === undefined || (typeof branchIndex === "number" && Number.isInteger(branchIndex) && branchIndex >= 0))
+      ? { siteId, kind: raw.kind, ...(typeof chainId === "string" ? { chainId } : {}), ...(typeof branchIndex === "number" ? { branchIndex } : {}), conditionId, span }
+      : null;
+  });
+  const conditions = value.conditions.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const conditionId = rawField(raw, "condition_id", "conditionId");
+    const siteId = rawField(raw, "site_id", "siteId");
+    const childConditionIds = rawField(raw, "child_condition_ids", "childConditionIds");
+    const operandIds = raw.operandIds ?? raw.operand_ids;
+    const span = normalizeSourceSpan(raw.span);
+    return typeof conditionId === "string" && typeof siteId === "string" &&
+      typeof raw.kind === "string" && ["truth_test", "comparison", "not", "and", "or", "opaque"].includes(raw.kind) &&
+      typeof raw.source === "string" && span && Array.isArray(childConditionIds) && childConditionIds.every((item) => typeof item === "string") &&
+      Array.isArray(operandIds) && operandIds.every((item) => typeof item === "string")
+      ? { conditionId, siteId, kind: raw.kind as ConditionPlan["conditions"][number]["kind"], source: raw.source, span, childConditionIds, operandIds }
+      : null;
+  });
+  const operands = value.operands.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const operandId = rawField(raw, "operand_id", "operandId");
+    const conditionId = rawField(raw, "condition_id", "conditionId");
+    const hint = raw.structureHint ?? raw.structure_hint;
+    const span = normalizeSourceSpan(raw.span);
+    return typeof operandId === "string" && typeof conditionId === "string" && typeof raw.source === "string" && span &&
+      (hint === undefined || normalizeConditionStructureHint(hint) !== undefined)
+      ? { operandId, conditionId, source: raw.source, span, ...(hint ? { structureHint: normalizeConditionStructureHint(hint) } : {}) }
+      : null;
+  });
+  const chains = value.chains.map((raw) => {
+    if (!isRecord(raw) || typeof raw.chainId !== "string" && typeof raw.chain_id !== "string" || !Array.isArray(raw.branches)) return null;
+    const chainId = rawField(raw, "chain_id", "chainId");
+    const branches = raw.branches.map((branch) => {
+      if (!isRecord(branch)) return null;
+      const branchIndex = rawField(branch, "branch_index", "branchIndex");
+      const siteId = rawField(branch, "site_id", "siteId");
+      return typeof branchIndex === "number" && Number.isInteger(branchIndex) && branchIndex >= 0 && ["if", "elif", "else"].includes(branch.kind as string) &&
+        (siteId === undefined || typeof siteId === "string")
+        ? { branchIndex, kind: branch.kind as "if" | "elif" | "else", ...(typeof siteId === "string" ? { siteId } : {}) }
+        : null;
+    });
+    return branches.every((branch) => branch !== null) ? { chainId, branches: branches as ConditionPlan["chains"][number]["branches"] } : null;
+  });
+  if (sites.some((item) => item === null) || conditions.some((item) => item === null) || operands.some((item) => item === null) || chains.some((item) => item === null)) return undefined;
+  return { version: 1, sites: sites as ConditionPlan["sites"], conditions: conditions as ConditionPlan["conditions"], operands: operands as ConditionPlan["operands"], chains: chains as ConditionPlan["chains"] };
+}
+
+export function normalizeDecisionBatch(value: unknown): DecisionBatch | null {
+  if (!isRecord(value)) return null;
+  const batchId = rawField(value, "batch_id", "batchId");
+  const anchorStep = rawField(value, "anchor_step", "anchorStep");
+  const frameId = rawField(value, "frame_id", "frameId");
+  const siteId = rawField(value, "site_id", "siteId");
+  const occurrence = rawField(value, "occurrence", "occurrence");
+  const conditionRaw = value.condition;
+  if (![batchId, anchorStep, frameId, occurrence].every((item) => typeof item === "number" && Number.isInteger(item) && item > 0) || typeof siteId !== "string" ||
+    (value.status !== "completed" && value.status !== "partial") || !isRecord(conditionRaw)) return null;
+  const conditionId = rawField(conditionRaw, "condition_id", "conditionId");
+  const rawEvaluations = conditionRaw.evaluations;
+  const rawResults = conditionRaw.condition_results ?? conditionRaw.conditionResults;
+  if (typeof conditionId !== "string" || !Array.isArray(rawEvaluations) || !Array.isArray(rawResults)) return null;
+  const evaluations = rawEvaluations.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const operandId = rawField(raw, "operand_id", "operandId");
+    return typeof operandId === "string" && typeof raw.order === "number" && Number.isInteger(raw.order) && raw.order > 0 && isValueSnapshot(raw.value)
+      ? { operandId, order: raw.order, value: raw.value }
+      : null;
+  });
+  const conditionResults = rawResults.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const resultConditionId = rawField(raw, "condition_id", "conditionId");
+    return typeof resultConditionId === "string" && typeof raw.order === "number" && Number.isInteger(raw.order) && raw.order > 0 && typeof raw.truth === "boolean"
+      ? { conditionId: resultConditionId, order: raw.order, truth: raw.truth }
+      : null;
+  });
+  const truth = conditionRaw.truth;
+  const outcome = value.outcome;
+  if (evaluations.some((item) => item === null) || conditionResults.some((item) => item === null) ||
+    (truth !== undefined && typeof truth !== "boolean") ||
+    conditionResults.some((item, index, items) => index > 0 && item!.order <= items[index - 1]!.order) ||
+    (value.status === "partial" ? outcome !== undefined : typeof outcome !== "string" || !["branch_entered", "branch_not_entered", "loop_body_entered", "loop_exited"].includes(outcome))) return null;
+  return {
+    batchId: batchId as number, anchorStep: anchorStep as number, frameId: frameId as number, siteId, occurrence: occurrence as number,
+    status: value.status,
+    condition: { conditionId, evaluations: evaluations as DecisionBatch["condition"]["evaluations"], conditionResults: conditionResults as DecisionBatch["condition"]["conditionResults"], ...(typeof truth === "boolean" ? { truth } : {}) },
+    ...(typeof outcome === "string" ? { outcome: outcome as DecisionBatch["outcome"] } : {})
+  };
+}
+
+export function normalizeDecisionTracingState(value: unknown): DecisionTracingState | undefined {
+  if (!isRecord(value) || !["complete", "truncated", "unavailable"].includes(String(value.status)) ||
+    (value.reason !== undefined && typeof value.reason !== "string")) return undefined;
+  return { status: value.status as DecisionTracingState["status"], ...(typeof value.reason === "string" ? { reason: value.reason } : {}) };
+}
+
 export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
   if (!isRecord(value)) {
     return null;
@@ -609,6 +770,16 @@ function normalizePythonExecutionResult(
   const expressionTracing = normalizeExpressionTracingState(
     value.expression_tracing ?? value.expressionTracing
   );
+  const conditionPlan = normalizeConditionPlan(value.condition_plan ?? value.conditionPlan);
+  const rawDecisionBatches = value.decision_batches ?? value.decisionBatches;
+  const decisionBatches = Array.isArray(rawDecisionBatches)
+    ? rawDecisionBatches
+        .map((batch) => normalizeDecisionBatch(batch))
+        .filter((batch): batch is DecisionBatch => batch !== null)
+    : [];
+  const decisionTracing = normalizeDecisionTracingState(
+    value.decision_tracing ?? value.decisionTracing
+  );
 
   return {
     events,
@@ -621,6 +792,9 @@ function normalizePythonExecutionResult(
       ...(expressionPlan ? { expressionPlan } : {}),
       ...(expressionBatches.length > 0 ? { expressionBatches } : {}),
       ...(expressionTracing ? { expressionTracing } : {}),
+      ...(conditionPlan ? { conditionPlan } : {}),
+      ...(decisionBatches.length > 0 ? { decisionBatches } : {}),
+      ...(decisionTracing ? { decisionTracing } : {}),
       ...(isValueSnapshot(returnValue) ? { returnValue } : {}),
       ...(exception ? { exception } : {})
     }
@@ -658,8 +832,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
       let traceCallbackInstalled = false;
       let expressionPlanCallbackInstalled = false;
       let expressionBatchCallbackInstalled = false;
+      let conditionPlanCallbackInstalled = false;
+      let decisionBatchCallbackInstalled = false;
       let streamedExpressionPlan = false;
       let streamedExpressionBatches = false;
+      let streamedConditionPlan = false;
+      let streamedDecisionBatches = false;
       const emitTraceBatch = (sessionId: string, eventsJson: string): void => {
         if (sessionId !== request.sessionId) {
           return;
@@ -707,6 +885,33 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
           // A malformed optional stream must not interrupt the Python run.
         }
       };
+      const emitConditionPlan = (sessionId: string, planJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const plan = normalizeConditionPlan(JSON.parse(planJson) as unknown);
+          if (!plan) return;
+          streamedConditionPlan = true;
+          options.onConditionPlan?.(sessionId, plan);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
+      const emitDecisionBatch = (sessionId: string, batchesJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const parsed = JSON.parse(batchesJson) as unknown;
+          const batches = Array.isArray(parsed)
+            ? parsed
+                .map((batch) => normalizeDecisionBatch(batch))
+                .filter((batch): batch is DecisionBatch => batch !== null)
+            : [];
+          if (batches.length === 0) return;
+          streamedDecisionBatches = true;
+          options.onDecisionBatch?.(sessionId, batches);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
 
       try {
         if (options.onTraceBatch && typeof pyodide.globals?.set === "function") {
@@ -720,6 +925,14 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         if (options.onExpressionBatch && typeof pyodide.globals?.set === "function") {
           pyodide.globals.set("__lc_emit_expression_batch", emitExpressionBatch);
           expressionBatchCallbackInstalled = true;
+        }
+        if (options.onConditionPlan && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_condition_plan", emitConditionPlan);
+          conditionPlanCallbackInstalled = true;
+        }
+        if (options.onDecisionBatch && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_decision_batch", emitDecisionBatch);
+          decisionBatchCallbackInstalled = true;
         }
         const rawResult = await pyodide.runPythonAsync(buildExecutionScript(request));
         const normalized = normalizePythonExecutionResult(
@@ -741,6 +954,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         if (!streamedExpressionBatches && normalized.result.expressionBatches) {
           options.onExpressionBatch?.(request.sessionId, normalized.result.expressionBatches);
         }
+        if (!streamedConditionPlan && normalized.result.conditionPlan) {
+          options.onConditionPlan?.(request.sessionId, normalized.result.conditionPlan);
+        }
+        if (!streamedDecisionBatches && normalized.result.decisionBatches) {
+          options.onDecisionBatch?.(request.sessionId, normalized.result.decisionBatches);
+        }
         options.onFinished?.(normalized.result);
       } catch (error) {
         options.onFinished?.(errorResult(error, Date.now() - startedAt));
@@ -753,6 +972,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         }
         if (expressionBatchCallbackInstalled) {
           pyodide.globals?.delete?.("__lc_emit_expression_batch");
+        }
+        if (conditionPlanCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_condition_plan");
+        }
+        if (decisionBatchCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_decision_batch");
         }
       }
     }

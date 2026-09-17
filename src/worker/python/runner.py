@@ -12,6 +12,8 @@ from tracer import TraceCollector, TraceLimitExceeded, USER_CODE_FILENAME, _limi
 from ast_analyzer import analyze_subscript_relations, relations_as_dicts
 from expression_instrumenter import instrument_expression_roots
 from expression_recorder import ExpressionRecorder
+from condition_instrumenter import instrument_condition_sites
+from decision_recorder import DecisionRecorder
 
 
 class UnsupportedTestcaseFormat(Exception):
@@ -242,6 +244,15 @@ def _emit_expression_plan(emit_plan, session_id, plan):
         pass
 
 
+def _emit_condition_plan(emit_plan, session_id, plan):
+    if emit_plan is None:
+        return
+    try:
+        emit_plan(session_id, json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        pass
+
+
 def run_request(
     source_code,
     raw_testcase,
@@ -252,6 +263,8 @@ def run_request(
     emit_batch=None,
     emit_expression_plan=None,
     emit_expression_batch=None,
+    emit_condition_plan=None,
+    emit_decision_batch=None,
 ):
     started_at = time.monotonic()
     lines = _argument_lines(raw_testcase)
@@ -284,8 +297,18 @@ def run_request(
         session_id=session_id,
         emit_batch=emit_expression_batch,
     )
+    decision_recorder = DecisionRecorder(
+        limits,
+        lambda: None,
+        session_id=session_id,
+        emit_batch=emit_decision_batch,
+    )
     expression_record_name = f"_lc_internal_expr_record_{secrets.token_hex(16)}"
     minmax_call_name = f"_lc_internal_minmax_call_{secrets.token_hex(16)}"
+    decision_begin_name = f"_lc_internal_decision_begin_{secrets.token_hex(16)}"
+    condition_truth_name = f"_lc_internal_condition_truth_{secrets.token_hex(16)}"
+    condition_operand_name = f"_lc_internal_condition_operand_{secrets.token_hex(16)}"
+    decision_complete_name = f"_lc_internal_decision_complete_{secrets.token_hex(16)}"
     instrumentation = instrument_expression_roots(
         source_code,
         expression_record_name=expression_record_name,
@@ -293,18 +316,45 @@ def run_request(
     )
     expression_plan = instrumentation.plan_dict
     try:
-        instrumented_tree = instrumentation.instrumented_tree
+        expression_tree = instrumentation.instrumented_tree if instrumentation.available else ast.parse(source_code)
+    except (SyntaxError, TypeError, ValueError) as error:
+        return _empty_result(
+            "parse_error",
+            "syntax_error",
+            exception=_exception_info(error),
+            expression_plan=expression_plan,
+        )
+    condition = instrument_condition_sites(
+        source_code,
+        expression_tree,
+        decision_begin_name,
+        condition_truth_name,
+        condition_operand_name,
+        decision_complete_name,
+    )
+    condition_plan = condition.plan_dict if condition.available else None
+    try:
+        instrumented_tree = condition.instrumented_tree if condition.available else expression_tree
+        capabilities = {}
         if instrumentation.available:
             capabilities = {
                 expression_record_name: (f"<lc-expr-{secrets.token_hex(16)}>", recorder.record_value),
                 minmax_call_name: (f"<lc-minmax-{secrets.token_hex(16)}>", recorder.record_minmax_call),
             }
+        if condition.available:
+            capabilities.update({
+                decision_begin_name: (f"<lc-decision-begin-{secrets.token_hex(16)}>", decision_recorder.begin),
+                condition_truth_name: (f"<lc-condition-truth-{secrets.token_hex(16)}>", decision_recorder.record_truth),
+                condition_operand_name: (f"<lc-condition-operand-{secrets.token_hex(16)}>", decision_recorder.record_operand),
+                decision_complete_name: (f"<lc-decision-complete-{secrets.token_hex(16)}>", decision_recorder.complete),
+            })
+        if capabilities:
             instrumented_tree = _ExpressionHelperLookupTransformer(capabilities).visit(instrumented_tree)
             ast.fix_missing_locations(instrumented_tree)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)
             user_code = compile(
-                instrumented_tree if instrumentation.available else source_code,
+                instrumented_tree,
                 USER_CODE_FILENAME,
                 "exec",
             )
@@ -335,6 +385,7 @@ def run_request(
         session_id=session_id,
         emit_batch=emit_batch,
         expression_recorder=recorder,
+        decision_recorder=decision_recorder,
     )
     recorder.serializer_factory = lambda: collector.serialize_value
     recorder.frame_id_for = collector.expression_frame_id
@@ -342,10 +393,17 @@ def run_request(
         root["rootId"]: root["expressionExprId"]
         for root in expression_plan["roots"]
     }
+    decision_recorder.serializer_factory = lambda: collector.serialize_value
+    decision_recorder.frame_id_for = collector.expression_frame_id
+    if not condition.available:
+        decision_recorder.status = "unavailable"
+        decision_recorder.reason = condition.reason
     return_value = None
 
     if instrumentation.available:
         _emit_expression_plan(emit_expression_plan, session_id, expression_plan)
+    if condition.available:
+        _emit_condition_plan(emit_condition_plan, session_id, condition_plan)
 
     collector.start()
     try:
@@ -386,7 +444,9 @@ def run_request(
             events=collector.events,
             subscript_relations=subscript_relations,
             expression_plan=expression_plan,
+            **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
+            **decision_recorder.result_dict(),
         )
     except UnsupportedTestcaseFormat as error:
         recorder.flush_all()
@@ -398,7 +458,9 @@ def run_request(
             subscript_relations=subscript_relations,
             exception=_exception_info(error),
             expression_plan=expression_plan,
+            **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
+            **decision_recorder.result_dict(),
         )
     except Exception as error:
         recorder.flush_all()
@@ -411,7 +473,9 @@ def run_request(
             subscript_relations=subscript_relations,
             exception=exception,
             expression_plan=expression_plan,
+            **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
+            **decision_recorder.result_dict(),
         )
     finally:
         collector.stop()
@@ -425,7 +489,9 @@ def run_request(
         events=collector.events,
         subscript_relations=subscript_relations,
         expression_plan=expression_plan,
+        **({"condition_plan": condition_plan} if condition_plan is not None else {}),
         **recorder.result_dict(),
+        **decision_recorder.result_dict(),
         return_value=collector.serialize_value(return_value),
         duration_ms=(time.monotonic() - started_at) * 1000,
     )

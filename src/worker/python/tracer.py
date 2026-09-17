@@ -36,6 +36,7 @@ class TraceCollector:
         session_id="session",
         emit_batch=None,
         expression_recorder=None,
+        decision_recorder=None,
     ):
         self.limits = limits
         self.stdout_buffer = stdout_buffer
@@ -43,6 +44,7 @@ class TraceCollector:
         self.session_id = session_id
         self.emit_batch = emit_batch
         self.expression_recorder = expression_recorder
+        self.decision_recorder = decision_recorder
         self.events = []
         self.pending_events = []
         self.pending_bytes = 2
@@ -238,9 +240,13 @@ class TraceCollector:
         if event_name in ("call", "line", "return", "exception"):
             if self.expression_recorder is not None and event_name in ("line", "return", "exception"):
                 self.expression_recorder.flush_frame(info["frame_id"])
+            if self.decision_recorder is not None and event_name in ("line", "return", "exception"):
+                self.decision_recorder.flush_frame(info["frame_id"])
             step = self._record(frame, event_name, argument, info)
             if self.expression_recorder is not None and event_name == "line":
                 self.expression_recorder.set_anchor(info["frame_id"], step, frame.f_lineno)
+            if self.decision_recorder is not None and event_name == "line":
+                self.decision_recorder.set_anchor(info["frame_id"], step, frame.f_lineno)
 
         if event_name == "return":
             if self.frame_stack and self.frame_stack[-1] == info["frame_id"]:

@@ -21,6 +21,27 @@ def instrument(source):
 
 
 class ConditionInstrumenterTests(unittest.TestCase):
+    @staticmethod
+    def run_variant(source, *arguments, instrumented):
+        tree = ast.parse(source)
+        if instrumented:
+            tree = instrument_condition_sites(
+                source,
+                tree,
+                "__lc_decision_begin",
+                "__lc_condition_truth",
+                "__lc_condition_operand",
+                "__lc_decision_complete",
+            ).instrumented_tree
+        namespace = {
+            "__lc_decision_begin": lambda _site, _condition: True,
+            "__lc_condition_operand": lambda _site, _condition, _operand, value: value,
+            "__lc_condition_truth": lambda _site, _condition, value: bool(value),
+            "__lc_decision_complete": lambda _site, _kind, _condition, truth: truth,
+        }
+        exec(compile(tree, "<leetcode-user-code>", "exec"), namespace, namespace)
+        return namespace["solve"](*arguments)
+
     def test_plans_sites_chains_and_evaluation_order_deterministically(self):
         source = """def solve(node, left, right, nums, i, target, x):
     if left < right and nums[i] != target:
@@ -133,6 +154,84 @@ class ConditionInstrumenterTests(unittest.TestCase):
             and node.func.id == "__lc_decision_complete"
             for node in ast.walk(condition.instrumented_tree)
         ))
+
+    def test_preserves_truth_side_effect_and_short_circuit_counts(self):
+        source = """class Flag:
+    def __init__(self):
+        self.calls = 0
+    def __bool__(self):
+        self.calls += 1
+        return self.calls == 1
+
+def solve(flag):
+    if flag:
+        pass
+    return flag.calls
+"""
+        plain_flag = type("Flag", (), {
+            "__init__": lambda self: setattr(self, "calls", 0),
+            "__bool__": lambda self: setattr(self, "calls", self.calls + 1) or self.calls == 1,
+        })()
+        self.assertEqual(self.run_variant(source, plain_flag, instrumented=False), 1)
+        instrumented_flag = type("Flag", (), {
+            "__init__": lambda self: setattr(self, "calls", 0),
+            "__bool__": lambda self: setattr(self, "calls", self.calls + 1) or self.calls == 1,
+        })()
+        self.assertEqual(self.run_variant(source, instrumented_flag, instrumented=True), 1)
+
+        short_circuit = """def explode():
+    raise AssertionError("called")
+
+def solve():
+    if False and explode():
+        return 1
+    if True or explode():
+        return 2
+    return 3
+"""
+        self.assertEqual(self.run_variant(short_circuit, instrumented=False), 2)
+        self.assertEqual(self.run_variant(short_circuit, instrumented=True), 2)
+
+    def test_preserves_custom_comparison_membership_and_identity_dispatch(self):
+        source = """class Left:
+    def __init__(self, state):
+        self.state = state
+    def __lt__(self, other):
+        self.state.append("lt")
+        return True
+
+class Container:
+    def __init__(self, state):
+        self.state = state
+    def __contains__(self, value):
+        self.state.append(value)
+        return True
+
+def solve(left, right, container, value, a, b, sentinel):
+    if left < right:
+        pass
+    if value in container:
+        pass
+    return a is sentinel, left.state, container.state
+"""
+        def run(instrumented):
+            state = []
+            left = type("Left", (), {
+                "__init__": lambda self: setattr(self, "state", state),
+                "__lt__": lambda self, _other: state.append("lt") or True,
+            })()
+            container = type("Container", (), {
+                "__init__": lambda self: setattr(self, "state", state),
+                "__contains__": lambda self, value: state.append(value) or True,
+            })()
+            sentinel = object()
+            result = self.run_variant(source, left, object(), container, "needle", object(), object(), sentinel, instrumented=instrumented)
+            return result
+
+        plain = run(False)
+        instrumented = run(True)
+        self.assertEqual(plain[0], instrumented[0])
+        self.assertEqual(plain[1:], instrumented[1:])
 
 
 if __name__ == "__main__":

@@ -115,4 +115,37 @@ describe("buildDecisionEvidence", () => {
     expect(result.historyBySite.get("d1")?.[0]).toMatchObject({ anchorStep: 9 });
     expect(result.historyBySite.get("d2")?.[0]).toMatchObject({ anchorStep: 12 });
   });
+
+  it("returns one decision-chain occurrence per runtime loop context", () => {
+    const chainPlan: ConditionPlan = {
+      ...planFor(),
+      sites: [
+        { siteId: "d1", kind: "if", chainId: "chain1", branchIndex: 0, conditionId: "d1.c0", span },
+        { siteId: "d2", kind: "elif", chainId: "chain1", branchIndex: 1, conditionId: "d2.c0", span }
+      ],
+      chains: [{ chainId: "chain1", branches: [
+        { branchIndex: 0, kind: "if", siteId: "d1" },
+        { branchIndex: 1, kind: "elif", siteId: "d2" },
+        { branchIndex: 2, kind: "else" }
+      ]}]
+    };
+    chainPlan.conditions.push({ conditionId: "d2.c0", siteId: "d2", kind: "truth_test", source: "C", span, childConditionIds: [], operandIds: [] });
+    const make = (batchId: number, anchorStep: number, context: number, siteId: "d1" | "d2", truth: boolean): DecisionBatch => ({
+      batchId,
+      anchorStep,
+      frameId: 1,
+      siteId,
+      occurrence: batchId,
+      status: "completed",
+      context: { loopStack: [{ loopId: "f1", iteration: context }] },
+      condition: { conditionId: `${siteId}.c0`, evaluations: [], conditionResults: [{ conditionId: `${siteId}.c0`, order: 1, truth }], truth },
+      outcome: truth ? "branch_entered" : "branch_not_entered"
+    });
+    const batches = [make(1, 1, 1, "d1", true), make(2, 2, 2, "d1", false), make(3, 3, 2, "d2", true), make(4, 4, 3, "d1", false), make(5, 5, 3, "d2", false)];
+    const result = buildDecisionEvidence(chainPlan, batches, batches.map((item) => runtimeState(item.anchorStep)));
+    expect(result.chains).toHaveLength(3);
+    expect(result.chains.map((occurrence) => occurrence.selectedBranchIndex)).toEqual([0, 1, 2]);
+    expect(new Set(result.chains.map((occurrence) => occurrence.occurrenceId)).size).toBe(3);
+    expect(result.chains.map((occurrence) => occurrence.context.loopStack[0]?.iteration)).toEqual([1, 2, 3]);
+  });
 });

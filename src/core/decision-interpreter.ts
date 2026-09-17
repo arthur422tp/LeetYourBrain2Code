@@ -4,7 +4,7 @@ import type {
   ConditionEvidenceNode,
   ConditionPlan,
   DecisionBatch,
-  DecisionChainEvidence,
+  DecisionChainOccurrence,
   DecisionEvidenceByStep,
   DecisionHistoryBySite,
   DecisionStepEvidence
@@ -13,7 +13,7 @@ import type {
 export interface DecisionInterpretation {
   byStep: DecisionEvidenceByStep;
   historyBySite: DecisionHistoryBySite;
-  chains: DecisionChainEvidence[];
+  chains: DecisionChainOccurrence[];
 }
 
 type ForcedStatus = "short_circuited" | "partial";
@@ -188,48 +188,78 @@ export function buildDecisionEvidence(
     history.sort((left, right) => left.occurrence - right.occurrence || left.anchorStep - right.anchorStep);
   }
 
-  const chains = plan.chains.map((chain) => {
-    const branches: DecisionChainEvidence["branches"] = chain.branches.map((branch) => ({
-      branchIndex: branch.branchIndex,
-      kind: branch.kind,
-      status: "not_reached" as const,
-      ...(branch.siteId ? { siteId: branch.siteId } : {})
-    }));
-    let selectedBranchIndex: number | null = null;
-    let partial = false;
-    const chainBatches = sortedBatches.filter((batch) => chain.branches.some((branch) => branch.siteId === batch.siteId));
-    for (const batch of chainBatches) {
-      if (selectedBranchIndex !== null || partial) break;
+  const chains: DecisionChainOccurrence[] = [];
+  for (const chain of plan.chains) {
+    const openOccurrences = new Map<string, DecisionChainOccurrence>();
+    const sequenceByFrame = new Map<number, number>();
+    const relevantBatches = sortedBatches.filter((batch) =>
+      chain.branches.some((branch) => branch.siteId === batch.siteId) && evidenceByBatch.has(batch.batchId)
+    );
+    const contextFor = (batch: DecisionBatch) => batch.context ?? { loopStack: [] };
+    const contextKey = (batch: DecisionBatch) => JSON.stringify(contextFor(batch).loopStack);
+    const createOccurrence = (batch: DecisionBatch): DecisionChainOccurrence => {
+      const sequence = (sequenceByFrame.get(batch.frameId) ?? 0) + 1;
+      sequenceByFrame.set(batch.frameId, sequence);
+      return {
+        chainId: chain.chainId,
+        occurrenceId: `${chain.chainId}:${batch.frameId}:${sequence}`,
+        frameId: batch.frameId,
+        context: contextFor(batch),
+        anchorStepStart: batch.anchorStep,
+        anchorStepEnd: batch.anchorStep,
+        branches: chain.branches.map((branch) => ({
+          branchIndex: branch.branchIndex,
+          kind: branch.kind,
+          status: "not_reached" as const,
+          ...(branch.siteId ? { siteId: branch.siteId } : {})
+        })),
+        selectedBranchIndex: null
+      };
+    };
+    const close = (key: string): void => {
+      const occurrence = openOccurrences.get(key);
+      if (!occurrence) return;
+      chains.push(occurrence);
+      openOccurrences.delete(key);
+    };
+    for (const batch of relevantBatches) {
       const branchIndex = chain.branches.find((branch) => branch.siteId === batch.siteId)?.branchIndex;
       if (branchIndex === undefined) continue;
-      const branch = branches.find((item) => item.branchIndex === branchIndex)!;
-      const evidence = evidenceByBatch.get(batch.batchId);
-      if (evidence) {
-        Object.assign(branch, { condition: evidence.condition, anchorStep: evidence.anchorStep });
+      const key = `${batch.frameId}:${contextKey(batch)}`;
+      if (branchIndex === 0) {
+        close(key);
+        openOccurrences.set(key, createOccurrence(batch));
       }
+      const occurrence = openOccurrences.get(key);
+      if (!occurrence) continue;
+      occurrence.anchorStepEnd = Math.max(occurrence.anchorStepEnd, batch.anchorStep);
+      const branch = occurrence.branches.find((item) => item.branchIndex === branchIndex);
+      if (!branch) continue;
+      const evidence = evidenceByBatch.get(batch.batchId);
+      if (evidence) Object.assign(branch, { condition: evidence.condition, anchorStep: evidence.anchorStep });
       if (batch.status === "partial") {
-        partial = true;
+        close(key);
         continue;
       }
       const truth = batch.condition.truth ?? batch.condition.conditionResults.find((result) => result.conditionId === batch.condition.conditionId)?.truth;
       if (truth === true) {
         branch.status = "selected";
-        selectedBranchIndex = branchIndex;
-        for (const later of branches) if (later.branchIndex > branchIndex) later.status = "not_reached";
+        occurrence.selectedBranchIndex = branchIndex;
+        close(key);
       } else if (truth === false) {
         branch.status = "rejected";
+        const conditionalBranches = occurrence.branches.filter((item) => item.kind !== "else");
+        const elseBranch = occurrence.branches.find((item) => item.kind === "else");
+        if (elseBranch && conditionalBranches.every((item) => item.status === "rejected")) {
+          elseBranch.status = "selected";
+          occurrence.selectedBranchIndex = elseBranch.branchIndex;
+          close(key);
+        }
       }
     }
-    if (!partial && selectedBranchIndex === null) {
-      const elseBranch = branches.find((branch) => branch.kind === "else");
-      const conditionalBranches = branches.filter((branch) => branch.kind !== "else");
-      if (elseBranch && conditionalBranches.length > 0 && conditionalBranches.every((branch) => branch.status === "rejected")) {
-        elseBranch.status = "selected";
-        selectedBranchIndex = elseBranch.branchIndex;
-      }
-    }
-    return { chainId: chain.chainId, branches, selectedBranchIndex };
-  });
+    for (const key of openOccurrences.keys()) close(key);
+  }
+  chains.sort((left, right) => left.frameId - right.frameId || left.anchorStepStart - right.anchorStepStart);
 
   return { byStep, historyBySite, chains };
 }

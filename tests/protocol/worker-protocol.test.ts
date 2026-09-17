@@ -200,6 +200,121 @@ describe("worker protocol", () => {
     ).toBe(true);
   });
 
+  it("accepts control-flow plans and runtime batches", () => {
+    expect(isWorkerOutboundMessage({
+      type: "control_flow_plan",
+      sessionId: "s1",
+      plan: {
+        version: 1,
+        loops: [{
+          loopId: "f1",
+          kind: "for",
+          span: { line: 2, column: 4, endLine: 4, endColumn: 12 },
+          target: {
+            source: "x",
+            span: { line: 2, column: 8, endLine: 2, endColumn: 9 },
+            bindingNames: ["x"],
+            capturable: true
+          }
+        }],
+        transfers: []
+      }
+    })).toBe(true);
+
+    expect(isWorkerOutboundMessage({
+      type: "control_flow_batch",
+      sessionId: "s1",
+      batches: [{
+        batchId: 1,
+        events: [{
+          eventId: 1,
+          kind: "iteration_begin",
+          anchorStep: 4,
+          frameId: 2,
+          context: { loopStack: [{ loopId: "f1", iteration: 1 }] },
+          loopId: "f1",
+          loopKind: "for",
+          iteration: 1,
+          bindings: [{ name: "x", value: { type: "int", value: "7" } }]
+        }]
+      }]
+    })).toBe(true);
+  });
+
+  it("rejects malformed control-flow protocol fields", () => {
+    const plan = {
+      type: "control_flow_plan",
+      sessionId: "s1",
+      plan: {
+        version: 1,
+        loops: [],
+        transfers: []
+      }
+    } as const;
+    expect(isWorkerOutboundMessage({ ...plan, plan: { ...plan.plan, version: 2 } })).toBe(false);
+
+    const batch = {
+      type: "control_flow_batch",
+      sessionId: "s1",
+      batches: [{
+        batchId: 1,
+        events: [{
+          eventId: 1,
+          kind: "transfer_status",
+          anchorStep: 4,
+          frameId: 2,
+          context: { loopStack: [] },
+          actionId: "a1",
+          status: "observed"
+        }]
+      }]
+    } as const;
+    expect(isWorkerOutboundMessage(batch)).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...batch,
+      batches: [{ ...batch.batches[0], events: [{ ...batch.batches[0].events[0], kind: "loop_exit", loopId: "f1", loopKind: "for", reason: "unknown" } as const] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...batch,
+      batches: [{ ...batch.batches[0], events: [{ ...batch.batches[0].events[0], kind: "iteration_begin", anchorStep: 0, loopId: "f1", loopKind: "for", iteration: 0, bindings: [] } as const] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...batch,
+      batches: [{ ...batch.batches[0], events: [
+        { ...batch.batches[0].events[0], kind: "iteration_complete", eventId: 2, loopId: "f1", iteration: 1 } as const,
+        { ...batch.batches[0].events[0], kind: "iteration_complete", eventId: 1, loopId: "f1", iteration: 1 } as const
+      ] }]
+    })).toBe(false);
+  });
+
+  it("accepts decision context and rejects malformed loop stacks", () => {
+    const decisionBatch = {
+      type: "decision_batch",
+      sessionId: "s1",
+      batches: [{
+        batchId: 1,
+        anchorStep: 4,
+        frameId: 2,
+        siteId: "d1",
+        occurrence: 1,
+        status: "completed",
+        context: { loopStack: [{ loopId: "f1", iteration: 1 }] },
+        condition: {
+          conditionId: "d1.c0",
+          evaluations: [],
+          conditionResults: [{ conditionId: "d1.c0", order: 1, truth: false }],
+          truth: false
+        },
+        outcome: "branch_not_entered"
+      }]
+    };
+    expect(isWorkerOutboundMessage(decisionBatch)).toBe(true);
+    expect(isWorkerOutboundMessage({
+      ...decisionBatch,
+      batches: [{ ...decisionBatch.batches[0], context: { loopStack: [{ loopId: "f1", iteration: 0 }] } }]
+    })).toBe(false);
+  });
+
   it("rejects malformed decision protocol fields", () => {
     const base = {
       type: "decision_batch",

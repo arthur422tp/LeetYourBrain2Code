@@ -37,7 +37,9 @@ function request(sessionId: string, hardTimeoutMs = 1_000): ExecutionRequest {
       maxExpressionEvents: 20_000,
       maxExpressionBytes: 2_000_000,
       maxDecisionEvents: 20_000,
-      maxDecisionBytes: 2_000_000
+    maxDecisionBytes: 2_000_000,
+    maxControlFlowEvents: 20_000,
+    maxControlFlowBytes: 2_000_000
     }
   };
 }

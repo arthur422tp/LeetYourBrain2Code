@@ -1,5 +1,6 @@
 import type { SourceSpan } from "./expression-types";
 import type { ValueSnapshot } from "./trace-types";
+import type { ExecutionContextRef } from "./control-flow-types";
 
 export type DecisionSiteKind = "if" | "elif" | "while";
 export type ConditionKind =
@@ -97,6 +98,15 @@ export interface DecisionBatch {
   status: "completed" | "partial";
   condition: ConditionEvaluation;
   outcome?: DecisionOutcome;
+  context?: ExecutionContextRef;
+}
+
+export interface DecisionChainOccurrence extends DecisionChainEvidence {
+  occurrenceId: string;
+  frameId: number;
+  context: ExecutionContextRef;
+  anchorStepStart: number;
+  anchorStepEnd: number;
 }
 
 export interface DecisionTracingState {

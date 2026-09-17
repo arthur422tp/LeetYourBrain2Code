@@ -24,6 +24,16 @@ import type {
   DecisionTracingState
 } from "./decision-types";
 import type {
+  ControlFlowBatch,
+  ControlFlowPlan,
+  ControlFlowRuntimeEvent,
+  ControlFlowTracingState,
+  ExecutionContextRef,
+  LoopExitReason,
+  LoopKind,
+  TransferKind
+} from "./control-flow-types";
+import type {
   AssignmentTargetDescriptor,
   ExpressionBatch,
   ExpressionDescriptor,
@@ -47,6 +57,8 @@ export type WorkerOutboundMessage =
   | { type: "expression_batch"; sessionId: string; batches: ExpressionBatch[] }
   | { type: "condition_plan"; sessionId: string; plan: ConditionPlan }
   | { type: "decision_batch"; sessionId: string; batches: DecisionBatch[] }
+  | { type: "control_flow_plan"; sessionId: string; plan: ControlFlowPlan }
+  | { type: "control_flow_batch"; sessionId: string; batches: ControlFlowBatch[] }
   | {
       type: "execution_finished";
       sessionId: string;
@@ -78,6 +90,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return isInteger(value) && value > 0;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -379,12 +395,88 @@ function isConditionEvaluation(value: unknown): value is ConditionEvaluation {
   return value.conditionResults.every((result, index, results) => index === 0 || result.order > results[index - 1]!.order);
 }
 
+export function isExecutionContextRef(value: unknown): value is ExecutionContextRef {
+  return isRecord(value) && Array.isArray(value.loopStack) && value.loopStack.every((item) =>
+    isRecord(item) && typeof item.loopId === "string" && isPositiveInteger(item.iteration)
+  );
+}
+
+function isLoopKind(value: unknown): value is LoopKind {
+  return value === "for" || value === "while";
+}
+
+function isTransferKind(value: unknown): value is TransferKind {
+  return value === "break" || value === "continue" || value === "return";
+}
+
+function isLoopExitReason(value: unknown): value is LoopExitReason {
+  return ["exhausted", "condition_false", "break", "function_return", "exception", "trace_ended"].includes(value as string);
+}
+
+function isForTargetDescriptor(value: unknown): boolean {
+  return isRecord(value) && typeof value.source === "string" && isSourceSpan(value.span) &&
+    isStringArray(value.bindingNames) && typeof value.capturable === "boolean";
+}
+
+function isControlFlowPlan(value: unknown): value is ControlFlowPlan {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.loops) || !Array.isArray(value.transfers)) {
+    return false;
+  }
+  const loopsValid = value.loops.every((loop) => isRecord(loop) && typeof loop.loopId === "string" &&
+    isLoopKind(loop.kind) && isSourceSpan(loop.span) &&
+    (loop.target === undefined || isForTargetDescriptor(loop.target)));
+  const transfersValid = value.transfers.every((transfer) => isRecord(transfer) &&
+    typeof transfer.transferId === "string" && isTransferKind(transfer.kind) && isSourceSpan(transfer.span) &&
+    (transfer.targetLoopId === undefined || typeof transfer.targetLoopId === "string"));
+  return loopsValid && transfersValid;
+}
+
+function isControlFlowRuntimeEvent(value: unknown): value is ControlFlowRuntimeEvent {
+  if (!isRecord(value) || !isPositiveInteger(value.eventId) || !isPositiveInteger(value.anchorStep) ||
+    !isPositiveInteger(value.frameId) || !isExecutionContextRef(value.context) || typeof value.kind !== "string") {
+    return false;
+  }
+  if (value.kind === "iteration_begin") {
+    return typeof value.loopId === "string" && isLoopKind(value.loopKind) && isPositiveInteger(value.iteration) &&
+      Array.isArray(value.bindings) && value.bindings.every((binding) => isRecord(binding) &&
+        typeof binding.name === "string" && isValueSnapshot(binding.value));
+  }
+  if (value.kind === "iteration_complete") {
+    return typeof value.loopId === "string" && isPositiveInteger(value.iteration);
+  }
+  if (value.kind === "transfer_observed") {
+    return typeof value.actionId === "string" && typeof value.transferId === "string" &&
+      isTransferKind(value.transferKind) && (value.targetLoopId === undefined || typeof value.targetLoopId === "string");
+  }
+  if (value.kind === "transfer_status") {
+    return typeof value.actionId === "string" &&
+      (value.status === "committed" || value.status === "superseded" || value.status === "interrupted") &&
+      (value.status === "superseded"
+        ? typeof value.supersededByActionId === "string"
+        : value.supersededByActionId === undefined);
+  }
+  return value.kind === "loop_exit" && typeof value.loopId === "string" && isLoopKind(value.loopKind) &&
+    isLoopExitReason(value.reason);
+}
+
+function isControlFlowBatch(value: unknown): value is ControlFlowBatch {
+  if (!isRecord(value) || !isPositiveInteger(value.batchId) || !Array.isArray(value.events) ||
+    !value.events.every(isControlFlowRuntimeEvent)) return false;
+  return value.events.every((event, index, events) => index === 0 || event.eventId > events[index - 1]!.eventId);
+}
+
+function isControlFlowTracingState(value: unknown): value is ControlFlowTracingState {
+  return isRecord(value) && ["complete", "truncated", "unavailable"].includes(value.status as string) &&
+    (value.reason === undefined || typeof value.reason === "string");
+}
+
 function isDecisionBatch(value: unknown): value is DecisionBatch {
   return isRecord(value) && isInteger(value.batchId) && value.batchId > 0 &&
     isInteger(value.anchorStep) && value.anchorStep > 0 && isInteger(value.frameId) && value.frameId > 0 &&
     typeof value.siteId === "string" && isInteger(value.occurrence) && value.occurrence > 0 &&
     (value.status === "completed" || value.status === "partial") && isConditionEvaluation(value.condition) &&
-    (value.status === "partial" ? value.outcome === undefined : isDecisionOutcome(value.outcome));
+    (value.status === "partial" ? value.outcome === undefined : isDecisionOutcome(value.outcome)) &&
+    (value.context === undefined || isExecutionContextRef(value.context));
 }
 
 function isDecisionTracingState(value: unknown): value is DecisionTracingState {
@@ -409,6 +501,9 @@ function isExecutionTerminalResult(value: unknown): value is ExecutionTerminalRe
     && (value.conditionPlan === undefined || isConditionPlan(value.conditionPlan))
     && (value.decisionBatches === undefined || (Array.isArray(value.decisionBatches) && value.decisionBatches.every(isDecisionBatch)))
     && (value.decisionTracing === undefined || isDecisionTracingState(value.decisionTracing))
+    && (value.controlFlowPlan === undefined || isControlFlowPlan(value.controlFlowPlan))
+    && (value.controlFlowBatches === undefined || (Array.isArray(value.controlFlowBatches) && value.controlFlowBatches.every(isControlFlowBatch)))
+    && (value.controlFlowTracing === undefined || isControlFlowTracingState(value.controlFlowTracing))
   );
 }
 
@@ -436,6 +531,10 @@ export function isWorkerOutboundMessage(value: unknown): value is WorkerOutbound
       return typeof value.sessionId === "string" && isConditionPlan(value.plan);
     case "decision_batch":
       return typeof value.sessionId === "string" && Array.isArray(value.batches) && value.batches.every(isDecisionBatch);
+    case "control_flow_plan":
+      return typeof value.sessionId === "string" && isControlFlowPlan(value.plan);
+    case "control_flow_batch":
+      return typeof value.sessionId === "string" && Array.isArray(value.batches) && value.batches.every(isControlFlowBatch);
     case "execution_finished":
       return (
         typeof value.sessionId === "string" &&

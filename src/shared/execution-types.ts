@@ -9,6 +9,11 @@ import type {
   DecisionBatch,
   DecisionTracingState
 } from "./decision-types";
+import type {
+  ControlFlowBatch,
+  ControlFlowPlan,
+  ControlFlowTracingState
+} from "./control-flow-types";
 
 export const TRACE_SESSION_STATUSES = [
   "running",
@@ -64,6 +69,8 @@ export interface ExecutionLimits {
   maxExpressionBytes: number;
   maxDecisionEvents: number;
   maxDecisionBytes: number;
+  maxControlFlowEvents: number;
+  maxControlFlowBytes: number;
 }
 
 export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
@@ -80,7 +87,9 @@ export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
   maxExpressionEvents: 20_000,
   maxExpressionBytes: 2_000_000,
   maxDecisionEvents: 20_000,
-  maxDecisionBytes: 2_000_000
+  maxDecisionBytes: 2_000_000,
+  maxControlFlowEvents: 20_000,
+  maxControlFlowBytes: 2_000_000
 };
 
 export interface ExecutionRequest {
@@ -113,6 +122,9 @@ export interface ExecutionTerminalResult {
   conditionPlan?: ConditionPlan;
   decisionBatches?: DecisionBatch[];
   decisionTracing?: DecisionTracingState;
+  controlFlowPlan?: ControlFlowPlan;
+  controlFlowBatches?: ControlFlowBatch[];
+  controlFlowTracing?: ControlFlowTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

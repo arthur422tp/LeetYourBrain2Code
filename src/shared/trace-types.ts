@@ -15,8 +15,13 @@ import type {
   DecisionBatch,
   DecisionTracingState
 } from "./decision-types";
+import type {
+  ControlFlowBatch,
+  ControlFlowPlan,
+  ControlFlowTracingState
+} from "./control-flow-types";
 
-export const TRACE_SCHEMA_VERSION = 4;
+export const TRACE_SCHEMA_VERSION = 5;
 
 export type ObjectId = string;
 
@@ -210,6 +215,9 @@ export interface TraceSession {
   conditionPlan?: ConditionPlan;
   decisionBatches?: DecisionBatch[];
   decisionTracing?: DecisionTracingState;
+  controlFlowPlan?: ControlFlowPlan;
+  controlFlowBatches?: ControlFlowBatch[];
+  controlFlowTracing?: ControlFlowTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

@@ -28,8 +28,14 @@ import type {
   DecisionBatch,
   DecisionEvidenceByStep,
   DecisionHistoryBySite,
-  DecisionChainEvidence
+  DecisionChainOccurrence
 } from "../shared/decision-types";
+import type { ControlFlowBatch, ControlFlowPlan } from "../shared/control-flow-types";
+import {
+  buildControlFlowEvidence,
+  type ControlFlowInterpretation,
+  type TraceTerminationContext
+} from "./control-flow-interpreter";
 
 export interface TraceInterpretation {
   runtimeStates: RuntimeState[];
@@ -40,7 +46,8 @@ export interface TraceInterpretation {
   expressionEvidence: ExpressionEvidenceByStep;
   decisionEvidence: DecisionEvidenceByStep;
   decisionHistory: DecisionHistoryBySite;
-  decisionChains: DecisionChainEvidence[];
+  decisionChains: DecisionChainOccurrence[];
+  controlFlow: ControlFlowInterpretation;
   visualStates: VisualState[];
 }
 
@@ -61,7 +68,10 @@ export function interpretTrace(
   expressionPlan?: ExpressionPlan,
   expressionBatches: ExpressionBatch[] = [],
   conditionPlan?: ConditionPlan,
-  decisionBatches: DecisionBatch[] = []
+  decisionBatches: DecisionBatch[] = [],
+  controlFlowPlan?: ControlFlowPlan,
+  controlFlowBatches: ControlFlowBatch[] = [],
+  termination?: TraceTerminationContext
 ): TraceInterpretation {
   const runtimeStates = reconstructStates(events);
   const expressionEvidence = buildExpressionEvidence(
@@ -73,6 +83,12 @@ export function interpretTrace(
     conditionPlan,
     decisionBatches,
     runtimeStates
+  );
+  const controlFlow = buildControlFlowEvidence(
+    controlFlowPlan,
+    controlFlowBatches,
+    runtimeStates,
+    termination
   );
   const previousFrameStates = new Map<number, FrameState>();
   const frameResults = runtimeStates.map((runtime) => {
@@ -139,6 +155,7 @@ export function interpretTrace(
     decisionEvidence: decisionInterpretation.byStep,
     decisionHistory: decisionInterpretation.historyBySite,
     decisionChains: decisionInterpretation.chains,
+    controlFlow,
     visualStates
   };
 }

@@ -437,6 +437,7 @@ def run_request(
             return_value = method(*converted_arguments)
     except TraceLimitExceeded as error:
         recorder.flush_all()
+        decision_recorder.flush_all()
         return _empty_result(
             "trace_limit",
             error.reason,
@@ -450,6 +451,7 @@ def run_request(
         )
     except UnsupportedTestcaseFormat as error:
         recorder.flush_all()
+        decision_recorder.flush_all()
         return _empty_result(
             "input_error",
             "unsupported_testcase_format",
@@ -464,6 +466,7 @@ def run_request(
         )
     except Exception as error:
         recorder.flush_all()
+        decision_recorder.flush_all()
         exception = collector.last_exception or _exception_info(error)
         return _empty_result(
             "exception",
@@ -481,6 +484,7 @@ def run_request(
         collector.stop()
         collector.flush()
         recorder.flush_all()
+        decision_recorder.flush_all()
 
     return _empty_result(
         "completed",

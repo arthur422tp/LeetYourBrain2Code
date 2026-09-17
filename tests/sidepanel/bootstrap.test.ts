@@ -134,6 +134,30 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("forwards a decision-aware session into the trace viewer", async () => {
+    const root = document.createElement("main");
+    const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({
+      ...completedSession(request),
+      schemaVersion: 4,
+      conditionPlan: {
+        version: 1,
+        sites: [],
+        conditions: [],
+        operands: [],
+        chains: []
+      },
+      decisionTracing: { status: "complete" }
+    }));
+    const handle = renderSidePanel(root, { controller: { execute }, liveDebounceMs: 1_000 });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    expect(root.querySelector(".trace-viewer__decision-panel")).not.toBeNull();
+    expect(root.querySelector(".trace-viewer__expression-panel")).not.toBeNull();
+    handle.dispose();
+  });
+
   it("visualizes the canonical page state emitted by the active tab source", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

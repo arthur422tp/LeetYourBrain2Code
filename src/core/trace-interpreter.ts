@@ -22,6 +22,14 @@ import type {
   ExpressionEvidenceByStep,
   ExpressionPlan
 } from "../shared/expression-types";
+import { buildDecisionEvidence } from "./decision-interpreter";
+import type {
+  ConditionPlan,
+  DecisionBatch,
+  DecisionEvidenceByStep,
+  DecisionHistoryBySite,
+  DecisionChainEvidence
+} from "../shared/decision-types";
 
 export interface TraceInterpretation {
   runtimeStates: RuntimeState[];
@@ -30,6 +38,9 @@ export interface TraceInterpretation {
   mutationBatches: RuntimeMutationBatch[];
   behavioralAnalysis: BehavioralAnalysis;
   expressionEvidence: ExpressionEvidenceByStep;
+  decisionEvidence: DecisionEvidenceByStep;
+  decisionHistory: DecisionHistoryBySite;
+  decisionChains: DecisionChainEvidence[];
   visualStates: VisualState[];
 }
 
@@ -48,12 +59,19 @@ export function interpretTrace(
   events: TraceEvent[],
   relations: StaticRelation[] = [],
   expressionPlan?: ExpressionPlan,
-  expressionBatches: ExpressionBatch[] = []
+  expressionBatches: ExpressionBatch[] = [],
+  conditionPlan?: ConditionPlan,
+  decisionBatches: DecisionBatch[] = []
 ): TraceInterpretation {
   const runtimeStates = reconstructStates(events);
   const expressionEvidence = buildExpressionEvidence(
     expressionPlan,
     expressionBatches,
+    runtimeStates
+  );
+  const decisionInterpretation = buildDecisionEvidence(
+    conditionPlan,
+    decisionBatches,
     runtimeStates
   );
   const previousFrameStates = new Map<number, FrameState>();
@@ -101,6 +119,7 @@ export function interpretTrace(
       mutationBatches[index]!.mutations,
       expressionEvidence.get(runtime.step)?.roots
         .flatMap((root) => root.structureReferences) ?? [],
+      decisionInterpretation.byStep.get(runtime.step)?.structureReferences ?? [],
       (matrices) => {
         if (runtime.activeFrameId !== null) {
           pathTracker.update(runtime.activeFrameId, matrices, expressionEvidence.get(runtime.step)?.roots ?? []);
@@ -117,6 +136,9 @@ export function interpretTrace(
     mutationBatches,
     behavioralAnalysis,
     expressionEvidence,
+    decisionEvidence: decisionInterpretation.byStep,
+    decisionHistory: decisionInterpretation.historyBySite,
+    decisionChains: decisionInterpretation.chains,
     visualStates
   };
 }

@@ -29,7 +29,9 @@ const limits: ExecutionLimits = {
   maxObjectAttributes: 20,
   maxObjectDepth: 32,
   maxExpressionEvents: 20_000,
-  maxExpressionBytes: 2_000_000
+  maxExpressionBytes: 2_000_000,
+  maxDecisionEvents: 20_000,
+  maxDecisionBytes: 2_000_000
 };
 
 const entrypoint: EntryPoint = {

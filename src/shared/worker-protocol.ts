@@ -8,6 +8,21 @@ import {
 } from "./execution-types";
 import type { ExecutionRequest } from "./execution-types";
 import type { TraceEvent } from "./trace-types";
+import type { ValueSnapshot } from "./trace-types";
+import type {
+  ConditionDescriptor,
+  ConditionEvaluation,
+  ConditionKind,
+  ConditionOperandDescriptor,
+  ConditionPlan,
+  ConditionResult,
+  ConditionStructureHint,
+  DecisionBatch,
+  DecisionChainDescriptor,
+  DecisionOutcome,
+  DecisionSiteDescriptor,
+  DecisionTracingState
+} from "./decision-types";
 import type {
   AssignmentTargetDescriptor,
   ExpressionBatch,
@@ -30,6 +45,8 @@ export type WorkerOutboundMessage =
   | { type: "trace_batch"; sessionId: string; events: TraceEvent[] }
   | { type: "expression_plan"; sessionId: string; plan: ExpressionPlan }
   | { type: "expression_batch"; sessionId: string; batches: ExpressionBatch[] }
+  | { type: "condition_plan"; sessionId: string; plan: ConditionPlan }
+  | { type: "decision_batch"; sessionId: string; batches: DecisionBatch[] }
   | {
       type: "execution_finished";
       sessionId: string;
@@ -276,6 +293,105 @@ function isExpressionTracingState(value: unknown): value is ExpressionTracingSta
   );
 }
 
+function isConditionKind(value: unknown): value is ConditionKind {
+  return ["truth_test", "comparison", "not", "and", "or", "opaque"].includes(value as string);
+}
+
+function isDecisionSiteKind(value: unknown): boolean {
+  return value === "if" || value === "elif" || value === "while";
+}
+
+function isDecisionOutcome(value: unknown): value is DecisionOutcome {
+  return ["branch_entered", "branch_not_entered", "loop_body_entered", "loop_exited"].includes(value as string);
+}
+
+function isConditionStructureHint(value: unknown): value is ConditionStructureHint {
+  if (!isRecord(value)) return false;
+  if (value.kind === "list_index") {
+    return typeof value.variableName === "string" && typeof value.indexOperandId === "string";
+  }
+  return value.kind === "matrix_cell" &&
+    typeof value.variableName === "string" &&
+    typeof value.rowOperandId === "string" &&
+    typeof value.columnOperandId === "string";
+}
+
+function isConditionOperandDescriptor(value: unknown): value is ConditionOperandDescriptor {
+  return isRecord(value) &&
+    typeof value.operandId === "string" &&
+    typeof value.conditionId === "string" &&
+    typeof value.source === "string" &&
+    isSourceSpan(value.span) &&
+    (value.structureHint === undefined || isConditionStructureHint(value.structureHint));
+}
+
+function isConditionDescriptor(value: unknown): value is ConditionDescriptor {
+  return isRecord(value) &&
+    typeof value.conditionId === "string" &&
+    typeof value.siteId === "string" &&
+    isConditionKind(value.kind) &&
+    typeof value.source === "string" &&
+    isSourceSpan(value.span) &&
+    isStringArray(value.childConditionIds) &&
+    isStringArray(value.operandIds);
+}
+
+function isDecisionSiteDescriptor(value: unknown): value is DecisionSiteDescriptor {
+  return isRecord(value) &&
+    typeof value.siteId === "string" &&
+    isDecisionSiteKind(value.kind) &&
+    (value.chainId === undefined || typeof value.chainId === "string") &&
+    (value.branchIndex === undefined || (isInteger(value.branchIndex) && value.branchIndex >= 0)) &&
+    typeof value.conditionId === "string" &&
+    isSourceSpan(value.span);
+}
+
+function isDecisionChainDescriptor(value: unknown): value is DecisionChainDescriptor {
+  return isRecord(value) && typeof value.chainId === "string" && Array.isArray(value.branches) &&
+    value.branches.every((branch) => isRecord(branch) && isInteger(branch.branchIndex) && branch.branchIndex >= 0 &&
+      ["if", "elif", "else"].includes(branch.kind as string) &&
+      (branch.siteId === undefined || typeof branch.siteId === "string"));
+}
+
+function isConditionPlan(value: unknown): value is ConditionPlan {
+  return isRecord(value) && value.version === 1 &&
+    Array.isArray(value.sites) && value.sites.every(isDecisionSiteDescriptor) &&
+    Array.isArray(value.conditions) && value.conditions.every(isConditionDescriptor) &&
+    Array.isArray(value.operands) && value.operands.every(isConditionOperandDescriptor) &&
+    Array.isArray(value.chains) && value.chains.every(isDecisionChainDescriptor);
+}
+
+function isConditionResult(value: unknown): value is ConditionResult {
+  return isRecord(value) && typeof value.conditionId === "string" &&
+    isInteger(value.order) && value.order > 0 && typeof value.truth === "boolean";
+}
+
+function isDecisionOperandEvaluation(value: unknown): boolean {
+  return isRecord(value) && typeof value.operandId === "string" &&
+    isInteger(value.order) && value.order > 0 && isValueSnapshot(value.value);
+}
+
+function isConditionEvaluation(value: unknown): value is ConditionEvaluation {
+  if (!isRecord(value) || typeof value.conditionId !== "string" || !Array.isArray(value.evaluations) ||
+    !value.evaluations.every(isDecisionOperandEvaluation) || !Array.isArray(value.conditionResults) ||
+    !value.conditionResults.every(isConditionResult) ||
+    (value.truth !== undefined && typeof value.truth !== "boolean")) return false;
+  return value.conditionResults.every((result, index, results) => index === 0 || result.order > results[index - 1]!.order);
+}
+
+function isDecisionBatch(value: unknown): value is DecisionBatch {
+  return isRecord(value) && isInteger(value.batchId) && value.batchId > 0 &&
+    isInteger(value.anchorStep) && value.anchorStep > 0 && isInteger(value.frameId) && value.frameId > 0 &&
+    typeof value.siteId === "string" && isInteger(value.occurrence) && value.occurrence > 0 &&
+    (value.status === "completed" || value.status === "partial") && isConditionEvaluation(value.condition) &&
+    (value.status === "partial" ? value.outcome === undefined : isDecisionOutcome(value.outcome));
+}
+
+function isDecisionTracingState(value: unknown): value is DecisionTracingState {
+  return isRecord(value) && ["complete", "truncated", "unavailable"].includes(value.status as string) &&
+    (value.reason === undefined || typeof value.reason === "string");
+}
+
 function isExecutionTerminalResult(value: unknown): value is ExecutionTerminalResult {
   if (!isRecord(value)) {
     return false;
@@ -290,6 +406,9 @@ function isExecutionTerminalResult(value: unknown): value is ExecutionTerminalRe
     (value.expressionBatches === undefined ||
       (Array.isArray(value.expressionBatches) && value.expressionBatches.every(isExpressionBatch))) &&
     (value.expressionTracing === undefined || isExpressionTracingState(value.expressionTracing))
+    && (value.conditionPlan === undefined || isConditionPlan(value.conditionPlan))
+    && (value.decisionBatches === undefined || (Array.isArray(value.decisionBatches) && value.decisionBatches.every(isDecisionBatch)))
+    && (value.decisionTracing === undefined || isDecisionTracingState(value.decisionTracing))
   );
 }
 
@@ -313,6 +432,10 @@ export function isWorkerOutboundMessage(value: unknown): value is WorkerOutbound
         Array.isArray(value.batches) &&
         value.batches.every(isExpressionBatch)
       );
+    case "condition_plan":
+      return typeof value.sessionId === "string" && isConditionPlan(value.plan);
+    case "decision_batch":
+      return typeof value.sessionId === "string" && Array.isArray(value.batches) && value.batches.every(isDecisionBatch);
     case "execution_finished":
       return (
         typeof value.sessionId === "string" &&

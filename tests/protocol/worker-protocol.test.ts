@@ -146,6 +146,96 @@ describe("worker protocol", () => {
     ).toBe(true);
   });
 
+  it("accepts condition plans and completed decision batches with ordered truth results", () => {
+    expect(
+      isWorkerOutboundMessage({
+        type: "condition_plan",
+        sessionId: "s1",
+        plan: { version: 1, sites: [], conditions: [], operands: [], chains: [] }
+      })
+    ).toBe(true);
+
+    expect(
+      isWorkerOutboundMessage({
+        type: "decision_batch",
+        sessionId: "s1",
+        batches: [{
+          batchId: 1,
+          anchorStep: 4,
+          frameId: 2,
+          siteId: "d1",
+          occurrence: 1,
+          status: "completed",
+          condition: {
+            conditionId: "d1.c0",
+            evaluations: [],
+            conditionResults: [{ conditionId: "d1.c0", order: 1, truth: false }],
+            truth: false
+          },
+          outcome: "branch_not_entered"
+        }]
+      })
+    ).toBe(true);
+  });
+
+  it("accepts partial decision batches without an outcome", () => {
+    expect(
+      isWorkerOutboundMessage({
+        type: "decision_batch",
+        sessionId: "s1",
+        batches: [{
+          batchId: 2,
+          anchorStep: 5,
+          frameId: 2,
+          siteId: "d1",
+          occurrence: 2,
+          status: "partial",
+          condition: {
+            conditionId: "d1.c0",
+            evaluations: [],
+            conditionResults: []
+          }
+        }]
+      })
+    ).toBe(true);
+  });
+
+  it("rejects malformed decision protocol fields", () => {
+    const base = {
+      type: "decision_batch",
+      sessionId: "s1",
+      batches: [{
+        batchId: 1,
+        anchorStep: 4,
+        frameId: 2,
+        siteId: "d1",
+        occurrence: 1,
+        status: "completed",
+        condition: {
+          conditionId: "d1.c0",
+          evaluations: [],
+          conditionResults: [{ conditionId: "d1.c0", order: 1, truth: false }],
+          truth: false
+        },
+        outcome: "branch_not_entered"
+      }]
+    } as const;
+
+    expect(isWorkerOutboundMessage({ ...base, batches: [{ ...base.batches[0], batchId: undefined }] })).toBe(false);
+    expect(isWorkerOutboundMessage({ ...base, batches: [{ ...base.batches[0], occurrence: 1.5 }] })).toBe(false);
+    expect(isWorkerOutboundMessage({ ...base, batches: [{ ...base.batches[0], status: "partial" }] })).toBe(false);
+    expect(isWorkerOutboundMessage({ ...base, batches: [{ ...base.batches[0], status: "unknown" }] })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ ...base.batches[0], condition: { ...base.batches[0].condition, conditionResults: [{ conditionId: "d1.c0", order: 2, truth: false }, { conditionId: "d1.c1", order: 1, truth: true }] } }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      type: "condition_plan",
+      sessionId: "s1",
+      plan: { version: 2, sites: [], conditions: [], operands: [], chains: [] }
+    })).toBe(false);
+  });
+
   it("rejects malformed expression plans and batches", () => {
     expect(
       isWorkerOutboundMessage({

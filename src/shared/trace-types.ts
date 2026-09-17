@@ -10,8 +10,13 @@ import type {
   ExpressionPlan,
   ExpressionTracingState
 } from "./expression-types";
+import type {
+  ConditionPlan,
+  DecisionBatch,
+  DecisionTracingState
+} from "./decision-types";
 
-export const TRACE_SCHEMA_VERSION = 3;
+export const TRACE_SCHEMA_VERSION = 4;
 
 export type ObjectId = string;
 
@@ -202,6 +207,9 @@ export interface TraceSession {
   expressionPlan?: ExpressionPlan;
   expressionBatches?: ExpressionBatch[];
   expressionTracing?: ExpressionTracingState;
+  conditionPlan?: ConditionPlan;
+  decisionBatches?: DecisionBatch[];
+  decisionTracing?: DecisionTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

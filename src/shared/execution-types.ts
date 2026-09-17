@@ -4,6 +4,11 @@ import type {
   ExpressionPlan,
   ExpressionTracingState
 } from "./expression-types";
+import type {
+  ConditionPlan,
+  DecisionBatch,
+  DecisionTracingState
+} from "./decision-types";
 
 export const TRACE_SESSION_STATUSES = [
   "running",
@@ -57,6 +62,8 @@ export interface ExecutionLimits {
   maxObjectDepth: number;
   maxExpressionEvents: number;
   maxExpressionBytes: number;
+  maxDecisionEvents: number;
+  maxDecisionBytes: number;
 }
 
 export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
@@ -71,7 +78,9 @@ export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
   maxObjectAttributes: 20,
   maxObjectDepth: 32,
   maxExpressionEvents: 20_000,
-  maxExpressionBytes: 2_000_000
+  maxExpressionBytes: 2_000_000,
+  maxDecisionEvents: 20_000,
+  maxDecisionBytes: 2_000_000
 };
 
 export interface ExecutionRequest {
@@ -101,6 +110,9 @@ export interface ExecutionTerminalResult {
   expressionPlan?: ExpressionPlan;
   expressionBatches?: ExpressionBatch[];
   expressionTracing?: ExpressionTracingState;
+  conditionPlan?: ConditionPlan;
+  decisionBatches?: DecisionBatch[];
+  decisionTracing?: DecisionTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

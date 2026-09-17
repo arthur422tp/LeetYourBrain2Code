@@ -19,6 +19,15 @@ function expressionReferencesAt(
   );
 }
 
+function decisionReferencesAt(
+  model: ListVisualModel,
+  index: number
+): NonNullable<ListVisualModel["decisionReferences"]> {
+  return (model.decisionReferences ?? []).filter((reference) =>
+    reference.kind === "list_index" && reference.index === index
+  );
+}
+
 function applyExpressionOverlays(
   item: HTMLElement,
   references: ListVisualModel["expressionReferences"]
@@ -45,6 +54,19 @@ function applyExpressionOverlays(
     item.dataset.expressionTarget = "true";
   } else {
     delete item.dataset.expressionTarget;
+  }
+}
+
+function applyDecisionOverlays(
+  item: HTMLElement,
+  references: NonNullable<ListVisualModel["decisionReferences"]>
+): void {
+  const hasDecisionOperand = references.length > 0;
+  item.classList.toggle("is-decision-operand", hasDecisionOperand);
+  if (hasDecisionOperand) {
+    item.dataset.decisionOperand = "true";
+  } else {
+    delete item.dataset.decisionOperand;
   }
 }
 
@@ -146,6 +168,7 @@ function createListItem(
     item.classList.add("is-pointer-target");
   }
   applyExpressionOverlays(item, expressionReferencesAt(model, index));
+  applyDecisionOverlays(item, decisionReferencesAt(model, index));
 
   item.append(pointerRow, value, itemIndex);
   return item;
@@ -269,6 +292,7 @@ function updateListItems(list: HTMLElement, model: ListVisualModel): void {
       item.classList.add("is-pointer-focus");
     }
     applyExpressionOverlays(item, expressionReferencesAt(model, index));
+    applyDecisionOverlays(item, decisionReferencesAt(model, index));
     item.querySelector<HTMLElement>(".list-visualizer__value")!.textContent =
       `[${formatValue(model.items[index]!)}]`;
   }

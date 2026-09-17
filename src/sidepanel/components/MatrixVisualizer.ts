@@ -83,6 +83,16 @@ function expressionReferencesAt(
   );
 }
 
+function decisionReferencesAt(
+  model: MatrixVisualModel,
+  row: number,
+  column: number
+): NonNullable<MatrixVisualModel["decisionReferences"]> {
+  return (model.decisionReferences ?? []).filter((reference) =>
+    reference.kind === "matrix_cell" && reference.row === row && reference.column === column
+  );
+}
+
 function applyExpressionOverlays(
   cell: HTMLElement,
   references: MatrixVisualModel["expressionReferences"]
@@ -103,6 +113,19 @@ function applyExpressionOverlays(
   }
   if (hasTarget) {
     cell.dataset.expressionTarget = "true";
+  }
+}
+
+function applyDecisionOverlays(
+  cell: HTMLElement,
+  references: NonNullable<MatrixVisualModel["decisionReferences"]>
+): void {
+  const hasDecisionOperand = references.length > 0;
+  cell.classList.toggle("is-decision-operand", hasDecisionOperand);
+  if (hasDecisionOperand) {
+    cell.dataset.decisionOperand = "true";
+  } else {
+    delete cell.dataset.decisionOperand;
   }
 }
 
@@ -261,6 +284,7 @@ function renderGrid(model: MatrixVisualModel, viewport: MatrixViewport): HTMLEle
       // Expression batches describe evaluation of the current line; path overlays
       // describe committed assignments. Do not mix the two moments in one grid.
       if (!model.path) applyExpressionOverlays(target, expressionReferencesAt(model, row, column));
+      applyDecisionOverlays(target, decisionReferencesAt(model, row, column));
       grid.append(target);
     }
   }

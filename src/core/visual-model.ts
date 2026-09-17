@@ -15,6 +15,7 @@ import type {
   SequenceElementMutation
 } from "./runtime-mutation";
 import type { StructureOperandReference } from "../shared/expression-types";
+import type { DecisionStructureReference } from "../shared/decision-types";
 import { cloneRuntimeMutation } from "./runtime-mutation";
 import { cloneLocals, cloneValueSnapshot, valueSnapshotKey } from "./value-snapshot";
 import { resolveVisualCandidates, type VisualCandidate } from "./visual-candidate-resolver";
@@ -25,6 +26,7 @@ export interface ListVisualModel {
   variableName: string;
   items: ValueSnapshot[];
   expressionReferences: StructureOperandReference[];
+  decisionReferences?: DecisionStructureReference[];
   pointers: Array<{
     name: string;
     index: number;
@@ -123,7 +125,8 @@ function buildListVisual(
   bindings: PointerBinding[],
   container: string,
   mutations: RuntimeMutation[],
-  expressionReferences: StructureOperandReference[]
+  expressionReferences: StructureOperandReference[],
+  decisionReferences: DecisionStructureReference[]
 ): ListVisualModel | null {
   if (runtime.activeFrameId === null) {
     return null;
@@ -134,6 +137,10 @@ function buildListVisual(
     return null;
   }
 
+  const projectedDecisionReferences = decisionReferences.filter((reference) =>
+    reference.kind === "list_index" && reference.variableName === container
+  );
+
   return {
     kind: "list",
     visualId: `list:${container}`,
@@ -142,6 +149,9 @@ function buildListVisual(
     expressionReferences: expressionReferences.filter((reference) =>
       reference.kind === "list_index" && reference.variableName === container
     ),
+    ...(projectedDecisionReferences.length > 0
+      ? { decisionReferences: projectedDecisionReferences }
+      : {}),
     pointers: bindings
       .filter((binding) => binding.container === container)
       .map((binding) => ({
@@ -239,14 +249,15 @@ function buildContainerVisual(
   container: string,
   relations: StaticRelation[],
   mutations: RuntimeMutation[],
-  expressionReferences: StructureOperandReference[]
+  expressionReferences: StructureOperandReference[],
+  decisionReferences: DecisionStructureReference[]
 ): ContainerVisualModel | null {
   const frame = runtime.activeFrameId === null
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const snapshot = frame?.locals[container];
   if (snapshot?.type === "list" || snapshot?.type === "tuple") {
-    return buildListVisual(runtime, bindings, container, mutations, expressionReferences);
+    return buildListVisual(runtime, bindings, container, mutations, expressionReferences, decisionReferences);
   }
   if (snapshot?.type === "dict") {
     return buildDictVisual(runtime, container, mutations, relations);
@@ -362,14 +373,19 @@ export function buildVisualState(
   objectDiff: ObjectDiff | null = null,
   mutations: RuntimeMutation[] = [],
   expressionReferences: StructureOperandReference[] = [],
+  decisionReferencesOrAnnotate: DecisionStructureReference[] | ((matrices: MatrixVisualModel[]) => void) = [],
   annotateMatrices?: (matrices: MatrixVisualModel[]) => void
 ): VisualState {
+  const decisionReferences = Array.isArray(decisionReferencesOrAnnotate) ? decisionReferencesOrAnnotate : [];
+  const matrixAnnotator = typeof decisionReferencesOrAnnotate === "function"
+    ? decisionReferencesOrAnnotate
+    : annotateMatrices;
   const frame = runtime.activeFrameId === null
     ? undefined
     : runtime.frames.get(runtime.activeFrameId);
   const bindings = resolvePointerBindings(relations, runtime);
-  const matrixVisuals = buildMatrixVisuals(runtime, relations, mutations, expressionReferences);
-  annotateMatrices?.(matrixVisuals);
+  const matrixVisuals = buildMatrixVisuals(runtime, relations, mutations, expressionReferences, decisionReferences);
+  matrixAnnotator?.(matrixVisuals);
   const matrixVariables = new Set(matrixVisuals.map((visual) => visual.variableName));
   const containerNames = frame
     ? Object.entries(frame.locals)
@@ -384,7 +400,8 @@ export function buildVisualState(
       container,
       relations,
       mutations,
-      expressionReferences
+      expressionReferences,
+      decisionReferences
     ))
     .filter((visual): visual is ContainerVisualModel => visual !== null);
   const linkedListVisuals = buildLinkedListVisuals(runtime, mutations);

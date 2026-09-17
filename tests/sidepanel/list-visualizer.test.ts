@@ -93,6 +93,33 @@ describe("renderListVisualizer", () => {
     expect(target?.dataset.expressionTarget).toBe("true");
   });
 
+  it("renders decision operand overlays independently from expression overlays", () => {
+    const view = renderListVisualizer(model({
+      expressionReferences: [{
+        exprId: "r1.value",
+        variableName: "nums",
+        kind: "list_index",
+        index: 1,
+        rawIndex: 1,
+        role: "selected_operand"
+      }],
+      decisionReferences: [{
+        operandId: "d1.c0.o1",
+        variableName: "nums",
+        kind: "list_index",
+        index: 1,
+        rawIndex: 1,
+        role: "condition_operand"
+      }]
+    }));
+
+    const item = view.querySelector<HTMLElement>('[data-list-item-index="1"]');
+    expect(item?.classList.contains("is-expression-selected")).toBe(true);
+    expect(item?.classList.contains("is-decision-operand")).toBe(true);
+    expect(item?.dataset.expressionSelected).toBe("true");
+    expect(item?.dataset.decisionOperand).toBe("true");
+  });
+
   it("keeps an out-of-bounds pointer visible as a requested index", () => {
     const view = renderListVisualizer(model({
       pointers: [{ name: "left", index: 5, outOfBounds: true }]

@@ -203,6 +203,38 @@ describe("MatrixVisualizer", () => {
     view.dispose();
   });
 
+  it("renders decision operand overlays independently from expression overlays", () => {
+    const view = createMatrixVisualizer(model({
+      expressionReferences: [{
+        exprId: "r1.value",
+        variableName: "dp",
+        kind: "matrix_cell",
+        row: 1,
+        column: 1,
+        rawRow: 1,
+        rawColumn: 1,
+        role: "selected_operand"
+      }],
+      decisionReferences: [{
+        operandId: "d1.c0.o1",
+        variableName: "dp",
+        kind: "matrix_cell",
+        row: 1,
+        column: 1,
+        rawRow: 1,
+        rawColumn: 1,
+        role: "condition_operand"
+      }]
+    }));
+
+    const target = cell(view.element, 1, 1)!;
+    expect(target.classList.contains("is-expression-selected")).toBe(true);
+    expect(target.classList.contains("is-decision-operand")).toBe(true);
+    expect(target.dataset.expressionSelected).toBe("true");
+    expect(target.dataset.decisionOperand).toBe("true");
+    view.dispose();
+  });
+
   it("does not auto-pan for expression references outside the current viewport", () => {
     const view = createMatrixVisualizer(model({
       rowCount: 20,

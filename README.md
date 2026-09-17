@@ -27,6 +27,10 @@ RuntimeState + FrameDiff/ObjectDiff
                 ↓
 RuntimeMutation + BehavioralPattern
                 ↓
+Expression Evidence
+                ↓
+Decision Evidence
+                ↓
 Visual interpretation + Behavioral Evidence Navigation
                 ↓
 Repeated-transition Trace Folding
@@ -55,6 +59,10 @@ The MVP is designed to expose:
   including operand, intermediate, and result values, factual `min` / `max`
   candidate selection when it can be proven safely, and List / Matrix overlays
   for operands, the selected candidate, and assignment targets;
+- captured Decision Evidence for `if`, `elif`, and `while` sites, including
+  nested `and` / `or` / `not`, factual short-circuit states, branch-chain
+  outcomes, repeated `while` history, and List / Matrix condition-operand
+  highlighting;
 - list state with index/pointer bindings;
 - dedicated Matrix / Grid visualization for complete rectangular 2D `list` / `tuple` scalar state, including direct `matrix[i][j]` focus, negative-index normalization, out-of-bounds requested-cell evidence, runtime-backed cell changes, a bounded focus-aware viewport, and persistent cell inspection;
 - dedicated linked-list visualization for Python objects with `next` topology, including pointer labels, edge mutation, disconnected fragments, and cycle-safe display;
@@ -100,6 +108,8 @@ Supported:
 - a bounded focus-aware viewport and persistent cell inspection;
 - Expression Evidence overlays for captured List / Matrix operands, selected
   `min` / `max` candidates, and assignment targets.
+- Decision Evidence overlays for captured List / Matrix condition operands,
+  kept independent from Expression Evidence styling.
 
 ### Recorded matrix paths
 
@@ -124,8 +134,6 @@ Not yet supported:
 - ragged, 3D, sparse, or NumPy matrix visualization;
 - alias recovery when the same runtime matrix is reached through another name;
 - focus inference for `i + 1`, `j - 1`, or other arbitrary index expressions;
-- comparison, boolean, and `if` / `while` branch evidence; these belong to the
-  future Condition / Decision Tracing work;
 - DP recurrence or algorithm inference, or expected-vs-actual correctness diagnosis.
 
 ## Important boundaries
@@ -137,6 +145,11 @@ Not yet supported:
 - Expression Evidence describes captured executed computation. It does not infer
   the correct recurrence, algorithm intent, root cause, or a fix; `min` / `max`
   candidate selection is shown only when the runtime evidence proves it safely.
+- Decision Evidence describes how a supported condition evaluated and which
+  branch Python selected. It does not judge whether that branch was correct.
+- Decision Tracing v0.1 does not decompose chained comparisons, infer `for`
+  loop semantics, explain `break` / `continue` causality, compare execution
+  against an expected path, or apply automatic bug fixes.
 - Trace folding is a deterministic presentation projection over captured raw steps. It does not delete raw events or diagnose why execution failed.
 - Pyodide does not perfectly reproduce LeetCode's judge environment.
 - Testcase synchronization observes LeetCode's visible testcase controls; if the testcase editor has not mounted yet, the Side Panel keeps code synchronized and waits for the testcase.

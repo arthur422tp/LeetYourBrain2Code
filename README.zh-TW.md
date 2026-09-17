@@ -27,6 +27,10 @@ RuntimeState + FrameDiff/ObjectDiff
                     ↓
 RuntimeMutation + BehavioralPattern
                     ↓
+Expression Evidence
+                    ↓
+Decision Evidence
+                    ↓
 Visual interpretation + Behavioral Evidence Navigation
                     ↓
 Repeated-transition Trace Folding
@@ -53,6 +57,9 @@ MVP 的目標是呈現：
   包含 operand、intermediate、result value；若 runtime evidence 能安全證明，
   也會呈現 factual `min`／`max` candidate selection，以及 List／Matrix 上的
   operand、selected candidate 與 assignment target overlay；
+- 對支援的 `if`、`elif`、`while` 提供 captured Decision Evidence，包含巢狀
+  `and`／`or`／`not`、factual short-circuit 狀態、branch-chain 結果、重複
+  `while` history，以及 List／Matrix condition operand highlighting；
 - 帶有 index／pointer bindings 的 list state；
 - 完整矩形 2D `list`／`tuple` scalar state 的專用 Matrix / Grid 視覺化，包含直接 `matrix[i][j]` focus、負索引正規化、越界 requested-cell evidence、由 runtime mutation evidence 推導的實際 cell 變更、受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection；
 - 對具有 `next` topology 的 Python runtime object 提供專用 linked-list 視覺化，包含 pointer labels、edge mutation、disconnected fragments 與 cycle-safe display；
@@ -98,14 +105,14 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - 受邊界限制且會跟隨 focus 的 viewport，以及可持續的 cell inspection；
 - 對已捕獲的 List／Matrix operand、selected `min`／`max` candidate 與
   assignment target 提供 Expression Evidence overlay。
+- 對已捕獲的 List／Matrix condition operand 提供獨立於 Expression Evidence
+  樣式的 Decision Evidence overlay。
 
 尚未支援：
 
 - ragged、3D、sparse 或 NumPy matrix 視覺化；
 - 同一 runtime matrix 透過其他名稱存取時的 alias recovery；
 - 對 `i + 1`、`j - 1` 或其他任意 index expression 的 focus 推導；
-- comparison、boolean，以及 `if`／`while` branch evidence；這些屬於未來的
-  Condition／Decision Tracing 工作；
 - DP recurrence 或演算法意圖推導，也不進行 expected-vs-actual correctness diagnosis。
 
 ## 重要邊界
@@ -117,6 +124,10 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - Expression Evidence 只描述 captured execution computation，不會推導正確的
   recurrence、演算法意圖、root cause 或修正方式；只有在 runtime evidence 能
   安全證明時，才會呈現 `min`／`max` candidate selection。
+- Decision Evidence 只描述支援的 condition 如何被評估，以及 Python 實際選擇
+  的 branch；不會判斷該 branch 是否正確。
+- Decision Tracing v0.1 尚不拆解 chained comparison、不推導 `for` loop semantics、
+  不解釋 `break`／`continue` causality、不比較 expected path，也不自動修正 bug。
 - Trace folding 只是 captured raw steps 上的 deterministic presentation projection，不會刪除 raw events，也不會診斷 execution failure 的原因。
 - Pyodide 無法完整重現 LeetCode judge environment。
 - Testcase synchronization 會讀取 LeetCode 畫面上可見的 testcase controls；如果 testcase editor 尚未 mount，Side Panel 仍會同步 code，並等待 testcase 出現。

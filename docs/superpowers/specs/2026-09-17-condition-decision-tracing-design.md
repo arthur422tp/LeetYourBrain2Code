@@ -83,7 +83,7 @@ Decision evidence must never state or imply:
 - a recommended fix;
 - an algorithm classification used to fill missing evidence.
 
-The factual boundary is therefore:
+The factual boundary is:
 
 ```text
 actual evaluation → yes
@@ -98,8 +98,6 @@ bug diagnosis → no
 # 3. Architectural Choice
 
 Decision Tracing uses the existing source-level instrumentation foundation but introduces a **separate evidence channel** from Expression Tracing.
-
-The selected architecture is:
 
 ```text
 Original Python AST
@@ -132,7 +130,7 @@ TraceEvent != RuntimeMutation != ExpressionEvidence != DecisionEvidence
 
 The evidence channels may correlate through the same raw execution coordinate, but none replaces another.
 
-Decision Tracing reuses the existing worker/runtime lifecycle, session anchoring, streaming, and limit patterns where appropriate. It does not introduce a second tracing runtime.
+Decision Tracing reuses the existing worker/runtime lifecycle, session anchoring, streaming, and limit patterns. It does not introduce a second tracing runtime.
 
 ---
 
@@ -146,7 +144,7 @@ Condition / Decision Tracing v0.1 includes:
 4. supported truth tests such as `if node:`;
 5. comparisons using `==`, `!=`, `<`, `<=`, `>`, `>=`, `is`, `is not`, `in`, and `not in`;
 6. unary `not`;
-7. nested `and` / `or` condition trees;
+7. nested `and` / `or` condition trees in truth-test context;
 8. factual short-circuit evidence;
 9. explicit distinction between evaluated, short-circuited, not-reached, and partial states;
 10. per-occurrence loop-condition history for `while`;
@@ -186,7 +184,7 @@ v0.1 does not implement:
 - generic behavioral classification of decision sequences;
 - Failure-First prioritization based on nearby Decision Evidence.
 
-Chained comparison decomposition is also excluded from v0.1. A condition such as:
+Chained comparison decomposition is excluded from v0.1. A condition such as:
 
 ```python
 0 <= i < n
@@ -287,20 +285,25 @@ Every actual condition evaluation is a runtime occurrence.
 Conceptually:
 
 ```ts
+type DecisionOutcome =
+  | "branch_entered"
+  | "branch_not_entered"
+  | "loop_body_entered"
+  | "loop_exited";
+
 interface DecisionBatch {
   batchId: number;
   anchorStep: number;
   frameId: number;
   siteId: string;
   occurrence: number;
+  status: "completed" | "partial";
   condition: ConditionEvaluation;
-  outcome:
-    | "branch_entered"
-    | "branch_not_entered"
-    | "loop_body_entered"
-    | "loop_exited";
+  outcome?: DecisionOutcome;
 }
 ```
+
+`outcome` exists only for a successfully completed decision occurrence. A condition interrupted by a user exception or termination remains `partial` and has no branch/loop outcome.
 
 A `while` condition therefore has one static site but many runtime occurrences:
 
@@ -312,7 +315,7 @@ occurrence 3 → True
 occurrence 4 → False
 ```
 
-Occurrence numbering is scoped so that repeated evaluations of the same site in the same runtime context remain ordered and inspectable.
+Occurrence numbering must remain stable within a runtime frame/site pair. Recursion therefore produces separate occurrence sequences for separate frame IDs rather than merging logically distinct calls.
 
 All decision evidence is anchored to the same authoritative execution coordinate already used by other evidence layers:
 
@@ -361,7 +364,7 @@ No state may be collapsed into another for UI convenience.
 
 A child may be labeled short-circuited only when a successfully completed parent boolean operation proves that Python skipped that child.
 
-If the condition is interrupted by an exception or tracing termination, absent child evidence must not automatically be classified as short-circuited.
+If condition evaluation is interrupted by an exception or tracing termination, absent child evidence must not automatically be classified as short-circuited.
 
 ---
 
@@ -417,7 +420,7 @@ The terms `selected`, `rejected`, and `not reached` are factual runtime descript
 
 Condition instrumentation must preserve ordinary Python behavior.
 
-The critical design choice is that a truth probe consumes the truth-test that Python would already perform and returns a built-in boolean.
+The critical design choice is that a truth probe consumes the user-defined truth test that Python would otherwise need at that truth-test position and returns a built-in boolean.
 
 For:
 
@@ -436,7 +439,7 @@ if __lc_truth(site_id, condition_id, node):
 where the helper:
 
 ```text
-1. performs the one truth test required by the original condition;
+1. performs the one user-value truth test required by the original condition;
 2. records factual evidence;
 3. returns the resulting built-in bool.
 ```
@@ -444,6 +447,8 @@ where the helper:
 It must not truth-test the original object and then return that original object for Python to truth-test again.
 
 This is required for values with user-defined `__bool__()` or `__len__()`.
+
+The additional truth test that Python performs on the helper's returned built-in `bool` is semantically inert with respect to user code and must not invoke user-defined truth behavior.
 
 ---
 
@@ -480,6 +485,8 @@ Python remains authoritative for:
 
 The instrumentation must never recompute the comparison solely to obtain evidence.
 
+Operand snapshotting must itself be fail-open and avoid invoking arbitrary user repr/iteration behavior solely for Decision Evidence.
+
 ---
 
 # 13. Boolean Short-Circuit Semantics
@@ -488,7 +495,7 @@ Python itself must remain authoritative for `and` / `or` short-circuiting.
 
 The implementation must not replace boolean evaluation with a custom thunk or callback engine.
 
-For:
+For a boolean expression used directly in a **truth-test context**:
 
 ```python
 if a < b and nums[i] != target:
@@ -522,13 +529,32 @@ reason = and_short_circuit
 
 The same principle applies to `or`.
 
-`not` must preserve Python's own logical semantics; the child may be instrumented, but the implementation must not create a second user-defined truth evaluation.
+`not` must preserve Python's logical semantics; the child may be instrumented, but the implementation must not create a second user-defined truth evaluation.
+
+## 13.1 Truth-test-context restriction
+
+Boolean operators in Python are also value-producing expressions. Instrumentation must not blindly replace every nested `and` / `or` operand with a built-in boolean when the expression's returned object identity or value may be observed by surrounding expression semantics.
+
+For example:
+
+```python
+if (a and b) is sentinel:
+    ...
+```
+
+`a and b` is an operand of `is`, so its actual returned object matters. v0.1 must either preserve the value-producing semantics exactly or treat the relevant condition subtree/root as opaque.
+
+Therefore:
+
+> bool-producing atomic probes are allowed only where the original Python construct is being consumed for truth control and replacing the user object's truth test with a built-in boolean does not alter a value observed by surrounding expression semantics.
+
+When this cannot be proven from the AST context, v0.1 fails closed to coarser factual evidence.
 
 ---
 
 # 14. Decision Completion and Outcome
 
-The outer condition wrapper finalizes each decision occurrence.
+The outer condition wrapper finalizes each successfully evaluated decision occurrence.
 
 Conceptually:
 
@@ -550,6 +576,8 @@ while + False     → loop_exited
 
 The implementation must not infer these outcomes by observing the next source line.
 
+If condition evaluation raises before the outer completion probe executes, the occurrence is partial and has no outcome.
+
 ---
 
 # 15. Partial Evaluation and Exceptions
@@ -569,6 +597,7 @@ If `ready` evaluates true and `values[i]` raises `IndexError`, valid evidence ma
 ready       → True
 values[i]   → partial / interrupted
 overall     → partial
+outcome     → unavailable
 ```
 
 The system must not produce:
@@ -634,7 +663,7 @@ interface TraceSession {
 }
 ```
 
-The trace schema version should advance:
+The trace schema version advances:
 
 ```text
 TRACE_SCHEMA_VERSION = 4
@@ -656,7 +685,7 @@ Responsibilities include:
 - resolving static descriptors to runtime occurrences;
 - reconstructing short-circuited children only when proven;
 - reconstructing `if / elif / else` chain status;
-- preserving `partial` states;
+- preserving `partial` states and missing outcomes;
 - constructing while-condition occurrence history;
 - resolving safe List / Matrix structure references;
 - never inventing missing truth values.
@@ -822,11 +851,13 @@ For every supported decision occurrence:
 3. Python remains authoritative for comparison and short-circuit semantics.
 4. Missing evidence is never assigned a truth value.
 5. A child is labeled short-circuited only when a completed parent decision proves that Python skipped it.
-6. Instrumentation failure cannot replace a user exception.
-7. Decision evidence limits cannot terminate ordinary execution.
-8. Original source spans remain authoritative.
-9. Instrumented helpers remain hidden behind the reserved __lc_* namespace.
-10. The debugger never re-evaluates source text to fill an evidence gap.
+6. A partial decision has no fabricated control-flow outcome.
+7. Instrumentation failure cannot replace a user exception.
+8. Decision evidence limits cannot terminate ordinary execution.
+9. Original source spans remain authoritative.
+10. Instrumented helpers remain hidden behind the reserved __lc_* namespace.
+11. The debugger never re-evaluates source text to fill an evidence gap.
+12. Truth-test instrumentation must not change value-producing `and` / `or` semantics observed by surrounding expressions.
 ```
 
 ---
@@ -847,7 +878,8 @@ Compare instrumented and uninstrumented observable behavior for:
 - nested `and` / `or`;
 - `not`;
 - short-circuit suppression of side effects;
-- exceptions during condition evaluation.
+- exceptions during condition evaluation;
+- value-producing boolean subexpressions such as `(a and b) is sentinel` to verify fail-closed handling or exact semantic preservation.
 
 Example requirement:
 
@@ -860,6 +892,8 @@ if False and explode():
 ```
 
 `explode()` must remain uncalled with or without Decision Tracing.
+
+Custom truth objects must also retain the same number of user-defined truth calls with and without instrumentation.
 
 ## 26.2 Protocol correctness tests
 
@@ -874,11 +908,13 @@ Directly assert raw `ConditionPlan` and `DecisionBatch` behavior for:
 - truth tests;
 - comparisons;
 - `if / elif / else`;
+- partial decisions with no outcome;
 - while occurrence numbering;
 - multiple frames;
 - recursive calls;
 - identical source text at different AST locations;
-- multiple decision sites on one source line where supported.
+- multiple decision sites on one source line where supported;
+- opaque fallback where detailed decomposition cannot be proven safe.
 
 ## 26.3 Interpreter and UI contract tests
 
@@ -892,9 +928,10 @@ including:
 
 - selected / rejected / not-reached branch states;
 - evaluated / short-circuited / partial condition states;
+- absence of outcome for partial decisions;
 - anchor-step alignment;
 - frame alignment;
-- decision history ordering;
+- decision-history ordering;
 - branch-chain reconstruction;
 - safe structure-reference resolution.
 
@@ -905,12 +942,12 @@ Side-panel tests must verify that distinct semantic states remain distinct in th
 Use a small set of representative LeetCode-style programs rather than broad problem-count coverage:
 
 ```text
-Binary Search        → if/elif/else + while
-Two Sum              → membership / guards
-Sliding Window       → nested while conditions
-Linked List traversal→ object truth / is not None
-Grid traversal       → matrix operand references
-DFS / BFS            → visited membership + compound guards
+Binary Search         → if/elif/else + while
+Two Sum               → membership / guards
+Sliding Window        → nested while conditions
+Linked List traversal → object truth / is not None
+Grid traversal        → matrix operand references
+DFS / BFS             → visited membership + compound guards
 ```
 
 The acceptance target is faithful execution replay, not Accepted status.
@@ -950,6 +987,7 @@ ordinary execution     = preserved
 ```text
 captured child evidence → preserved
 overall decision         → partial
+outcome                  → unavailable
 original exception       → authoritative
 ```
 
@@ -966,17 +1004,19 @@ Condition / Decision Tracing v0.1 is complete when all of the following hold:
 1. `if`, `elif`, and `while` decision sites can produce factual runtime evidence.
 2. Truth tests, `not`, nested `and/or`, and the supported comparison operators are captured without duplicate user evaluation.
 3. `and/or` evidence clearly distinguishes false from not-evaluated operands.
-4. Each `while` evaluation has a distinct occurrence and navigable history entry.
-5. `if / elif / else` chains reconstruct selected, rejected, and not-reached branches.
-6. Decision Evidence aligns with the existing raw trace through `anchorStep + frameId`.
-7. Safe List / Matrix operand projection works without algorithm-specific inference.
-8. Decision Tracing never judges correctness, intended control flow, root cause, or fixes.
-9. Instrumentation preserves ordinary Python evaluation counts, side effects, comparison dispatch, and exceptions.
-10. Instrumentation, serialization, recorder, or budget failure cannot terminate or alter ordinary user execution.
-11. Captured evidence before exception, timeout, or trace termination is preserved when feasible.
-12. Existing Expression Evidence, Runtime Mutation, Behavioral Signals, structure visualizers, Failure-First behavior, and raw navigation do not regress.
-13. Trace schema v4 remains backward-compatible with older sessions lacking decision fields.
-14. Unit, integration, semantic-preservation, DOM, and representative end-to-end tests pass.
+4. Truth-test rewriting does not alter value-producing boolean semantics; unsafe shapes fall back to opaque evidence.
+5. Each `while` evaluation has a distinct occurrence and navigable history entry.
+6. `if / elif / else` chains reconstruct selected, rejected, and not-reached branches.
+7. Partial decisions preserve captured evidence and expose no fabricated outcome.
+8. Decision Evidence aligns with the existing raw trace through `anchorStep + frameId`.
+9. Safe List / Matrix operand projection works without algorithm-specific inference.
+10. Decision Tracing never judges correctness, intended control flow, root cause, or fixes.
+11. Instrumentation preserves ordinary Python evaluation counts, side effects, comparison dispatch, truth behavior, and exceptions.
+12. Instrumentation, serialization, recorder, or budget failure cannot terminate or alter ordinary user execution.
+13. Captured evidence before exception, timeout, or trace termination is preserved when feasible.
+14. Existing Expression Evidence, Runtime Mutation, Behavioral Signals, structure visualizers, Failure-First behavior, and raw navigation do not regress.
+15. Trace schema v4 remains backward-compatible with older sessions lacking decision fields.
+16. Unit, integration, semantic-preservation, DOM, and representative end-to-end tests pass.
 
 ---
 

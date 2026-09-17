@@ -20,6 +20,7 @@ class DecisionRecorder:
         self.status = "complete"
         self.reason = None
         self.frame_id_for = None
+        self.context_provider = None
 
     def _max_events(self):
         return max(0, int(_limit(
@@ -123,6 +124,7 @@ class DecisionRecorder:
             "evaluations": [],
             "condition_results": [],
             "truth": None,
+            "context": self.context_provider(frame_id) if self.context_provider is not None else None,
         }
         return True
 
@@ -198,6 +200,8 @@ class DecisionRecorder:
                     batch["outcome"] = "loop_body_entered" if occurrence["truth"] is True else "loop_exited"
                 else:
                     batch["outcome"] = "branch_entered" if occurrence["truth"] is True else "branch_not_entered"
+            if occurrence.get("context") is not None:
+                batch["context"] = occurrence["context"]
             self.completed_batches.append(batch)
             self.next_batch_id += 1
             if self.emit_batch is not None:

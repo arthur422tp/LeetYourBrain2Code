@@ -120,6 +120,16 @@ class DecisionRecorderTests(unittest.TestCase):
         self.assertEqual(recorder.reason, "decision_event_limit")
         self.assertTrue(recorder.record_truth("d1", "d1.c0", True))
 
+    def test_copies_control_flow_context_into_completed_batch(self):
+        recorder = self.recorder()
+        recorder.context_provider = lambda frame_id: {"loop_stack": [{"loop_id": "f1", "iteration": frame_id}]}
+        recorder.begin("d1", "d1.c0")
+        recorder.complete("d1", "if", "d1.c0", True)
+        recorder.flush_all()
+        self.assertEqual(recorder.completed_batches[0]["context"], {
+            "loop_stack": [{"loop_id": "f1", "iteration": 1}]
+        })
+
     def test_runner_records_a_decision_batch_with_the_authoritative_trace_anchor(self):
         result = run_request(
             """class Solution:

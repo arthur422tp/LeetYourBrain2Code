@@ -1,4 +1,5 @@
 import json
+import dis
 import sys
 import time
 import traceback
@@ -37,6 +38,8 @@ class TraceCollector:
         emit_batch=None,
         expression_recorder=None,
         decision_recorder=None,
+        control_flow_recorder=None,
+        synthetic_line_map=None,
     ):
         self.limits = limits
         self.stdout_buffer = stdout_buffer
@@ -45,6 +48,10 @@ class TraceCollector:
         self.emit_batch = emit_batch
         self.expression_recorder = expression_recorder
         self.decision_recorder = decision_recorder
+        self.control_flow_recorder = control_flow_recorder
+        self.synthetic_line_map = dict(synthetic_line_map or {})
+        self.last_visible_step_by_frame = {}
+        self.return_offsets = {}
         self.events = []
         self.pending_events = []
         self.pending_bytes = 2
@@ -86,7 +93,21 @@ class TraceCollector:
         self.stdout_offset = len(current)
         return delta
 
-    def _exception_info(self, frame, argument, frame_id):
+    def _normal_return_offsets(self, code):
+        offsets = self.return_offsets.get(code)
+        if offsets is None:
+            offsets = {
+                instruction.offset
+                for instruction in dis.get_instructions(code)
+                if instruction.opname in {"RETURN_VALUE", "RETURN_CONST"}
+            }
+            self.return_offsets[code] = offsets
+        return offsets
+
+    def _is_normal_frame_return(self, frame):
+        return frame.f_lasti in self._normal_return_offsets(frame.f_code)
+
+    def _exception_info(self, frame, argument, frame_id, display_line=None):
         exception_type, exception_value, exception_traceback = argument
         try:
             stack = traceback.format_tb(exception_traceback)
@@ -95,7 +116,7 @@ class TraceCollector:
         return {
             "type": getattr(exception_type, "__name__", str(exception_type)),
             "message": str(exception_value),
-            "line": frame.f_lineno,
+            "line": frame.f_lineno if display_line is None else display_line,
             "stack": stack,
             "frame_id": frame_id,
         }
@@ -118,7 +139,7 @@ class TraceCollector:
             )
         }
 
-    def _record(self, frame, event_name, argument, info):
+    def _record(self, frame, event_name, argument, info, display_line=None):
         self.step_count += 1
         if self.step_count > self._max_trace_steps():
             raise TraceLimitExceeded("step_limit")
@@ -153,7 +174,7 @@ class TraceCollector:
         if event_name == "return":
             payload = {"return_value": serializer.serialize(argument)}
         elif event_name == "exception":
-            exception = self._exception_info(frame, argument, frame_id)
+            exception = self._exception_info(frame, argument, frame_id, display_line)
             self.last_exception = exception
             payload = {"exception": exception}
 
@@ -163,7 +184,7 @@ class TraceCollector:
             "frame_id": frame_id,
             "parent_frame_id": info["parent_frame_id"],
             "function": frame.f_code.co_name,
-            "line": frame.f_lineno,
+            "line": frame.f_lineno if display_line is None else display_line,
             "call_depth": info["call_depth"],
             "locals": locals_snapshot,
             "objects": topology["objects"],
@@ -238,15 +259,21 @@ class TraceCollector:
                 return self.trace
 
         if event_name in ("call", "line", "return", "exception"):
+            if event_name == "line" and frame.f_lineno in self.synthetic_line_map:
+                return self.trace
             if self.expression_recorder is not None and event_name in ("line", "return", "exception"):
                 self.expression_recorder.flush_frame(info["frame_id"])
             if self.decision_recorder is not None and event_name in ("line", "return", "exception"):
                 self.decision_recorder.flush_frame(info["frame_id"])
-            step = self._record(frame, event_name, argument, info)
+            display_line = self.synthetic_line_map.get(frame.f_lineno, frame.f_lineno)
+            step = self._record(frame, event_name, argument, info, display_line)
+            self.last_visible_step_by_frame[info["frame_id"]] = step
             if self.expression_recorder is not None and event_name == "line":
                 self.expression_recorder.set_anchor(info["frame_id"], step, frame.f_lineno)
             if self.decision_recorder is not None and event_name == "line":
                 self.decision_recorder.set_anchor(info["frame_id"], step, frame.f_lineno)
+            if event_name == "return" and self.control_flow_recorder is not None and self._is_normal_frame_return(frame):
+                self.control_flow_recorder.on_frame_return(info["frame_id"], step)
 
         if event_name == "return":
             if self.frame_stack and self.frame_stack[-1] == info["frame_id"]:
@@ -270,3 +297,6 @@ class TraceCollector:
 
     def expression_frame_id(self, frame):
         return self.frame_ids.get(id(frame))
+
+    def control_flow_anchor_step(self, frame_id):
+        return self.last_visible_step_by_frame.get(frame_id)

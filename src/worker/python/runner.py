@@ -14,6 +14,8 @@ from expression_instrumenter import instrument_expression_roots
 from expression_recorder import ExpressionRecorder
 from condition_instrumenter import instrument_condition_sites
 from decision_recorder import DecisionRecorder
+from control_flow_instrumenter import instrument_control_flow
+from control_flow_recorder import ControlFlowRecorder
 
 
 class UnsupportedTestcaseFormat(Exception):
@@ -253,6 +255,15 @@ def _emit_condition_plan(emit_plan, session_id, plan):
         pass
 
 
+def _emit_control_flow_plan(emit_plan, session_id, plan):
+    if emit_plan is None:
+        return
+    try:
+        emit_plan(session_id, json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        pass
+
+
 def run_request(
     source_code,
     raw_testcase,
@@ -265,6 +276,8 @@ def run_request(
     emit_expression_batch=None,
     emit_condition_plan=None,
     emit_decision_batch=None,
+    emit_control_flow_plan=None,
+    emit_control_flow_batch=None,
 ):
     started_at = time.monotonic()
     lines = _argument_lines(raw_testcase)
@@ -303,12 +316,23 @@ def run_request(
         session_id=session_id,
         emit_batch=emit_decision_batch,
     )
+    control_recorder = ControlFlowRecorder(
+        limits,
+        session_id=session_id,
+        emit_batch=emit_control_flow_batch,
+    )
     expression_record_name = f"_lc_internal_expr_record_{secrets.token_hex(16)}"
     minmax_call_name = f"_lc_internal_minmax_call_{secrets.token_hex(16)}"
     decision_begin_name = f"_lc_internal_decision_begin_{secrets.token_hex(16)}"
     condition_truth_name = f"_lc_internal_condition_truth_{secrets.token_hex(16)}"
     condition_operand_name = f"_lc_internal_condition_operand_{secrets.token_hex(16)}"
     decision_complete_name = f"_lc_internal_decision_complete_{secrets.token_hex(16)}"
+    control_iteration_begin_name = f"_lc_internal_control_iteration_begin_{secrets.token_hex(16)}"
+    control_iteration_complete_name = f"_lc_internal_control_iteration_complete_{secrets.token_hex(16)}"
+    control_transfer_observed_name = f"_lc_internal_control_transfer_observed_{secrets.token_hex(16)}"
+    control_return_observed_name = f"_lc_internal_control_return_observed_{secrets.token_hex(16)}"
+    control_loop_natural_exit_name = f"_lc_internal_control_loop_natural_exit_{secrets.token_hex(16)}"
+    control_loop_after_name = f"_lc_internal_control_loop_after_{secrets.token_hex(16)}"
     instrumentation = instrument_expression_roots(
         source_code,
         expression_record_name=expression_record_name,
@@ -334,7 +358,19 @@ def run_request(
     )
     condition_plan = condition.plan_dict if condition.available else None
     try:
-        instrumented_tree = condition.instrumented_tree if condition.available else expression_tree
+        decision_tree = condition.instrumented_tree if condition.available else expression_tree
+        control = instrument_control_flow(
+            source_code,
+            decision_tree,
+            control_iteration_begin_name,
+            control_iteration_complete_name,
+            control_transfer_observed_name,
+            control_return_observed_name,
+            control_loop_natural_exit_name,
+            control_loop_after_name,
+        )
+        control_plan = control.plan_dict
+        instrumented_tree = control.instrumented_tree if control.available else decision_tree
         capabilities = {}
         if instrumentation.available:
             capabilities = {
@@ -348,6 +384,15 @@ def run_request(
                 condition_operand_name: (f"<lc-condition-operand-{secrets.token_hex(16)}>", decision_recorder.record_operand),
                 decision_complete_name: (f"<lc-decision-complete-{secrets.token_hex(16)}>", decision_recorder.complete),
             })
+        if control.available:
+            capabilities.update({
+                control_iteration_begin_name: (f"<lc-control-iteration-begin-{secrets.token_hex(16)}>", control_recorder.iteration_begin),
+                control_iteration_complete_name: (f"<lc-control-iteration-complete-{secrets.token_hex(16)}>", control_recorder.iteration_complete),
+                control_transfer_observed_name: (f"<lc-control-transfer-observed-{secrets.token_hex(16)}>", control_recorder.transfer_observed),
+                control_return_observed_name: (f"<lc-control-return-observed-{secrets.token_hex(16)}>", control_recorder.return_observed),
+                control_loop_natural_exit_name: (f"<lc-control-loop-natural-exit-{secrets.token_hex(16)}>", control_recorder.loop_natural_exit),
+                control_loop_after_name: (f"<lc-control-loop-after-{secrets.token_hex(16)}>", control_recorder.loop_after),
+            })
         if capabilities:
             instrumented_tree = _ExpressionHelperLookupTransformer(capabilities).visit(instrumented_tree)
             ast.fix_missing_locations(instrumented_tree)
@@ -358,7 +403,7 @@ def run_request(
                 USER_CODE_FILENAME,
                 "exec",
             )
-        if instrumentation.available:
+        if capabilities:
             user_code = _bind_expression_capabilities(
                 user_code,
                 {marker: helper for marker, helper in capabilities.values()},
@@ -368,6 +413,7 @@ def run_request(
             "parse_error",
             "syntax_error",
             exception=_exception_info(error),
+            control_flow_plan=control_plan,
         )
 
     subscript_relations = relations_as_dicts(analyze_subscript_relations(source_code))
@@ -376,6 +422,9 @@ def run_request(
     if not instrumentation.available:
         recorder.status = "unavailable"
         recorder.reason = instrumentation.reason
+    if not control.available:
+        control_recorder.status = "unavailable"
+        control_recorder.reason = control.reason
     baseline_global_names = set(namespace)
     stdout_buffer = io.StringIO()
     collector = TraceCollector(
@@ -386,6 +435,8 @@ def run_request(
         emit_batch=emit_batch,
         expression_recorder=recorder,
         decision_recorder=decision_recorder,
+        control_flow_recorder=control_recorder,
+        synthetic_line_map=control.synthetic_line_map if control.available else {},
     )
     recorder.serializer_factory = lambda: collector.serialize_value
     recorder.frame_id_for = collector.expression_frame_id
@@ -395,6 +446,10 @@ def run_request(
     }
     decision_recorder.serializer_factory = lambda: collector.serialize_value
     decision_recorder.frame_id_for = collector.expression_frame_id
+    control_recorder.serializer_factory = lambda: collector.serialize_value
+    control_recorder.frame_id_for = collector.expression_frame_id
+    control_recorder.anchor_step_for = collector.control_flow_anchor_step
+    decision_recorder.context_provider = control_recorder.current_execution_context
     if not condition.available:
         decision_recorder.status = "unavailable"
         decision_recorder.reason = condition.reason
@@ -404,6 +459,8 @@ def run_request(
         _emit_expression_plan(emit_expression_plan, session_id, expression_plan)
     if condition.available:
         _emit_condition_plan(emit_condition_plan, session_id, condition_plan)
+    if control.available:
+        _emit_control_flow_plan(emit_control_flow_plan, session_id, control_plan)
 
     collector.start()
     try:
@@ -436,6 +493,7 @@ def run_request(
             method = getattr(instance(), entrypoint["method_name"])
             return_value = method(*converted_arguments)
     except TraceLimitExceeded as error:
+        control_recorder.finalize_trace_ended()
         recorder.flush_all()
         decision_recorder.flush_all()
         return _empty_result(
@@ -445,11 +503,14 @@ def run_request(
             events=collector.events,
             subscript_relations=subscript_relations,
             expression_plan=expression_plan,
+            control_flow_plan=control_plan,
             **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
+            **control_recorder.result_dict(),
         )
     except UnsupportedTestcaseFormat as error:
+        control_recorder.finalize_exception()
         recorder.flush_all()
         decision_recorder.flush_all()
         return _empty_result(
@@ -460,11 +521,14 @@ def run_request(
             subscript_relations=subscript_relations,
             exception=_exception_info(error),
             expression_plan=expression_plan,
+            control_flow_plan=control_plan,
             **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
+            **control_recorder.result_dict(),
         )
     except Exception as error:
+        control_recorder.finalize_exception()
         recorder.flush_all()
         decision_recorder.flush_all()
         exception = collector.last_exception or _exception_info(error)
@@ -476,9 +540,11 @@ def run_request(
             subscript_relations=subscript_relations,
             exception=exception,
             expression_plan=expression_plan,
+            control_flow_plan=control_plan,
             **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
+            **control_recorder.result_dict(),
         )
     finally:
         collector.stop()
@@ -493,9 +559,11 @@ def run_request(
         events=collector.events,
         subscript_relations=subscript_relations,
         expression_plan=expression_plan,
+        control_flow_plan=control_plan,
         **({"condition_plan": condition_plan} if condition_plan is not None else {}),
         **recorder.result_dict(),
         **decision_recorder.result_dict(),
+        **control_recorder.result_dict(),
         return_value=collector.serialize_value(return_value),
         duration_ms=(time.monotonic() - started_at) * 1000,
     )

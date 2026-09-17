@@ -35,6 +35,24 @@ interface RunResult {
   interpretation: ReturnType<typeof interpretTrace>;
 }
 
+interface ActiveRun {
+  events: TraceEvent[];
+  plans: ConditionPlan[];
+  batches: DecisionBatch[];
+  terminal?: ExecutionTerminalResult;
+}
+
+let activeRun: ActiveRun | null = null;
+const sharedRuntime = createPyodideRuntime({
+  indexURL: `${process.cwd()}/node_modules/pyodide/`,
+  onTraceBatch: (_id, events) => activeRun?.events.push(...events),
+  onConditionPlan: (_id, plan) => activeRun?.plans.push(plan),
+  onDecisionBatch: (_id, batches) => activeRun?.batches.push(...batches),
+  onFinished: (result) => {
+    if (activeRun) activeRun.terminal = result;
+  }
+});
+
 async function run(
   sessionId: string,
   sourceCode: string,
@@ -42,36 +60,31 @@ async function run(
   point: EntryPoint,
   overrides: Partial<typeof limits> = {}
 ): Promise<RunResult> {
-  const events: TraceEvent[] = [];
-  const plans: ConditionPlan[] = [];
-  const batches: DecisionBatch[] = [];
-  let terminal: ExecutionTerminalResult | undefined;
-  const execution = createPyodideRuntime({
-    indexURL: `${process.cwd()}/node_modules/pyodide/`,
-    onTraceBatch: (_id, next) => events.push(...next),
-    onConditionPlan: (_id, plan) => plans.push(plan),
-    onDecisionBatch: (_id, next) => batches.push(...next),
-    onFinished: (result) => { terminal = result; }
-  });
-  await execution.execute({
-    sessionId,
-    sourceCode,
-    rawTestcase,
-    entrypoint: point,
-    limits: { ...limits, ...overrides }
-  });
-  const result = terminal!;
-  const plan = plans[0] ?? result.conditionPlan!;
-  const capturedBatches = batches.length > 0 ? batches : result.decisionBatches ?? [];
+  const capture: ActiveRun = { events: [], plans: [], batches: [] };
+  activeRun = capture;
+  try {
+    await sharedRuntime.execute({
+      sessionId,
+      sourceCode,
+      rawTestcase,
+      entrypoint: point,
+      limits: { ...limits, ...overrides }
+    });
+  } finally {
+    activeRun = null;
+  }
+  const result = capture.terminal!;
+  const plan = capture.plans[0] ?? result.conditionPlan!;
+  const capturedBatches = capture.batches.length > 0 ? capture.batches : result.decisionBatches ?? [];
   const interpretation = interpretTrace(
-    events,
+    capture.events,
     result.subscriptRelations ?? [],
     undefined,
     [],
     plan,
     capturedBatches
   );
-  return { terminal: result, events, plan, batches: capturedBatches, interpretation };
+  return { terminal: result, events: capture.events, plan, batches: capturedBatches, interpretation };
 }
 
 describe("decision tracing end to end", () => {

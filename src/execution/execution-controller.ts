@@ -54,6 +54,16 @@ function isDecisionMessage(value: unknown): boolean {
   );
 }
 
+function isControlFlowMessage(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "type" in value &&
+    (value.type === "control_flow_plan" || value.type === "control_flow_batch")
+  );
+}
+
 function internalErrorResult(
   message: string,
   duringInitialization = false
@@ -230,7 +240,7 @@ export class ExecutionController {
 
           onMessage = (event: MessageEvent): void => {
             if (!isWorkerOutboundMessage(event.data)) {
-              if (isExpressionMessage(event.data) || isDecisionMessage(event.data)) {
+              if (isExpressionMessage(event.data) || isDecisionMessage(event.data) || isControlFlowMessage(event.data)) {
                 return;
               }
               fail("Worker sent malformed protocol message");
@@ -269,6 +279,18 @@ export class ExecutionController {
               }
               return;
             }
+            if (message.type === "control_flow_plan") {
+              if (message.sessionId === request.sessionId) {
+                collector.setControlFlowPlan(message.plan);
+              }
+              return;
+            }
+            if (message.type === "control_flow_batch") {
+              if (message.sessionId === request.sessionId) {
+                collector.appendControlFlowBatches(message.batches);
+              }
+              return;
+            }
             if (message.type === "execution_finished") {
               if (message.sessionId === request.sessionId) {
                 if (message.result.expressionPlan) {
@@ -288,6 +310,15 @@ export class ExecutionController {
                 }
                 if (message.result.decisionTracing) {
                   collector.setDecisionTracingState(message.result.decisionTracing);
+                }
+                if (message.result.controlFlowPlan) {
+                  collector.setControlFlowPlan(message.result.controlFlowPlan);
+                }
+                if (message.result.controlFlowBatches) {
+                  collector.appendControlFlowBatches(message.result.controlFlowBatches);
+                }
+                if (message.result.controlFlowTracing) {
+                  collector.setControlFlowTracingState(message.result.controlFlowTracing);
                 }
                 finish(
                   collector.finish(message.result),

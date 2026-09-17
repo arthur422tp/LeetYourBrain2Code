@@ -17,12 +17,25 @@ import type {
   DecisionBatch,
   DecisionTracingState
 } from "../shared/decision-types";
+import type {
+  ControlFlowBatch,
+  ControlFlowBindingSnapshot,
+  ControlFlowPlan,
+  ControlFlowRuntimeEvent,
+  ControlFlowTracingState,
+  ExecutionContextRef,
+  LoopExitReason,
+  LoopKind,
+  TransferKind
+} from "../shared/control-flow-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
 import astAnalyzerSource from "./python/ast_analyzer.py?raw";
 import expressionInstrumenterSource from "./python/expression_instrumenter.py?raw";
 import expressionRecorderSource from "./python/expression_recorder.py?raw";
 import conditionInstrumenterSource from "./python/condition_instrumenter.py?raw";
 import decisionRecorderSource from "./python/decision_recorder.py?raw";
+import controlFlowInstrumenterSource from "./python/control_flow_instrumenter.py?raw";
+import controlFlowRecorderSource from "./python/control_flow_recorder.py?raw";
 import runnerSource from "./python/runner.py?raw";
 import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
@@ -55,6 +68,8 @@ export interface PyodideRuntimeOptions {
   onExpressionBatch?: (sessionId: string, batches: ExpressionBatch[]) => void;
   onConditionPlan?: (sessionId: string, plan: ConditionPlan) => void;
   onDecisionBatch?: (sessionId: string, batches: DecisionBatch[]) => void;
+  onControlFlowPlan?: (sessionId: string, plan: ControlFlowPlan) => void;
+  onControlFlowBatch?: (sessionId: string, batches: ControlFlowBatch[]) => void;
   onFinished?: (result: ExecutionTerminalResult) => void;
 }
 
@@ -118,6 +133,14 @@ __lc_decision_recorder_module = types.ModuleType("decision_recorder")
 sys.modules["decision_recorder"] = __lc_decision_recorder_module
 exec(compile(${quotePython(decisionRecorderSource)}, "<leetcode-decision-recorder>", "exec"), vars(__lc_decision_recorder_module), vars(__lc_decision_recorder_module))
 
+__lc_control_flow_instrumenter_module = types.ModuleType("control_flow_instrumenter")
+sys.modules["control_flow_instrumenter"] = __lc_control_flow_instrumenter_module
+exec(compile(${quotePython(controlFlowInstrumenterSource)}, "<leetcode-control-flow-instrumenter>", "exec"), vars(__lc_control_flow_instrumenter_module), vars(__lc_control_flow_instrumenter_module))
+
+__lc_control_flow_recorder_module = types.ModuleType("control_flow_recorder")
+sys.modules["control_flow_recorder"] = __lc_control_flow_recorder_module
+exec(compile(${quotePython(controlFlowRecorderSource)}, "<leetcode-control-flow-recorder>", "exec"), vars(__lc_control_flow_recorder_module), vars(__lc_control_flow_recorder_module))
+
 __lc_runner_module = types.ModuleType("runner")
 exec(compile(${quotePython(runnerSource)}, "<leetcode-runner>", "exec"), vars(__lc_runner_module), vars(__lc_runner_module))
 
@@ -144,6 +167,8 @@ __lc_runner_module.run_request(
         "max_expression_bytes": ${request.limits.maxExpressionBytes},
         "max_decision_events": ${request.limits.maxDecisionEvents},
         "max_decision_bytes": ${request.limits.maxDecisionBytes},
+        "max_control_flow_events": ${request.limits.maxControlFlowEvents},
+        "max_control_flow_bytes": ${request.limits.maxControlFlowBytes},
     },
     runtime_globals=__lc_runtime_namespace,
     session_id=${quotePython(request.sessionId)},
@@ -152,6 +177,8 @@ __lc_runner_module.run_request(
     emit_expression_batch=globals().get("__lc_emit_expression_batch"),
     emit_condition_plan=globals().get("__lc_emit_condition_plan"),
     emit_decision_batch=globals().get("__lc_emit_decision_batch"),
+    emit_control_flow_plan=globals().get("__lc_emit_control_flow_plan"),
+    emit_control_flow_batch=globals().get("__lc_emit_control_flow_batch"),
 )
 `;
 }
@@ -608,6 +635,7 @@ export function normalizeDecisionBatch(value: unknown): DecisionBatch | null {
     batchId: batchId as number, anchorStep: anchorStep as number, frameId: frameId as number, siteId, occurrence: occurrence as number,
     status: value.status,
     condition: { conditionId, evaluations: evaluations as DecisionBatch["condition"]["evaluations"], conditionResults: conditionResults as DecisionBatch["condition"]["conditionResults"], ...(typeof truth === "boolean" ? { truth } : {}) },
+    ...(normalizeControlFlowContext(value.context) ? { context: normalizeControlFlowContext(value.context) } : {}),
     ...(typeof outcome === "string" ? { outcome: outcome as DecisionBatch["outcome"] } : {})
   };
 }
@@ -616,6 +644,142 @@ export function normalizeDecisionTracingState(value: unknown): DecisionTracingSt
   if (!isRecord(value) || !["complete", "truncated", "unavailable"].includes(String(value.status)) ||
     (value.reason !== undefined && typeof value.reason !== "string")) return undefined;
   return { status: value.status as DecisionTracingState["status"], ...(typeof value.reason === "string" ? { reason: value.reason } : {}) };
+}
+
+function normalizeControlFlowContext(value: unknown): ExecutionContextRef | undefined {
+  if (!isRecord(value)) return undefined;
+  const rawStack = value.loop_stack ?? value.loopStack;
+  if (!Array.isArray(rawStack)) return undefined;
+  const loopStack = rawStack.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const loopId = raw.loop_id ?? raw.loopId;
+    return typeof loopId === "string" && Number.isInteger(raw.iteration) && (raw.iteration as number) > 0
+      ? { loopId, iteration: raw.iteration as number }
+      : null;
+  });
+  return loopStack.every((item) => item !== null)
+    ? { loopStack: loopStack as ExecutionContextRef["loopStack"] }
+    : undefined;
+}
+
+function normalizeControlFlowSpan(value: unknown): ControlFlowPlan["loops"][number]["span"] | undefined {
+  if (!isRecord(value) || ![value.line, value.column, value.endLine, value.endColumn].every((item) => Number.isInteger(item))) {
+    return undefined;
+  }
+  return {
+    line: value.line as number,
+    column: value.column as number,
+    endLine: value.endLine as number,
+    endColumn: value.endColumn as number
+  };
+}
+
+function normalizeLoopKind(value: unknown): LoopKind | undefined {
+  return value === "for" || value === "while" ? value : undefined;
+}
+
+function normalizeTransferKind(value: unknown): TransferKind | undefined {
+  return value === "break" || value === "continue" || value === "return" ? value : undefined;
+}
+
+export function normalizeControlFlowPlan(value: unknown): ControlFlowPlan | undefined {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.loops) || !Array.isArray(value.transfers)) return undefined;
+  const loops = value.loops.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const loopId = raw.loop_id ?? raw.loopId;
+    const kind = normalizeLoopKind(raw.kind);
+    const span = normalizeControlFlowSpan(raw.span);
+    if (typeof loopId !== "string" || !kind || !span) return null;
+    const rawTarget = raw.target;
+    if (rawTarget === undefined) return { loopId, kind, span };
+    if (!isRecord(rawTarget)) return null;
+    const targetSpan = normalizeControlFlowSpan(rawTarget.span);
+    const source = rawTarget.source;
+    const bindingNames = rawTarget.binding_names ?? rawTarget.bindingNames;
+    if (typeof source !== "string" || !targetSpan || !Array.isArray(bindingNames) || !bindingNames.every((item) => typeof item === "string") || typeof rawTarget.capturable !== "boolean") return null;
+    return { loopId, kind, span, target: { source, span: targetSpan, bindingNames, capturable: rawTarget.capturable } };
+  });
+  const transfers = value.transfers.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const transferId = raw.transfer_id ?? raw.transferId;
+    const kind = normalizeTransferKind(raw.kind);
+    const span = normalizeControlFlowSpan(raw.span);
+    const targetLoopId = raw.target_loop_id ?? raw.targetLoopId;
+    if (typeof transferId !== "string" || !kind || !span || (targetLoopId !== undefined && typeof targetLoopId !== "string")) return null;
+    return { transferId, kind, span, ...(typeof targetLoopId === "string" ? { targetLoopId } : {}) };
+  });
+  return loops.every((item) => item !== null) && transfers.every((item) => item !== null)
+    ? { version: 1, loops: loops as ControlFlowPlan["loops"], transfers: transfers as ControlFlowPlan["transfers"] }
+    : undefined;
+}
+
+function normalizeControlFlowBinding(value: unknown): ControlFlowBindingSnapshot | null {
+  if (!isRecord(value) || typeof value.name !== "string" || !isValueSnapshot(value.value)) return null;
+  return { name: value.name, value: value.value };
+}
+
+export function normalizeControlFlowBatch(value: unknown): ControlFlowBatch | null {
+  if (!isRecord(value) || !Array.isArray(value.events)) return null;
+  const batchId = value.batch_id ?? value.batchId;
+  if (!Number.isInteger(batchId) || (batchId as number) <= 0) return null;
+  const events = value.events.map((raw): ControlFlowRuntimeEvent | null => {
+    if (!isRecord(raw)) return null;
+    const eventId = raw.event_id ?? raw.eventId;
+    const anchorStep = raw.anchor_step ?? raw.anchorStep;
+    const frameId = raw.frame_id ?? raw.frameId;
+    const context = normalizeControlFlowContext(raw.context);
+    if (!Number.isInteger(eventId) || (eventId as number) <= 0 || !Number.isInteger(anchorStep) || (anchorStep as number) <= 0 || !Number.isInteger(frameId) || (frameId as number) <= 0 || !context || typeof raw.kind !== "string") return null;
+    const base = { eventId: eventId as number, anchorStep: anchorStep as number, frameId: frameId as number, context };
+    if (raw.kind === "iteration_begin") {
+      const loopId = raw.loop_id ?? raw.loopId;
+      const loopKind = normalizeLoopKind(raw.loop_kind ?? raw.loopKind);
+      const iteration = raw.iteration;
+      const bindings = Array.isArray(raw.bindings) ? raw.bindings.map(normalizeControlFlowBinding) : null;
+      return typeof loopId === "string" && loopKind && Number.isInteger(iteration) && (iteration as number) > 0 && bindings !== null && bindings.every((item) => item !== null)
+        ? { ...base, kind: "iteration_begin", loopId, loopKind, iteration: iteration as number, bindings: bindings as ControlFlowBindingSnapshot[] }
+        : null;
+    }
+    if (raw.kind === "iteration_complete") {
+      const loopId = raw.loop_id ?? raw.loopId;
+      return typeof loopId === "string" && Number.isInteger(raw.iteration) && (raw.iteration as number) > 0
+        ? { ...base, kind: "iteration_complete", loopId, iteration: raw.iteration as number }
+        : null;
+    }
+    if (raw.kind === "transfer_observed") {
+      const actionId = raw.action_id ?? raw.actionId;
+      const transferId = raw.transfer_id ?? raw.transferId;
+      const transferKind = normalizeTransferKind(raw.transfer_kind ?? raw.transferKind);
+      const targetLoopId = raw.target_loop_id ?? raw.targetLoopId;
+      return typeof actionId === "string" && typeof transferId === "string" && transferKind && (targetLoopId === undefined || typeof targetLoopId === "string")
+        ? { ...base, kind: "transfer_observed", actionId, transferId, transferKind, ...(typeof targetLoopId === "string" ? { targetLoopId } : {}) }
+        : null;
+    }
+    if (raw.kind === "transfer_status") {
+      const actionId = raw.action_id ?? raw.actionId;
+      const supersededByActionId = raw.superseded_by_action_id ?? raw.supersededByActionId;
+      const status = raw.status;
+      return typeof actionId === "string" && (status === "committed" || status === "superseded" || status === "interrupted") &&
+        (status === "superseded" ? typeof supersededByActionId === "string" : supersededByActionId === undefined)
+        ? { ...base, kind: "transfer_status", actionId, status, ...(typeof supersededByActionId === "string" ? { supersededByActionId } : {}) }
+        : null;
+    }
+    const loopId = raw.loop_id ?? raw.loopId;
+    const loopKind = normalizeLoopKind(raw.loop_kind ?? raw.loopKind);
+    const reason = raw.reason;
+    const reasons: LoopExitReason[] = ["exhausted", "condition_false", "break", "function_return", "exception", "trace_ended"];
+    return raw.kind === "loop_exit" && typeof loopId === "string" && loopKind && reasons.includes(reason as LoopExitReason)
+      ? { ...base, kind: "loop_exit", loopId, loopKind, reason: reason as LoopExitReason }
+      : null;
+  });
+  if (events.some((event) => event === null)) return null;
+  const normalized = events as ControlFlowRuntimeEvent[];
+  if (normalized.some((event, index) => index > 0 && event.eventId <= normalized[index - 1]!.eventId)) return null;
+  return { batchId: batchId as number, events: normalized };
+}
+
+export function normalizeControlFlowTracingState(value: unknown): ControlFlowTracingState | undefined {
+  if (!isRecord(value) || !["complete", "truncated", "unavailable"].includes(String(value.status)) || (value.reason !== undefined && typeof value.reason !== "string")) return undefined;
+  return { status: value.status as ControlFlowTracingState["status"], ...(typeof value.reason === "string" ? { reason: value.reason } : {}) };
 }
 
 export function normalizePythonTraceEvent(value: unknown): TraceEvent | null {
@@ -754,6 +918,9 @@ function normalizePythonExecutionResult(
     ? (terminationReason as ExecutionTerminalResult["terminationReason"])
     : "tracer_internal_error";
   const returnValue = value.return_value;
+  const normalizedReturnValue = isRecord(returnValue) && returnValue.type === "none"
+    ? { type: "none", value: null }
+    : returnValue;
   const exception = normalizeException(value.exception);
   const subscriptRelations = Array.isArray(value.subscript_relations)
     ? value.subscript_relations
@@ -780,6 +947,16 @@ function normalizePythonExecutionResult(
   const decisionTracing = normalizeDecisionTracingState(
     value.decision_tracing ?? value.decisionTracing
   );
+  const controlFlowPlan = normalizeControlFlowPlan(value.control_flow_plan ?? value.controlFlowPlan);
+  const rawControlFlowBatches = value.control_flow_batches ?? value.controlFlowBatches;
+  const controlFlowBatches = Array.isArray(rawControlFlowBatches)
+    ? rawControlFlowBatches
+        .map((batch) => normalizeControlFlowBatch(batch))
+        .filter((batch): batch is ControlFlowBatch => batch !== null)
+    : [];
+  const controlFlowTracing = normalizeControlFlowTracingState(
+    value.control_flow_tracing ?? value.controlFlowTracing
+  );
 
   return {
     events,
@@ -795,7 +972,14 @@ function normalizePythonExecutionResult(
       ...(conditionPlan ? { conditionPlan } : {}),
       ...(decisionBatches.length > 0 ? { decisionBatches } : {}),
       ...(decisionTracing ? { decisionTracing } : {}),
-      ...(isValueSnapshot(returnValue) ? { returnValue } : {}),
+      ...(controlFlowPlan ? { controlFlowPlan } : {}),
+      ...(controlFlowBatches.length > 0 ? { controlFlowBatches } : {}),
+      ...(controlFlowTracing ? { controlFlowTracing } : {}),
+      ...(isValueSnapshot(normalizedReturnValue)
+        ? { returnValue: normalizedReturnValue }
+        : normalizedReturnValue === null
+          ? { returnValue: { type: "none", value: null } as const }
+          : {}),
       ...(exception ? { exception } : {})
     }
   };
@@ -834,10 +1018,14 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
       let expressionBatchCallbackInstalled = false;
       let conditionPlanCallbackInstalled = false;
       let decisionBatchCallbackInstalled = false;
+      let controlFlowPlanCallbackInstalled = false;
+      let controlFlowBatchCallbackInstalled = false;
       let streamedExpressionPlan = false;
       let streamedExpressionBatches = false;
       let streamedConditionPlan = false;
       let streamedDecisionBatches = false;
+      let streamedControlFlowPlan = false;
+      let streamedControlFlowBatches = false;
       const emitTraceBatch = (sessionId: string, eventsJson: string): void => {
         if (sessionId !== request.sessionId) {
           return;
@@ -912,6 +1100,31 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
           // A malformed optional stream must not interrupt the Python run.
         }
       };
+      const emitControlFlowPlan = (sessionId: string, planJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const plan = normalizeControlFlowPlan(JSON.parse(planJson) as unknown);
+          if (!plan) return;
+          streamedControlFlowPlan = true;
+          options.onControlFlowPlan?.(sessionId, plan);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
+      const emitControlFlowBatch = (sessionId: string, batchesJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const parsed = JSON.parse(batchesJson) as unknown;
+          const batches = Array.isArray(parsed)
+            ? parsed.map((batch) => normalizeControlFlowBatch(batch)).filter((batch): batch is ControlFlowBatch => batch !== null)
+            : [];
+          if (batches.length === 0) return;
+          streamedControlFlowBatches = true;
+          options.onControlFlowBatch?.(sessionId, batches);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
 
       try {
         if (options.onTraceBatch && typeof pyodide.globals?.set === "function") {
@@ -933,6 +1146,14 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         if (options.onDecisionBatch && typeof pyodide.globals?.set === "function") {
           pyodide.globals.set("__lc_emit_decision_batch", emitDecisionBatch);
           decisionBatchCallbackInstalled = true;
+        }
+        if (options.onControlFlowPlan && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_control_flow_plan", emitControlFlowPlan);
+          controlFlowPlanCallbackInstalled = true;
+        }
+        if (options.onControlFlowBatch && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_control_flow_batch", emitControlFlowBatch);
+          controlFlowBatchCallbackInstalled = true;
         }
         const rawResult = await pyodide.runPythonAsync(buildExecutionScript(request));
         const normalized = normalizePythonExecutionResult(
@@ -960,6 +1181,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         if (!streamedDecisionBatches && normalized.result.decisionBatches) {
           options.onDecisionBatch?.(request.sessionId, normalized.result.decisionBatches);
         }
+        if (!streamedControlFlowPlan && normalized.result.controlFlowPlan) {
+          options.onControlFlowPlan?.(request.sessionId, normalized.result.controlFlowPlan);
+        }
+        if (!streamedControlFlowBatches && normalized.result.controlFlowBatches) {
+          options.onControlFlowBatch?.(request.sessionId, normalized.result.controlFlowBatches);
+        }
         options.onFinished?.(normalized.result);
       } catch (error) {
         options.onFinished?.(errorResult(error, Date.now() - startedAt));
@@ -978,6 +1205,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         }
         if (decisionBatchCallbackInstalled) {
           pyodide.globals?.delete?.("__lc_emit_decision_batch");
+        }
+        if (controlFlowPlanCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_control_flow_plan");
+        }
+        if (controlFlowBatchCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_control_flow_batch");
         }
       }
     }

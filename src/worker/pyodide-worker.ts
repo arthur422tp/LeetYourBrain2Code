@@ -48,6 +48,12 @@ export function createWorkerRuntime(
     onDecisionBatch: (sessionId, batches) => {
       scope.postMessage({ type: "decision_batch", sessionId, batches });
     },
+    onControlFlowPlan: (sessionId, plan) => {
+      scope.postMessage({ type: "control_flow_plan", sessionId, plan });
+    },
+    onControlFlowBatch: (sessionId, batches) => {
+      scope.postMessage({ type: "control_flow_batch", sessionId, batches });
+    },
     onFinished: (result) => {
       const sessionId = activeSessionId();
       if (!sessionId) {

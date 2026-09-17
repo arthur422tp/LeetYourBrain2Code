@@ -7,6 +7,7 @@ import type {
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
+import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
 import type {
   PyodideRuntime,
   PyodideRuntimeOptions
@@ -60,6 +61,11 @@ const decisionBatch: DecisionBatch = {
   batchId: 1, anchorStep: 1, frameId: 1, siteId: "d1", occurrence: 1, status: "completed",
   condition: { conditionId: "d1.c0", evaluations: [], conditionResults: [{ conditionId: "d1.c0", order: 1, truth: true }], truth: true },
   outcome: "branch_entered"
+};
+const controlFlowPlan: ControlFlowPlan = { version: 1, loops: [], transfers: [] };
+const controlFlowBatch: ControlFlowBatch = {
+  batchId: 1,
+  events: [{ eventId: 1, kind: "loop_exit", anchorStep: 1, frameId: 1, context: { loopStack: [] }, loopId: "f1", loopKind: "for", reason: "exhausted" }]
 };
 
 describe("Pyodide worker", () => {
@@ -158,6 +164,8 @@ describe("Pyodide worker", () => {
     callbacks?.onExpressionBatch?.("worker-session", [expressionBatch]);
     callbacks?.onConditionPlan?.("worker-session", conditionPlan);
     callbacks?.onDecisionBatch?.("worker-session", [decisionBatch]);
+    callbacks?.onControlFlowPlan?.("worker-session", controlFlowPlan);
+    callbacks?.onControlFlowBatch?.("worker-session", [controlFlowBatch]);
     callbacks?.onTraceBatch?.("worker-session", [trace]);
     callbacks?.onFinished?.(result);
 
@@ -166,6 +174,8 @@ describe("Pyodide worker", () => {
       { type: "expression_batch", sessionId: "worker-session", batches: [expressionBatch] },
       { type: "condition_plan", sessionId: "worker-session", plan: conditionPlan },
       { type: "decision_batch", sessionId: "worker-session", batches: [decisionBatch] },
+      { type: "control_flow_plan", sessionId: "worker-session", plan: controlFlowPlan },
+      { type: "control_flow_batch", sessionId: "worker-session", batches: [controlFlowBatch] },
       { type: "trace_batch", sessionId: "worker-session", events: [trace] },
       { type: "execution_finished", sessionId: "worker-session", result }
     ]);

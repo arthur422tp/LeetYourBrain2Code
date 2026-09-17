@@ -7,6 +7,7 @@ import type {
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
+import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
 import {
   ExecutionController,
   type WorkerLike
@@ -87,6 +88,11 @@ const decisionBatch: DecisionBatch = {
     truth: false
   },
   outcome: "branch_not_entered"
+};
+const controlFlowPlan: ControlFlowPlan = { version: 1, loops: [], transfers: [] };
+const controlFlowBatch: ControlFlowBatch = {
+  batchId: 1,
+  events: [{ eventId: 1, kind: "loop_exit", anchorStep: 1, frameId: 1, context: { loopStack: [] }, loopId: "f1", loopKind: "for", reason: "exhausted" }]
 };
 
 class ControlledWorker implements WorkerLike {
@@ -274,6 +280,29 @@ describe("ExecutionController", () => {
         status: "timeout",
         conditionPlan,
         decisionBatches: [decisionBatch]
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains streamed control-flow evidence when a running request reaches hard timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new ControlledWorker();
+      const controller = new ExecutionController({ workerFactory: () => worker });
+      const pending = controller.execute(request("control-timeout", 20));
+
+      worker.emit({ type: "ready" });
+      await Promise.resolve();
+      worker.emit({ type: "control_flow_plan", sessionId: "control-timeout", plan: controlFlowPlan });
+      worker.emit({ type: "control_flow_batch", sessionId: "control-timeout", batches: [controlFlowBatch] });
+      await vi.advanceTimersByTimeAsync(20);
+      const result = await pending;
+      expect(result).toEqual(expect.objectContaining({
+        status: "timeout",
+        controlFlowPlan,
+        controlFlowBatches: [controlFlowBatch]
       }));
     } finally {
       vi.useRealTimers();

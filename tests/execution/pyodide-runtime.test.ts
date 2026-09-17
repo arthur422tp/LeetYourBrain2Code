@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ExecutionRequest, ExecutionTerminalResult } from "../../src/shared/execution-types";
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
+import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
 import { interpretTrace } from "../../src/core/trace-interpreter";
 import { createTraceVisualizer } from "../../src/sidepanel/components/TraceVisualizer";
 import {
@@ -57,6 +58,20 @@ const streamedExpressionBatch: ExpressionBatch = {
   frameId: 1,
   line: 3,
   roots: []
+};
+const streamedControlFlowPlan: ControlFlowPlan = { version: 1, loops: [], transfers: [] };
+const streamedControlFlowBatch: ControlFlowBatch = {
+  batchId: 1,
+  events: [{
+    eventId: 1,
+    kind: "loop_exit",
+    anchorStep: 1,
+    frameId: 1,
+    context: { loopStack: [] },
+    loopId: "f1",
+    loopKind: "for",
+    reason: "exhausted"
+  }]
 };
 
 describe("Pyodide runtime", () => {
@@ -133,6 +148,25 @@ describe("Pyodide runtime", () => {
 
     await runtime.execute(request);
     expect(callbacks).toEqual(["plan:1", "batch:d1"]);
+  });
+
+  it("normalizes and forwards control-flow plan and batch callback payloads", async () => {
+    const callbacks: string[] = [];
+    const globals: Record<string, (sessionId: string, payload: string) => void> = {};
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => {
+          globals.__lc_emit_control_flow_plan!("runtime-session", JSON.stringify({ version: 1, loops: [], transfers: [] }));
+          globals.__lc_emit_control_flow_batch!("runtime-session", JSON.stringify([{ batch_id: 1, events: [{ event_id: 1, kind: "loop_exit", anchor_step: 1, frame_id: 1, context: { loop_stack: [] }, loop_id: "f1", loop_kind: "for", reason: "exhausted" }] }]));
+          return { status: "completed", termination_reason: "normal_return", stdout: "", duration_ms: 1, events: [] };
+        },
+        globals: { set: (name, value) => { globals[name] = value as (sessionId: string, payload: string) => void; }, delete: () => undefined }
+      }),
+      onControlFlowPlan: (_sessionId, plan) => callbacks.push(`plan:${plan.version}`),
+      onControlFlowBatch: (_sessionId, batches) => callbacks.push(`batch:${batches[0]!.batchId}`)
+    });
+    await runtime.execute(request);
+    expect(callbacks).toEqual(["plan:1", "batch:1"]);
   });
 
   it("normalizes object references and bounded topology fields", () => {

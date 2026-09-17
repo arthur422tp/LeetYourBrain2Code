@@ -9,6 +9,7 @@ import type {
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
+import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
 import {
   TraceSessionCollector,
   type TraceSessionCollectorOptions
@@ -126,6 +127,21 @@ const decisionBatch: DecisionBatch = {
     truth: false
   },
   outcome: "branch_not_entered"
+};
+
+const controlFlowPlan: ControlFlowPlan = { version: 1, loops: [], transfers: [] };
+const controlFlowBatch: ControlFlowBatch = {
+  batchId: 1,
+  events: [{
+    eventId: 1,
+    kind: "loop_exit",
+    anchorStep: 2,
+    frameId: 1,
+    context: { loopStack: [] },
+    loopId: "f1",
+    loopKind: "for",
+    reason: "exhausted"
+  }]
 };
 
 class FakeWorker implements WorkerLike {
@@ -353,6 +369,39 @@ describe("TraceSessionCollector", () => {
     expect(session.decisionBatches).toBeUndefined();
     expect(session.decisionTracing).toEqual({ status: "truncated", reason: "decision_byte_limit" });
     expect(session.status).toBe("completed");
+  });
+
+  it("preserves streamed control-flow prefixes and de-duplicates terminal copies", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+    collector.setControlFlowPlan(controlFlowPlan);
+    collector.appendControlFlowBatches([controlFlowBatch]);
+    collector.appendControlFlowBatches([controlFlowBatch, { ...controlFlowBatch, batchId: 2 }]);
+    const session = collector.finish(terminalResult({
+      controlFlowPlan,
+      controlFlowBatches: [controlFlowBatch]
+    }));
+    expect(session.controlFlowPlan).toEqual(controlFlowPlan);
+    expect(session.controlFlowBatches?.map((batch) => batch.batchId)).toEqual([1, 2]);
+  });
+
+  it("truncates control-flow bytes without changing raw trace status", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions({
+      limits: { ...limits, maxControlFlowBytes: 1 }
+    }));
+    collector.appendControlFlowBatches([controlFlowBatch]);
+    const session = collector.finish(terminalResult());
+    expect(session.controlFlowBatches).toBeUndefined();
+    expect(session.controlFlowTracing).toEqual({ status: "truncated", reason: "control_flow_byte_limit" });
+    expect(session.status).toBe("completed");
+  });
+
+  it("keeps streamed control-flow evidence when hard timeout closes the session", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+    collector.setControlFlowPlan(controlFlowPlan);
+    collector.appendControlFlowBatches([controlFlowBatch]);
+    const session = collector.forceTimeout();
+    expect(session.controlFlowPlan).toEqual(controlFlowPlan);
+    expect(session.controlFlowBatches).toEqual([controlFlowBatch]);
   });
 
   it("keeps all received batches when the controller hard-times out", async () => {

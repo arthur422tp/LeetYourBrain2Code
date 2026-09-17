@@ -19,6 +19,11 @@ import type {
   DecisionBatch,
   DecisionTracingState
 } from "../shared/decision-types";
+import type {
+  ControlFlowBatch,
+  ControlFlowPlan,
+  ControlFlowTracingState
+} from "../shared/control-flow-types";
 
 export interface TraceSessionCollectorOptions {
   sessionId: string;
@@ -46,6 +51,11 @@ export class TraceSessionCollector {
   private readonly decisionBatchIds = new Set<number>();
   private decisionTracing: DecisionTracingState | undefined;
   private decisionBytes = 0;
+  private controlFlowPlan: ControlFlowPlan | undefined;
+  private readonly controlFlowBatches: ControlFlowBatch[] = [];
+  private readonly controlFlowBatchIds = new Set<number>();
+  private controlFlowTracing: ControlFlowTracingState | undefined;
+  private controlFlowBytes = 0;
   private terminalSession: TraceSession | null = null;
 
   public constructor(options: TraceSessionCollectorOptions) {
@@ -137,10 +147,38 @@ export class TraceSessionCollector {
     this.decisionTracing = state;
   }
 
+  public setControlFlowPlan(plan: ControlFlowPlan): void {
+    if (!this.terminalSession) this.controlFlowPlan = plan;
+  }
+
+  public appendControlFlowBatches(batches: ControlFlowBatch[]): void {
+    if (this.terminalSession || this.controlFlowTracing?.status === "truncated") return;
+    for (const batch of batches) {
+      if (this.controlFlowBatchIds.has(batch.batchId)) continue;
+      const batchBytes = this.encodedEventBytes.encode(JSON.stringify(batch)).byteLength;
+      if (this.controlFlowBytes + batchBytes > this.options.limits.maxControlFlowBytes) {
+        this.controlFlowTracing = { status: "truncated", reason: "control_flow_byte_limit" };
+        return;
+      }
+      this.controlFlowBytes += batchBytes;
+      this.controlFlowBatchIds.add(batch.batchId);
+      this.controlFlowBatches.push(batch);
+    }
+  }
+
+  public setControlFlowTracingState(state: ControlFlowTracingState): void {
+    if (this.terminalSession || this.controlFlowTracing?.status === "truncated") return;
+    this.controlFlowTracing = state;
+  }
+
   public finish(result: ExecutionTerminalResult): TraceSession {
     if (this.terminalSession) {
       return this.terminalSession;
     }
+
+    if (result.controlFlowPlan) this.setControlFlowPlan(result.controlFlowPlan);
+    if (result.controlFlowBatches) this.appendControlFlowBatches(result.controlFlowBatches);
+    if (result.controlFlowTracing) this.setControlFlowTracingState(result.controlFlowTracing);
 
     const terminalResult = this.resourceLimitReached
       ? {
@@ -195,7 +233,10 @@ export class TraceSessionCollector {
       ...(this.expressionTracing ? { expressionTracing: this.expressionTracing } : {}),
       ...(this.conditionPlan ? { conditionPlan: this.conditionPlan } : {}),
       ...(this.decisionBatches.length > 0 ? { decisionBatches: [...this.decisionBatches] } : {}),
-      ...(this.decisionTracing ? { decisionTracing: this.decisionTracing } : {})
+      ...(this.decisionTracing ? { decisionTracing: this.decisionTracing } : {}),
+      ...(this.controlFlowPlan ? { controlFlowPlan: this.controlFlowPlan } : {}),
+      ...(this.controlFlowBatches.length > 0 ? { controlFlowBatches: [...this.controlFlowBatches] } : {}),
+      ...(this.controlFlowTracing ? { controlFlowTracing: this.controlFlowTracing } : {})
     };
   }
 }

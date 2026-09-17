@@ -154,6 +154,55 @@ function expressionSession(): TraceSession {
   };
 }
 
+function decisionSession(): TraceSession {
+  const base = session();
+  return {
+    ...base,
+    schemaVersion: 4,
+    conditionPlan: {
+      version: 1,
+      sites: [{
+        siteId: "d1",
+        kind: "if",
+        conditionId: "d1.c0",
+        span: { line: 5, column: 8, endLine: 5, endColumn: 20 }
+      }],
+      conditions: [{
+        conditionId: "d1.c0",
+        siteId: "d1",
+        kind: "comparison",
+        source: "total == target",
+        span: { line: 5, column: 8, endLine: 5, endColumn: 20 },
+        childConditionIds: [],
+        operandIds: ["d1.c0.o0"]
+      }],
+      operands: [{
+        operandId: "d1.c0.o0",
+        conditionId: "d1.c0",
+        source: "total",
+        span: { line: 5, column: 8, endLine: 5, endColumn: 13 }
+      }],
+      chains: []
+    },
+    decisionBatches: [{
+      batchId: 1,
+      anchorStep: 1,
+      frameId: 1,
+      siteId: "d1",
+      occurrence: 1,
+      status: "completed",
+      condition: {
+        conditionId: "d1.c0",
+        evaluations: [{ operandId: "d1.c0.o0", order: 1, value: int(9) }],
+        conditionResults: [{ conditionId: "d1.c0", order: 1, truth: true }],
+        truth: true
+      },
+      outcome: "branch_entered"
+    }],
+    decisionTracing: { status: "complete" }
+  };
+}
+
 function matrixSession(): TraceSession {
   const base = session();
   return {
@@ -668,6 +717,24 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("renders decision evidence between visual state and expression evidence and adds a factual badge", () => {
+    const view = createTraceVisualizer(decisionSession());
+
+    expect(view.element.querySelector(".trace-viewer__decision-panel")).not.toBeNull();
+    expect(view.element.querySelector('[data-condition-id="d1.c0"]')).not.toBeNull();
+    expect(view.element.querySelector("[data-decision-badge]")?.textContent).toBe("condition True");
+    expect(view.element.querySelector(".trace-viewer__visual-panel")?.compareDocumentPosition(
+      view.element.querySelector(".trace-viewer__decision-panel")!
+    )).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(view.element.querySelector(".trace-viewer__decision-panel")?.compareDocumentPosition(
+      view.element.querySelector(".trace-viewer__expression-panel")!
+    )).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    view.setStep(1);
+    expect(view.element.querySelector(".trace-viewer__decision-panel")).not.toBeNull();
+    view.dispose();
+  });
+
   it("renders a v2-style session without expression fields", () => {
     const view = createTraceVisualizer(session());
     const panel = view.element.querySelector<HTMLElement>(".trace-viewer__expression-panel");

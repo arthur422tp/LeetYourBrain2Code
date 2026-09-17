@@ -13,6 +13,7 @@ import {
   type BehavioralTimelineHandle
 } from "./BehavioralTimeline";
 import { createFailureFirstEntry } from "./FailureFirstEntry";
+import { createDecisionEvidence, decisionBadgeText } from "./DecisionEvidence";
 import { createExpressionEvidence } from "./ExpressionEvidence";
 import { createMutationList } from "./MutationList";
 import {
@@ -73,12 +74,16 @@ function renderCodePanel(sourceCode: string): {
   panel: HTMLDetailsElement;
   lines: HTMLDivElement[];
   lineLabel: HTMLSpanElement;
+  decisionBadge: HTMLSpanElement;
 } {
   const { panel, body } = createPanel("Code", "trace-viewer__code-panel");
   const header = createElement("div", "trace-viewer__code-meta");
   const language = createElement("span", undefined, "Python");
   const lineLabel = createElement("span", undefined, "No active line");
-  header.append(language, lineLabel);
+  const decisionBadge = createElement("span", "trace-viewer__decision-badge");
+  decisionBadge.dataset.decisionBadge = "true";
+  decisionBadge.hidden = true;
+  header.append(language, lineLabel, decisionBadge);
 
   const code = createElement("pre", "trace-viewer__code");
   const lines = sourceCode.replace(/\r\n/g, "\n").split("\n").map((sourceLine, index) => {
@@ -92,7 +97,7 @@ function renderCodePanel(sourceCode: string): {
     return line;
   });
   body.append(header, code);
-  return { panel, lines, lineLabel };
+  return { panel, lines, lineLabel, decisionBadge };
 }
 
 function renderEmptyState(message: string): HTMLDivElement {
@@ -278,7 +283,9 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     session.events,
     session.subscriptRelations ?? [],
     session.expressionPlan,
-    session.expressionBatches ?? []
+    session.expressionBatches ?? [],
+    session.conditionPlan,
+    session.decisionBatches ?? []
   );
   const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
   const evidenceByPatternId = resolveBehavioralEvidenceMap(
@@ -316,6 +323,9 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const visualPanel = createPanel("Visual State", "trace-viewer__visual-panel");
   const visualStateRenderer = createVisualStateRenderer();
   visualPanel.body.append(visualStateRenderer.body);
+  const decisionPanel = session.conditionPlan || (session.decisionBatches?.length ?? 0) > 0
+    ? createPanel("Decision Evidence", "trace-viewer__decision-panel")
+    : null;
   const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel");
   const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel");
   const behavioralPanel = createPanel(
@@ -372,6 +382,16 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
       visualStateRenderer.setState(undefined);
+      decisionPanel?.body.replaceChildren(createDecisionEvidence({
+        evidence: undefined,
+        tracingState: session.decisionTracing,
+        chain: undefined,
+        history: [],
+        onNavigateStep: (step) => {
+          const index = traceIndex.stepToIndex.get(step);
+          if (index !== undefined) navigateDirect(index);
+        }
+      }));
       expressionPanel.body.replaceChildren(createExpressionEvidence(undefined, session.expressionTracing));
       changesPanel.body.replaceChildren(createMutationList([]));
       behavioralPanel.body.replaceChildren(createBehavioralSignals(
@@ -415,7 +435,32 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       ? "No active line"
       : `Line ${state.currentLine}`;
 
+    const decisionEvidence = event
+      ? interpretation.decisionEvidence.get(event.step)
+      : undefined;
+    const decisionChain = decisionEvidence
+      ? interpretation.decisionChains.find((chain) => chain.branches.some((branch) =>
+        branch.siteId === decisionEvidence.siteId && branch.anchorStep === decisionEvidence.anchorStep
+      ))
+      : undefined;
+    const decisionHistory = decisionEvidence
+      ? interpretation.decisionHistory.get(decisionEvidence.siteId) ?? []
+      : [];
+    const badge = decisionBadgeText(decisionEvidence);
+    codePanel.decisionBadge.hidden = badge === null;
+    codePanel.decisionBadge.textContent = badge ?? "";
+
     visualStateRenderer.setState(state);
+    decisionPanel?.body.replaceChildren(createDecisionEvidence({
+      evidence: decisionEvidence,
+      tracingState: session.decisionTracing,
+      chain: decisionChain,
+      history: decisionHistory,
+      onNavigateStep: (step) => {
+        const index = traceIndex.stepToIndex.get(step);
+        if (index !== undefined) navigateDirect(index);
+      }
+    }));
     expressionPanel.body.replaceChildren(createExpressionEvidence(
       event ? interpretation.expressionEvidence.get(event.step) : undefined,
       session.expressionTracing
@@ -503,6 +548,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   root.append(
     codePanel.panel,
     visualPanel.panel,
+    ...(decisionPanel ? [decisionPanel.panel] : []),
     expressionPanel.panel,
     inspectorGrid,
     callStackPanel,

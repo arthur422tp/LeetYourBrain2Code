@@ -2,6 +2,8 @@
 
 ## Design Spec v0.1
 
+**UI companion:** `docs/superpowers/specs/2026-09-17-control-flow-execution-story-ui-design.md`
+
 ---
 
 # 1. Goal
@@ -10,7 +12,7 @@ LeetYourBrain2Code already captures factual runtime state, mutation semantics, e
 
 The next milestone is **Control-Flow Evidence Foundation v0.1**.
 
-The goal is to explain how execution moves through loop iterations and explicit transfer statements without turning the debugger into a solver, correctness engine, or static control-flow analyzer.
+This document defines the runtime, protocol, instrumentation, occurrence model, interpretation rules, and semantic-preservation requirements for explaining how execution moves through loop iterations and explicit transfer statements.
 
 The existing evidence stack answers:
 
@@ -42,7 +44,7 @@ for x in nums:
         break
 ```
 
-The debugger should be able to present factual evidence such as:
+The runtime foundation must be able to establish factual evidence such as:
 
 ```text
 FOR line 8 · iteration #4
@@ -57,11 +59,9 @@ break committed
 loop exited by break
 ```
 
-The product must not claim that the break, continue, return, or selected branch was correct.
-
 Core acceptance statement:
 
-> Given a supported `for`, `while`, `break`, `continue`, or `return`, LeetYourBrain2Code can preserve Python's native iterator and unwinding behavior, attach execution to concrete runtime occurrences, distinguish observed transfer statements from transfers that actually commit, and present the resulting execution story without inferring intended behavior or correctness.
+> Given a supported `for`, `while`, `break`, `continue`, or `return`, LeetYourBrain2Code can preserve Python's native iterator and unwinding behavior, attach execution to concrete runtime occurrences, distinguish observed transfer statements from transfers that actually commit, and expose enough factual evidence for a UI to reconstruct the execution story without inferring intended behavior or correctness.
 
 ---
 
@@ -97,24 +97,11 @@ Control-Flow Evidence must never state or imply:
 - a recommended fix;
 - an algorithm classification used to fill missing evidence.
 
-The factual boundary is:
-
-```text
-"break statement executed"               → yes
-"break transfer committed"               → yes, if confirmed
-"loop exited because break committed"     → yes, if confirmed
-"this break is the bug"                   → no
-
-"return statement observed"               → yes
-"frame exited after that return"           → yes, if confirmed
-"you returned too early"                  → no
-```
-
 ---
 
 # 3. Architectural Choice
 
-Control-Flow Evidence is a **separate evidence layer** from Decision Evidence.
+Control-Flow Evidence is a separate evidence layer from Decision Evidence.
 
 Decision Evidence answers:
 
@@ -131,7 +118,7 @@ Did this iteration complete, continue, break, return, or become interrupted?
 Was an observed transfer superseded or committed?
 ```
 
-The architecture becomes:
+Architecture:
 
 ```text
 Original Python source
@@ -149,8 +136,6 @@ Original Python source
         └──────┼───────────────┘
                ▼
        Runtime occurrence model
-               ▼
-       synchronized debugger UI
 ```
 
 Core invariant:
@@ -174,24 +159,23 @@ Control-Flow Evidence Foundation v0.1 includes:
 1. static `ControlFlowPlan` generation from original source;
 2. supported loop sites for `for` and `while`;
 3. supported explicit transfers for `break`, `continue`, and `return`;
-4. post-binding observation of `for` iterations without debugger-driven `iter()` / `next()` calls;
-5. loop-iteration occurrence identity;
-6. nested loop-stack execution context;
-7. explicit distinction between observed and committed transfers;
-8. supersession handling for transfers replaced by later control flow, including `finally` cases;
-9. natural loop-exit evidence for `for` exhaustion and `while` condition false;
-10. confirmed loop exit by `break`;
-11. `for ... else` and `while ... else` support;
-12. frame-exit confirmation for `return`;
-13. runtime iteration outcome states;
-14. per-occurrence branch-chain evidence replacing the current static-chain aggregation behavior;
-15. Decision Evidence context snapshots referencing the active loop stack;
-16. execution-story UI over current runtime occurrence;
-17. iteration history and iteration-based Trace Outline grouping;
-18. source-code factual control-flow badges;
-19. independent control-flow recording limits and tracing state;
-20. synthetic instrumentation that does not produce user-visible raw trace lines;
-21. semantic-preservation, protocol, interpreter, DOM, integration, and representative end-to-end tests.
+4. both expression-valued `return expr` and bare `return`;
+5. post-binding observation of `for` iterations without debugger-driven `iter()` / `next()` calls;
+6. loop-iteration occurrence identity;
+7. nested loop-stack execution context;
+8. explicit distinction between observed and committed transfers;
+9. supersession handling for transfers replaced by later control flow, including `finally` cases;
+10. natural loop-exit evidence for `for` exhaustion and `while` condition false;
+11. confirmed loop exit by `break`;
+12. `for ... else` and `while ... else` support;
+13. frame-exit confirmation for `return`;
+14. runtime iteration outcome states;
+15. per-occurrence branch-chain evidence replacing the current static-chain aggregation behavior;
+16. Decision Evidence context snapshots referencing the active loop stack;
+17. an interpreted occurrence model sufficient for the separate Execution Story UI spec;
+18. independent control-flow recording limits and tracing state;
+19. synthetic instrumentation that does not produce user-visible raw trace lines;
+20. semantic-preservation, protocol, interpreter, integration, and representative end-to-end tests.
 
 ---
 
@@ -207,16 +191,15 @@ v0.1 does not implement:
 - CFG visualization;
 - async iteration;
 - `yield` / `yield from` generator lifecycle;
-- `async with` or `with` lifecycle visualization;
+- `async with` or `with` lifecycle evidence;
 - exception-handler control-flow visualization;
 - `raise` causality as a first-class transfer type;
 - `match / case` control-flow evidence;
 - comprehension/generator-expression iteration evidence;
 - algorithm-specific branch/loop semantics;
-- Failure-First weighting from Control-Flow Evidence;
-- a dedicated Control-Flow lane in Behavioral Timeline.
+- Failure-First weighting from Control-Flow Evidence.
 
-`try/finally` is not visualized as its own structure in v0.1, but instrumentation must preserve and respect Python's actual `finally` transfer resolution.
+`try/finally` is not modeled as its own first-class UI/runtime structure in v0.1, but instrumentation must preserve and respect Python's actual `finally` transfer resolution.
 
 ---
 
@@ -258,7 +241,7 @@ for x in xs:          # f1
 
 The debugger must not infer transfer targets from later runtime line movement.
 
-Static IDs must be deterministic for the same source and independent of source-text equality.
+Static IDs must be deterministic for the same original source and independent of source-text equality.
 
 ---
 
@@ -270,7 +253,7 @@ Core invariant:
 
 > Site tells us where, occurrence tells us when, context tells us inside which frame/loop execution, and outcome tells us what actually happened.
 
-The runtime model uses three identity levels:
+Runtime identity levels:
 
 ```text
 Frame occurrence
@@ -299,15 +282,7 @@ interface ExecutionContextRef {
 }
 ```
 
-Example:
-
-```text
-frame 1
-outer f1 iteration 2
-inner f2 iteration 5
-```
-
-A decision occurring inside that nested loop must retain this context rather than only a global condition occurrence number.
+A decision inside nested loops must retain this context rather than only a global condition occurrence number.
 
 ---
 
@@ -337,24 +312,6 @@ interface LoopIterationEvidence {
 ```
 
 `active` may exist inside the recorder as internal state but is not required as an exported terminal status.
-
-For:
-
-```python
-for i, value in pairs:
-```
-
-an iteration may produce:
-
-```text
-frame = 4
-loop = f1
-iteration = 3
-bindings:
-  i = 2
-  value = 17
-status = continued
-```
 
 Bindings are captured only after Python has already assigned/destructured the target.
 
@@ -398,14 +355,6 @@ Name
 Tuple/List destructuring composed of Names
 ```
 
-Examples:
-
-```python
-for x in values:
-for i, value in pairs:
-for (x, (y, z)) in triples:
-```
-
 For targets such as:
 
 ```python
@@ -413,7 +362,7 @@ for obj.attr in values:
 for arr[i] in values:
 ```
 
-iteration occurrence may still be recorded, but the debugger must not perform extra attribute/subscript reads solely to reconstruct the target value.
+iteration occurrence may still be recorded, but the debugger must not perform extra attribute/subscript reads solely to reconstruct target values.
 
 ---
 
@@ -426,7 +375,7 @@ Decision Evidence remains responsible for:
 ```text
 condition True / False
 short-circuit detail
-branch/loop condition evaluation
+loop-condition evaluation
 ```
 
 Control-Flow Evidence is responsible for:
@@ -445,8 +394,6 @@ while <existing decision-instrumented condition>:
     body()
     __lc_iteration_complete(loop_id)
 ```
-
-This separation prevents duplicate condition evaluation logic.
 
 ---
 
@@ -477,15 +424,13 @@ Core invariant:
 
 > A syntactic control statement being executed is not automatically equivalent to the intended transfer being committed.
 
-This distinction is required for Python `finally` behavior.
-
 ---
 
 # 12. Pending-Transfer State Machine
 
-The recorder maintains at most the relevant pending transfer state for each frame/control-flow context.
+The recorder maintains the relevant pending transfer state for each frame/control-flow context.
 
-For example:
+Example:
 
 ```python
 for x in xs:
@@ -495,7 +440,7 @@ for x in xs:
         continue
 ```
 
-Runtime evidence should become:
+Required evidence progression:
 
 ```text
 break observed
@@ -505,7 +450,7 @@ next iteration begins
 continue committed
 ```
 
-The debugger does not simulate `finally`; it observes actual execution order and confirms the transfer only at factual runtime boundaries.
+The debugger does not simulate `finally`; actual execution order determines supersession and confirmation.
 
 Similarly:
 
@@ -516,7 +461,7 @@ finally:
     return 2
 ```
 
-must produce:
+must support:
 
 ```text
 return 1 observed
@@ -539,27 +484,15 @@ if __lc_transfer_observed(transfer_id, "break", target_loop_id):
 
 The helper must always return built-in `True`, even when recording is unavailable or truncated.
 
-The observation means only:
+Observation proves only that the statement executed.
 
-```text
-break statement executed
-```
-
-It does not yet mean:
-
-```text
-loop exited by break
-```
-
-Commit confirmation occurs only when the runtime reaches a factual post-loop boundary proving that the break transfer took effect.
+Commit confirmation occurs only when a factual post-loop boundary proves that the break transfer took effect.
 
 If a later `finally` transfer supersedes the break, the break remains `superseded`.
 
 ---
 
 # 14. Continue Instrumentation and Confirmation
-
-`continue` is also observed first and committed later.
 
 A pending continue may be confirmed by:
 
@@ -573,7 +506,7 @@ for x in [1]:
     continue
 ```
 
-Evidence may be:
+may produce:
 
 ```text
 iteration #1 started
@@ -590,37 +523,33 @@ If tracing ends before a confirmation boundary, v0.1 must not fabricate committe
 
 # 15. Return Instrumentation and Frame-Exit Confirmation
 
-Expression Evidence remains responsible for explaining how the return value was computed.
+Expression Evidence remains responsible for explaining how an expression-valued return was computed.
 
-Control-Flow Evidence wraps the already instrumented return expression only to observe the transfer:
+For:
+
+```python
+return expression
+```
+
+Control-Flow instrumentation conceptually wraps the already instrumented expression:
 
 ```python
 return __lc_return_observed(return_site_id, expression)
 ```
 
-The helper:
+The helper records the action and returns the exact same object/value.
 
-```text
-records the return action
-returns the exact same object/value
+For bare:
+
+```python
+return
 ```
 
-No expression is re-evaluated.
+instrumentation must preserve ordinary `None` semantics while still observing the return site. Conceptually, this may be represented as an observed return whose runtime value is `None`; implementation must not convert it into a different user-visible expression evaluation.
 
 A return becomes `committed` only when the authoritative tracer receives the actual frame `return` event for that frame.
 
-This is required to distinguish:
-
-```python
-try:
-    return 1
-finally:
-    return 2
-```
-
-from an ordinary single return.
-
-The final frame-return value remains sourced from the existing raw trace event.
+The final return value remains sourced from the existing raw trace event.
 
 ---
 
@@ -678,7 +607,7 @@ while + natural exit → condition_false
 
 A committed break skips loop `else` and is confirmed by the post-loop boundary.
 
-If `return` or exception occurs inside the loop before natural exit, the debugger must not claim exhausted or condition_false.
+If return or exception occurs inside the loop before natural exit, the debugger must not claim exhausted or condition_false.
 
 ---
 
@@ -726,20 +655,7 @@ Conceptually:
 currentExecutionContext(frameId): ExecutionContextRef
 ```
 
-Example:
-
-```ts
-{
-  loopStack: [
-    { loopId: "f1", iteration: 2 },
-    { loopId: "w3", iteration: 5 }
-  ]
-}
-```
-
 DecisionRecorder may snapshot this context when a decision occurrence begins.
-
-Decision Evidence does not own or mutate loop state.
 
 Core relationship:
 
@@ -748,7 +664,7 @@ ControlFlow owns execution context
 Decision snapshots execution context
 ```
 
-This allows a condition to be associated with the exact loop iteration in which it was evaluated.
+Decision Evidence does not own or mutate loop state.
 
 ---
 
@@ -785,15 +701,13 @@ for x in [-1, 0, 3]:
         ...
 ```
 
-must produce three chain occurrences:
+must produce:
 
 ```text
 iteration #1 → if selected
 iteration #2 → elif selected
 iteration #3 → else selected
 ```
-
-It must not collapse them into one static chain result.
 
 Occurrence grouping must use runtime ordering plus frame/context identity, not source text.
 
@@ -849,28 +763,11 @@ compile
 
 This allows Control-Flow instrumentation to wrap already instrumented expressions without re-evaluating them.
 
-Example:
-
-```python
-return mid + 1
-```
-
-becomes conceptually:
-
-```python
-return __lc_return_observed(
-    return_site_id,
-    <already-expression-instrumented mid + 1>
-)
-```
-
 ---
 
 # 23. Synthetic Probe Suppression
 
-Control-Flow instrumentation must add statement-level probes, unlike current inline Expression/Decision probes.
-
-Those synthetic statements must not appear as user-visible raw trace lines.
+Control-Flow instrumentation adds statement-level probes. Those synthetic statements must not appear as user-visible raw trace lines.
 
 Instrumentation should assign synthetic probes to reserved source lines outside the original user-source range and return a mapping such as:
 
@@ -889,13 +786,7 @@ do not increment visible trace step
 do not feed synthetic line into behavioral analysis
 ```
 
-If a frame return/exception reports a synthetic line, it should be mapped back to the associated original user-source line when possible.
-
-Hard invariant:
-
-```text
-Control-flow instrumentation != extra user-visible source execution
-```
+If a frame return/exception reports a synthetic line, map it back to the associated original user-source line when possible.
 
 Synthetic helpers must also remain excluded from Locals and Call Stack.
 
@@ -917,7 +808,7 @@ return_observed failure           → exact return value still returned
 loop boundary recording failure   → Python loop behavior unchanged
 ```
 
-In particular, helper wrappers that gate `break` or `continue` must return built-in `True` even if Control-Flow tracing is truncated or unavailable.
+Helper wrappers that gate `break` or `continue` must return built-in `True` even if Control-Flow tracing is truncated or unavailable.
 
 Instrumentation construction failure must fall back to the previous successfully instrumented AST or original source execution.
 
@@ -950,200 +841,42 @@ Control-Flow budgets must never terminate the program.
 
 ---
 
-# 26. Execution Story UX
+# 26. UI Contract Boundary
 
-Control-Flow Evidence is presented primarily as an **Execution Story**, not a raw event log.
-
-Recommended Side Panel hierarchy:
+The runtime foundation must expose enough interpreted evidence for the separate UI companion spec to render:
 
 ```text
-Code
-Visual State
-Execution Story
-Decision Evidence
-Expression Evidence
-What Changed | Behavioral Signals | Locals
-Call Stack
-Output
-Trace Outline
-Behavioral Timeline
-Controls
+current execution context
+current loop iteration
+iteration history scoped by frame/loop
+ordered control actions
+loop exit evidence
+per-occurrence decision chains
+raw-step anchors for navigation
+controlFlowTracing state
 ```
 
-For a current loop iteration:
+The runtime/core layer does **not** own:
 
 ```text
-Execution Story
-
-FOR · line 8
-Iteration #4
-x = 7
-
-1. iteration started
-2. x < 0 → False
-3. x == target → True
-4. return x observed
-5. function exited
-6. return committed
+panel placement
+Execution Story rendering
+disclosure/open state
+DOM structure
+CSS/status styling
+source badges
+Trace Outline presentation
 ```
 
-Execution Story is an overview layer.
+Those requirements are defined exclusively in:
 
-Decision Evidence and Expression Evidence remain detailed evidence layers.
+`docs/superpowers/specs/2026-09-17-control-flow-execution-story-ui-design.md`
+
+Failure-First prioritization remains unchanged by this foundation.
 
 ---
 
-# 27. Loop Context Header
-
-When the current step is inside loops, Execution Story shows the active runtime context.
-
-Single loop:
-
-```text
-FOR line 8 · iteration #4
-x = 7
-```
-
-Nested loops:
-
-```text
-FOR line 8 · iteration #2
-└─ WHILE line 11 · iteration #5
-```
-
-The UI projects `ExecutionContextRef`; it does not infer iteration numbers from raw line repetition.
-
----
-
-# 28. Iteration Outcome UI
-
-Every terminal iteration shows one factual outcome:
-
-```text
-Completed normally
-Continued
-Broke loop
-Function returned
-Interrupted
-```
-
-When evidence is incomplete, use a neutral incomplete state rather than guessing.
-
-Examples:
-
-```text
-Iteration #3 → Continued
-Iteration #5 → Broke loop
-Iteration #7 → Function returned
-Iteration #8 → Incomplete evidence
-```
-
----
-
-# 29. Transfer Status UI
-
-Normal committed transfers may be shown compactly:
-
-```text
-return target · committed
-break · committed
-continue · committed
-```
-
-When supersession occurs, the UI must expose both stages:
-
-```text
-return 1 · observed · superseded
-return 2 · observed · committed
-Function exited with 2
-```
-
-The UI must not hide superseded transfers when they materially explain execution.
-
----
-
-# 30. Iteration History
-
-Loop history becomes iteration-centric rather than condition-check-centric.
-
-Example:
-
-```text
-Iteration History
-
-#1  x=2   Completed
-#2  x=4   Continued
-#3  x=7   Completed
-#4  x=9   Broke loop
-```
-
-For `while`:
-
-```text
-#1  condition=True   Completed
-#2  condition=True   Continued
-#3  condition=True   Completed
-exit condition=False
-```
-
-Selecting an iteration navigates to its authoritative `anchorStepStart`.
-
----
-
-# 31. Trace Outline Integration
-
-Trace Outline may group runtime steps by loop iteration:
-
-```text
-FOR line 8
-├─ Iteration #1 · completed
-├─ Iteration #2 · continued
-├─ Iteration #3 · completed
-└─ Iteration #4 · broke
-```
-
-Expanded iteration:
-
-```text
-Iteration #4
-├─ Decision: x < 0 → False
-├─ Decision: x == target → False
-├─ Decision: x > limit → True
-└─ break
-```
-
-Raw Previous / Next / Play navigation remains authoritative.
-
-Behavioral Timeline does not receive a new Control-Flow lane in v0.1.
-
----
-
-# 32. Source-Code Panel Enhancement
-
-The active source line may display compact factual badges such as:
-
-```text
-iteration #4
-continue observed
-break committed
-return committed
-```
-
-The source panel must not claim correctness or display inferred CFG arrows.
-
----
-
-# 33. Failure-First Boundary
-
-Failure-First remains independent in v0.1.
-
-Control-Flow Evidence must not automatically change `Start Here` selection merely because a break, continue, return, or loop exit occurred near a failure.
-
-Future cross-evidence prioritization may be designed separately.
-
----
-
-# 34. Semantic-Preservation Invariants
+# 27. Semantic-Preservation Invariants
 
 For every supported control-flow occurrence:
 
@@ -1166,11 +899,12 @@ For every supported control-flow occurrence:
 16. Instrumentation failure cannot replace a user exception.
 17. Control-Flow limits cannot terminate ordinary execution.
 18. Decision/Expression tracing failure is independent from Control-Flow tracing.
+19. Bare return preserves native None semantics and is still observable as a return transfer.
 ```
 
 ---
 
-# 35. Testing Strategy
+# 28. Testing Strategy
 
 Testing priority is:
 
@@ -1181,25 +915,12 @@ transfer confirmation correctness
     >
 occurrence/context correctness
     >
-UI rendering
+UI rendering (owned by companion UI spec)
 ```
 
-## 35.1 Iterator semantic-preservation tests
+## 28.1 Iterator semantic-preservation tests
 
-Use custom iterators with side effects:
-
-```python
-class SideEffectIterator:
-    def __iter__(self):
-        calls.append("iter")
-        return self
-
-    def __next__(self):
-        calls.append("next")
-        ...
-```
-
-Instrumented and uninstrumented execution must produce identical `iter` and `next` counts.
+Use custom iterators with side effects and require instrumented/uninstrumented execution to produce identical `iter` and `next` counts.
 
 Also test:
 
@@ -1209,7 +930,7 @@ Also test:
 - iterator exceptions from `__next__`;
 - nested loops.
 
-## 35.2 Loop-else tests
+## 28.2 Loop-else tests
 
 Cover:
 
@@ -1223,14 +944,15 @@ while break            → else skipped → break
 while return/exception → else skipped; no fabricated condition_false
 ```
 
-## 35.3 Transfer confirmation tests
+## 28.3 Transfer confirmation tests
 
 Cover ordinary:
 
 ```text
 continue
 break
-return
+return expression
+bare return
 ```
 
 and `finally` override cases:
@@ -1287,7 +1009,21 @@ return 2 observed → committed
 frame return value = 2
 ```
 
-## 35.4 Exception and trace termination tests
+Bare return:
+
+```python
+def f():
+    return
+```
+
+Expected:
+
+```text
+return observed → committed
+frame return value = None
+```
+
+## 28.4 Exception and trace termination tests
 
 Captured user exceptions may mark active iteration/loop as exception-interrupted only when raw trace evidence confirms the exception.
 
@@ -1300,11 +1036,9 @@ loop exit → trace_ended
 
 They must not fabricate Python exception or normal loop-exit semantics.
 
-## 35.5 Synthetic-line suppression tests
+## 28.5 Synthetic-line suppression tests
 
-Verify that statement-level probes do not add visible raw source lines.
-
-At minimum:
+Verify:
 
 ```text
 all user-visible TraceEvent.line values map to original source lines
@@ -1313,7 +1047,7 @@ synthetic helper frames do not appear in Call Stack
 behavioral analysis does not receive synthetic steps
 ```
 
-## 35.6 Occurrence/context tests
+## 28.6 Occurrence/context tests
 
 Nested loop:
 
@@ -1334,7 +1068,7 @@ inner f2#3
 
 Recursion must keep loop occurrences separated by frame ID.
 
-## 35.7 Branch-chain regression tests
+## 28.7 Branch-chain regression tests
 
 For:
 
@@ -1350,7 +1084,7 @@ for x in [-1, 0, 3]:
 
 assert three `DecisionChainOccurrence` records with independent context and selected branch.
 
-## 35.8 Representative end-to-end flows
+## 28.8 Representative end-to-end flows
 
 Use a compact representative set:
 
@@ -1364,15 +1098,14 @@ Early return search       → function_returned iteration
 Loop with break           → confirmed break exit
 for...else                → exhaustion vs break
 try/finally override      → superseded vs committed
+bare return               → committed None frame exit
 ```
 
 Acceptance is faithful replay, not LeetCode Accepted status.
 
 ---
 
-# 36. Failure Modes
-
-Supported degradation behavior:
+# 29. Failure Modes
 
 ### Static planning failure
 
@@ -1417,7 +1150,7 @@ No failure path may rewrite Python control flow solely to make tracing easier.
 
 ---
 
-# 37. Definition of Done
+# 30. Definition of Done
 
 Control-Flow Evidence Foundation v0.1 is complete when all of the following hold:
 
@@ -1427,30 +1160,31 @@ Control-Flow Evidence Foundation v0.1 is complete when all of the following hold
 4. Nested loops expose ordered `loopStack` execution context.
 5. Safe `for` target bindings are captured only after Python binds them.
 6. `break`, `continue`, and `return` distinguish observed, committed, superseded, and interrupted states where applicable.
-7. A break is declared committed only after a factual runtime boundary confirms it.
-8. A continue is declared committed only after a factual next-iteration/natural-exit boundary confirms it.
-9. A return is declared committed only after the actual frame return event confirms it.
-10. `finally` can supersede pending break/continue/return without debugger-side simulation of unwinding.
-11. `for ... else` distinguishes exhaustion, break, return, exception, and incomplete tracing.
-12. `while ... else` distinguishes condition_false, break, return, exception, and incomplete tracing.
-13. Normal body fallthrough yields `completed` iteration status.
-14. break/continue/return/exception are never mislabeled as normal completion.
-15. Decision batches can snapshot Control-Flow execution context.
-16. Static branch-chain aggregation is replaced by per-occurrence chain evidence.
-17. Repeated execution of the same branch chain inside loops produces independent occurrences.
-18. Synthetic probes do not produce user-visible raw trace steps.
-19. Synthetic helpers do not pollute Locals, Call Stack, Trace Outline, or Behavioral analysis.
-20. Control-Flow tracing has independent soft event/byte budgets.
-21. Control-Flow truncation does not affect ordinary execution, Expression Evidence, or Decision Evidence.
-22. Expression/Decision tracing failures do not prevent Control-Flow evidence collection where possible.
-23. Execution Story displays active loop context, iteration history, decision/transfer sequence, and transfer status.
-24. Trace Outline can group by iteration without adding a Control-Flow lane to Behavioral Timeline.
-25. Failure-First behavior remains unchanged.
-26. Semantic-preservation, unit, integration, DOM, end-to-end, typecheck, and production build verification all pass.
+7. Expression-valued returns preserve existing Expression Evidence behavior.
+8. Bare `return` preserves native `None` semantics and produces return Control-Flow Evidence.
+9. A break is declared committed only after a factual runtime boundary confirms it.
+10. A continue is declared committed only after a factual next-iteration/natural-exit boundary confirms it.
+11. A return is declared committed only after the actual frame return event confirms it.
+12. `finally` can supersede pending break/continue/return without debugger-side simulation of unwinding.
+13. `for ... else` distinguishes exhaustion, break, return, exception, and incomplete tracing.
+14. `while ... else` distinguishes condition_false, break, return, exception, and incomplete tracing.
+15. Normal body fallthrough yields `completed` iteration status.
+16. break/continue/return/exception are never mislabeled as normal completion.
+17. Decision batches can snapshot Control-Flow execution context.
+18. Static branch-chain aggregation is replaced by per-occurrence chain evidence.
+19. Repeated execution of the same branch chain inside loops produces independent occurrences.
+20. Synthetic probes do not produce user-visible raw trace steps.
+21. Synthetic helpers do not pollute Locals, Call Stack, or Behavioral analysis.
+22. Control-Flow tracing has independent soft event/byte budgets.
+23. Control-Flow truncation does not affect ordinary execution, Expression Evidence, or Decision Evidence.
+24. Expression/Decision tracing failures do not prevent Control-Flow evidence collection where possible.
+25. The interpreted core model exposes all inputs required by the companion Execution Story UI spec.
+26. Failure-First behavior remains unchanged.
+27. Semantic-preservation, unit, integration, end-to-end, typecheck, and production build verification all pass.
 
 ---
 
-# 38. Resulting Product Model
+# 31. Resulting Runtime Model
 
 After this milestone, the debugger runtime model becomes:
 
@@ -1466,4 +1200,4 @@ Frame
             └── committed transfer / iteration outcome
 ```
 
-The resulting product is no longer merely a line-by-line animation of Python state. It becomes a factual runtime evidence model that lets users inspect how execution moved through concrete frames, loop iterations, decisions, expressions, mutations, and confirmed control transfers while preserving Python semantics and avoiding solver-style judgment.
+The runtime foundation supplies factual occurrence and transfer evidence. The separate UI companion defines how that evidence becomes an Execution Story, iteration history, per-occurrence branch-chain presentation, navigation, source badges, and Trace Outline grouping.

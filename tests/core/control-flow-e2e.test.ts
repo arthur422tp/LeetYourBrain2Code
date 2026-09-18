@@ -201,6 +201,139 @@ describe("control-flow evidence end to end", () => {
     expect(overridden.interpretation.controlFlow.actions.map((action) => action.status)).toEqual(["superseded", "committed"]);
   });
 
+  it("keeps an outer return alive when finally completes an inner-loop break", async () => {
+    const result = await run(
+      "control-e2e-return-inner-break",
+      `class Solution:
+    def solve(self):
+        try:
+            return 1
+        finally:
+            for _ in [1]:
+                break
+`,
+      "",
+      entrypoint("solve", 0, [])
+    );
+
+    expect(result.terminal.returnValue).toEqual({ type: "int", value: "1" });
+    const actions = result.interpretation.controlFlow.actions;
+    expect(actions.find((action) => action.kind === "break")).toMatchObject({ status: "committed" });
+    expect(actions.find((action) => action.kind === "return")).toMatchObject({ status: "committed" });
+    expect(actions.filter((action) => action.status === "superseded")).toHaveLength(0);
+  });
+
+  it("supersedes a pending return when finally commits a break from its original loop", async () => {
+    const result = await run(
+      "control-e2e-return-outer-break",
+      `class Solution:
+    def solve(self):
+        for _ in [1]:
+            try:
+                return 1
+            finally:
+                break
+        return 2
+`,
+      "",
+      entrypoint("solve", 0, [])
+    );
+
+    expect(result.terminal.returnValue).toEqual({ type: "int", value: "2" });
+    const returns = result.interpretation.controlFlow.actions.filter((action) => action.kind === "return");
+    expect(returns.some((action) => action.status === "superseded")).toBe(true);
+    expect(returns.some((action) => action.status === "committed")).toBe(true);
+    expect(result.interpretation.controlFlow.actions.some((action) => action.kind === "break" && action.status === "committed")).toBe(true);
+  });
+
+  it("resolves competing break and continue using the boundary that actually occurs", async () => {
+    const continueWins = await run(
+      "control-e2e-break-then-continue",
+      `class Solution:
+    def solve(self):
+        last = -1
+        for i in range(2):
+            last = i
+            try:
+                break
+            finally:
+                continue
+        return last
+`,
+      "",
+      entrypoint("solve", 0, [])
+    );
+
+    expect(continueWins.terminal.returnValue).toEqual({ type: "int", value: "1" });
+    expect(continueWins.interpretation.controlFlow.actions.some((action) => action.kind === "break" && action.status === "superseded")).toBe(true);
+    expect(continueWins.interpretation.controlFlow.actions.some((action) => action.kind === "continue" && action.status === "committed")).toBe(true);
+
+    const breakWins = await run(
+      "control-e2e-continue-then-break",
+      `class Solution:
+    def solve(self):
+        last = -1
+        for i in range(2):
+            last = i
+            try:
+                continue
+            finally:
+                break
+        return last
+`,
+      "",
+      entrypoint("solve", 0, [])
+    );
+
+    expect(breakWins.terminal.returnValue).toEqual({ type: "int", value: "0" });
+    expect(breakWins.interpretation.controlFlow.actions.some((action) => action.kind === "continue" && action.status === "superseded")).toBe(true);
+    expect(breakWins.interpretation.controlFlow.actions.some((action) => action.kind === "break" && action.status === "committed")).toBe(true);
+  });
+
+  it("does not relabel an exhausted loop when the function later raises", async () => {
+    const result = await run(
+      "control-e2e-exhausted-then-exception",
+      `class Solution:
+    def solve(self):
+        for x in [1]:
+            pass
+        raise ValueError("boom")
+`,
+      "",
+      entrypoint("solve", 0, [])
+    );
+
+    expect(result.terminal.status).toBe("exception");
+    const exits = result.interpretation.controlFlow.loopExits
+      .filter((exit) => exit.loopId === result.controlPlan!.loops[0]!.loopId);
+    expect(exits).toEqual([expect.objectContaining({ reason: "exhausted" })]);
+  });
+
+  it("keeps a completed first loop closed when tracing ends inside a second loop", async () => {
+    const result = await run(
+      "control-e2e-first-closed-second-truncated",
+      `class Solution:
+    def solve(self):
+        for x in [1]:
+            pass
+
+        i = 0
+        while True:
+            i += 1
+`,
+      "",
+      entrypoint("solve", 0, []),
+      { maxTraceSteps: 28 }
+    );
+
+    expect(result.terminal.status).toBe("trace_limit");
+    const [firstLoop, secondLoop] = result.controlPlan!.loops;
+    expect(result.interpretation.controlFlow.loopExits.filter((exit) => exit.loopId === firstLoop!.loopId))
+      .toEqual([expect.objectContaining({ reason: "exhausted" })]);
+    expect(result.interpretation.controlFlow.loopExits.filter((exit) => exit.loopId === secondLoop!.loopId))
+      .toEqual([expect.objectContaining({ reason: "trace_ended" })]);
+  });
+
   it("keeps a trace-limit prefix and does not expose synthetic lifecycle lines", async () => {
     const source = `class Solution:
     def loop(self):

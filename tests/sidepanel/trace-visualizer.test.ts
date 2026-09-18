@@ -1597,3 +1597,42 @@ describe("createTraceVisualizer", () => {
     view.dispose();
   });
 });
+
+function controlFlowSession(): TraceSession {
+  const fixture=session();
+  fixture.events=[10,20,30,40].map((step,i)=>({...fixture.events[0]!,step,line:i+1}));
+  fixture.controlFlowPlan={version:1,loops:[{loopId:"f1",kind:"for",span:{line:1,column:0,endLine:4,endColumn:1}}],transfers:[]};
+  const context={loopStack:[{loopId:"f1",iteration:1}]};
+  fixture.controlFlowBatches=[{batchId:1,events:[
+    {eventId:1,anchorStep:10,frameId:1,context,kind:"iteration_begin",loopId:"f1",loopKind:"for",iteration:1,bindings:[]},
+    {eventId:2,anchorStep:20,frameId:1,context,kind:"transfer_observed",transferId:"t1",actionId:"a1",transferKind:"break",targetLoopId:"f1"},
+    {eventId:3,anchorStep:30,frameId:1,context,kind:"transfer_status",actionId:"a1",status:"committed"},
+    {eventId:4,anchorStep:30,frameId:1,context:{loopStack:[]},kind:"loop_exit",loopId:"f1",loopKind:"for",reason:"break"}
+  ]}];
+  fixture.controlFlowTracing={status:"complete"};
+  return fixture;
+}
+
+describe("Execution Story trace integration",()=>{
+  it("uses sparse raw anchors for navigation and preserves panel collapse",()=>{
+    const handle=createTraceVisualizer(controlFlowSession());
+    const panel=handle.element.querySelector<HTMLDetailsElement>('details.trace-viewer__execution-story-panel');
+    expect(panel).not.toBeNull(); expect(panel!.textContent).toContain("Iteration #1");
+    panel!.open=false;
+    handle.element.querySelector<HTMLButtonElement>('[data-transfer-phase="committed"]')!.click();
+    expect(handle.element.dataset.stepIndex).toBe("2"); expect(panel!.open).toBe(false);
+    handle.element.querySelector<HTMLButtonElement>('#trace-previous')!.click();
+    expect(handle.element.dataset.stepIndex).toBe("1");
+    handle.element.querySelector<HTMLButtonElement>('[data-raw-iteration="1"]')!.click();
+    expect(handle.element.dataset.stepIndex).toBe("0"); handle.dispose();
+  });
+  it("shows tracing failure even when no raw steps exist",()=>{
+    const fixture=session(); fixture.events=[]; fixture.controlFlowTracing={status:"unavailable",reason:"instrumentation_failed"};
+    const handle=createTraceVisualizer(fixture);
+    expect(handle.element.querySelector('.execution-story')?.textContent).toContain("Control-flow tracing unavailable · instrumentation_failed"); handle.dispose();
+  });
+  it("omits the panel when no control-flow evidence exists",()=>{
+    const handle=createTraceVisualizer(session());
+    expect(handle.element.querySelector('.execution-story')).toBeNull(); handle.dispose();
+  });
+});

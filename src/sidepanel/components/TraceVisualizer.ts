@@ -1,3 +1,5 @@
+import { buildControlFlowUiModel } from "../../core/execution-story";
+import { createExecutionStory } from "./ExecutionStory";
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
@@ -285,7 +287,10 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     session.expressionPlan,
     session.expressionBatches ?? [],
     session.conditionPlan,
-    session.decisionBatches ?? []
+    session.decisionBatches ?? [],
+    session.controlFlowPlan,
+    session.controlFlowBatches ?? [],
+    { status: session.status, terminationReason: session.terminationReason }
   );
   const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
   const evidenceByPatternId = resolveBehavioralEvidenceMap(
@@ -325,6 +330,9 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   visualPanel.body.append(visualStateRenderer.body);
   const decisionPanel = session.conditionPlan || (session.decisionBatches?.length ?? 0) > 0
     ? createPanel("Decision Evidence", "trace-viewer__decision-panel")
+    : null;
+  const storyPanel = session.controlFlowPlan || (session.controlFlowBatches?.length ?? 0) > 0 || (session.controlFlowTracing && session.controlFlowTracing.status !== "complete")
+    ? createPanel("Execution Story", "trace-viewer__execution-story-panel")
     : null;
   const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel");
   const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel");
@@ -376,8 +384,19 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     root.dataset.playing = "false";
   };
 
+  const onNavigateStep = (step: number): void => {
+    const index = traceIndex.stepToIndex.get(step);
+    if (index !== undefined) navigateDirect(index);
+  };
+  const storyModelAt = (step: number, frameId: number) => buildControlFlowUiModel({
+    step, frameId, sourceCode: session.sourceCode, plan: session.controlFlowPlan,
+    controlFlow: interpretation.controlFlow, decisionEvidence: interpretation.decisionEvidence,
+    decisionChains: interpretation.decisionChains, tracingState: session.controlFlowTracing
+  });
+
   const setStep = (requestedIndex: number): void => {
     if (interpretation.visualStates.length === 0) {
+      storyPanel?.body.replaceChildren(createExecutionStory({model: storyModelAt(-1, -1), onNavigateStep}));
       currentIndex = 0;
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
@@ -435,6 +454,8 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       ? "No active line"
       : `Line ${state.currentLine}`;
 
+    const controlFlowUiModel = storyModelAt(event?.step ?? -1, event?.frameId ?? -1);
+    storyPanel?.body.replaceChildren(createExecutionStory({model: controlFlowUiModel, onNavigateStep}));
     const decisionEvidence = event
       ? interpretation.decisionEvidence.get(event.step)
       : undefined;
@@ -548,6 +569,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   root.append(
     codePanel.panel,
     visualPanel.panel,
+    ...(storyPanel ? [storyPanel.panel] : []),
     ...(decisionPanel ? [decisionPanel.panel] : []),
     expressionPanel.panel,
     inspectorGrid,

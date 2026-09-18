@@ -241,7 +241,22 @@ git commit -m "fix: prepare control flow evidence for execution story UI"
 **Interfaces:**
 - Adds `context: ExecutionContextRef` to interpreted `DecisionStepEvidence`; it comes from existing `DecisionBatch.context`, so no worker protocol change.
 - Produces `ExecutionStoryItem`, `LoopActivationView`, `ControlFlowUiModel`.
-- Produces `buildControlFlowUiModel(input): ControlFlowUiModel`.
+- Produces `buildControlFlowUiModel(input: BuildControlFlowUiModelInput): ControlFlowUiModel`.
+
+Define the exact input contract:
+
+```ts
+export interface BuildControlFlowUiModelInput {
+  step: number;
+  frameId: number;
+  sourceCode: string;
+  plan: ControlFlowPlan | undefined;
+  controlFlow: ControlFlowInterpretation;
+  decisionEvidence: DecisionEvidenceByStep;
+  decisionChains: DecisionChainOccurrence[];
+  tracingState?: ControlFlowTracingState;
+}
+```
 
 - [ ] **Step 1: Carry runtime context into interpreted Decision evidence**
 
@@ -273,6 +288,17 @@ expect(model.currentIteration?.ordinal).toBe(2);
 ```
 
 For an iteration containing a false decision then committed break, assert story items preserve factual order and include separate `transfer observed` and `transfer committed` rows.
+
+Also add two exit-boundary tests:
+
+```ts
+expect(buildControlFlowUiModel({ ...inputAtExhaustedStep }).currentLoopExit?.reason)
+  .toBe("exhausted");
+expect(buildControlFlowUiModel({ ...inputAtZeroIterationExit }).currentIteration)
+  .toBeUndefined();
+```
+
+The first fixture must have an empty current `contextByStep` at the exit anchor to prove the exact-exit fallback works.
 
 - [ ] **Step 3: Define presentation types**
 
@@ -315,13 +341,23 @@ export interface ControlFlowUiModel {
 }
 ```
 
-- [ ] **Step 4: Implement activation/current-iteration selection**
+- [ ] **Step 4: Implement activation/current-iteration selection, including exact loop-exit steps**
 
-Use `controlFlow.contextByStep.get(step)` and the deepest loop entry.
+First use `controlFlow.contextByStep.get(step)` and the deepest loop entry. When a deepest loop exists, derive `activationKey` with `controlFlowActivationKey(frameId, deepest.loopId, currentContext)` and retrieve that history from `iterationsByActivation`.
 
-Derive `activationKey` with `controlFlowActivationKey(frameId, deepest.loopId, currentContext)` and retrieve that history from `iterationsByActivation`.
+When the current raw step has no active loop context, check for an authoritative exact-step exit:
 
-Visible ordinal is history index + 1; raw worker iteration remains untouched.
+```ts
+const exactExit = input.controlFlow.loopExits.find((exit) =>
+  exit.frameId === input.frameId && exit.anchorStep === input.step
+);
+```
+
+For an exact exit with prior iterations, select the most recent activation of the same `frameId + loopId` whose final iteration ends at or before `exactExit.anchorStep`, and only if no later activation of that static loop starts before the exit. This lets the exit step project the activation that just closed even though its runtime loop stack is already empty.
+
+For an authoritative zero-iteration exit, create an exit-only `LoopActivationView` from the static loop descriptor with `iterations: []`; do not fabricate `currentIteration` or an iteration-history row.
+
+Visible iteration ordinal is history index + 1; raw worker iteration remains untouched.
 
 - [ ] **Step 5: Project decisions and transfers only into the matching activation**
 
@@ -349,11 +385,11 @@ Use transfer source text from `ControlFlowPlan` span + `sourceCode`; fall back t
 
 - [ ] **Step 6: Project iteration outcome and loop exit conservatively**
 
-Emit `iteration_outcome` from the selected iteration status.
+Emit `iteration_outcome` from the selected iteration status when a current iteration exists.
 
-Associate a loop exit only when matching `frameId + loopId` and temporal ordering unambiguously places it after the current activation and before the next activation of the same static loop. Otherwise omit it.
+Prefer an exact-step `LoopExitEvidence` when `exit.anchorStep === input.step`. Otherwise associate an exit with the selected activation only when matching `frameId + loopId` and temporal ordering unambiguously places it after the activation and before the next activation of the same static loop. Otherwise omit it.
 
-For zero-iteration loops, expose a loop exit only when the current raw step equals authoritative `LoopExitEvidence.anchorStep`; never fabricate an iteration.
+For zero-iteration loops, expose only the authoritative loop-exit item on the exact exit step; never fabricate an iteration, binding, or iteration outcome.
 
 - [ ] **Step 7: Project Decision chain occurrence contextually**
 

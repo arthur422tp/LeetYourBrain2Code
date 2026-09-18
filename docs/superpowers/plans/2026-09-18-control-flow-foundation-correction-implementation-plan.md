@@ -108,6 +108,50 @@ def test_same_loop_break_supersedes_older_continue_at_loop_after(self):
     self.assertEqual(statuses["a2"], "committed")
 ```
 
+Cover the remaining ledger matrix explicitly:
+
+```python
+def test_inner_continue_commits_without_superseding_outer_return(self):
+    recorder = self.make_recorder()
+
+    self.assertEqual(recorder.return_observed("t_return", 1), 1)
+    recorder.iteration_begin("f2", "for", (), ())
+    recorder.transfer_observed("t_inner_continue", "continue", "f2")
+    recorder.iteration_begin("f2", "for", (), ())
+    recorder.iteration_complete("f2")
+    recorder.loop_natural_exit("f2", "for")
+    recorder.loop_after("f2", "for")
+    recorder.on_frame_return(7, 20)
+
+    statuses = self.status_by_action(recorder)
+    self.assertEqual(statuses["a1"], "committed")
+    self.assertEqual(statuses["a2"], "committed")
+
+def test_outer_continue_supersedes_return_when_next_outer_iteration_begins(self):
+    recorder = self.make_recorder()
+
+    recorder.iteration_begin("f1", "for", (), ())
+    self.assertEqual(recorder.return_observed("t_return", 1), 1)
+    recorder.transfer_observed("t_continue", "continue", "f1")
+    recorder.iteration_begin("f1", "for", (), ())
+
+    statuses = self.status_by_action(recorder)
+    self.assertEqual(statuses["a1"], "superseded")
+    self.assertEqual(statuses["a2"], "committed")
+
+def test_frame_return_supersedes_older_break(self):
+    recorder = self.make_recorder()
+
+    recorder.iteration_begin("f1", "for", (), ())
+    recorder.transfer_observed("t_break", "break", "f1")
+    self.assertEqual(recorder.return_observed("t_return", 2), 2)
+    recorder.on_frame_return(7, 20)
+
+    statuses = self.status_by_action(recorder)
+    self.assertEqual(statuses["a1"], "superseded")
+    self.assertEqual(statuses["a2"], "committed")
+```
+
 - [ ] **Step 2: Add failing end-to-end Python regressions for real `finally` semantics**
 
 In the same fixture, add:
@@ -643,7 +687,63 @@ it("finalizes only the second active loop when an earlier loop already exited", 
 });
 ```
 
-- [ ] **Step 3: Run the two focused tests and verify current interpreter fails**
+- [ ] **Step 3: Add a failing test that terminal fallback finalizes nested loops inner-to-outer**
+
+Add:
+
+```ts
+it("finalizes nested active loops from inner to outer", () => {
+  const nestedPlan: ControlFlowPlan = {
+    version: 1,
+    loops: [
+      { loopId: "f1", kind: "for", span: { line: 2, column: 0, endLine: 6, endColumn: 1 } },
+      { loopId: "w2", kind: "while", span: { line: 3, column: 0, endLine: 5, endColumn: 1 } }
+    ],
+    transfers: []
+  };
+  const nestedContext = {
+    loopStack: [
+      { loopId: "f1", iteration: 1 },
+      { loopId: "w2", iteration: 1 }
+    ]
+  };
+
+  const result = buildControlFlowEvidence(
+    nestedPlan,
+    [batch([
+      {
+        eventId: 1,
+        anchorStep: 2,
+        frameId: 1,
+        context: { loopStack: [{ loopId: "f1", iteration: 1 }] },
+        kind: "iteration_begin",
+        loopId: "f1",
+        loopKind: "for",
+        iteration: 1,
+        bindings: []
+      },
+      {
+        eventId: 2,
+        anchorStep: 3,
+        frameId: 1,
+        context: nestedContext,
+        kind: "iteration_begin",
+        loopId: "w2",
+        loopKind: "while",
+        iteration: 1,
+        bindings: []
+      }
+    ])],
+    reconstructStates([rawEvent(2), rawEvent(3)]),
+    { status: "exception", terminationReason: "exception" }
+  );
+
+  expect(result.loopExits.map((exit) => exit.loopId)).toEqual(["w2", "f1"]);
+  expect(result.loopExits.map((exit) => exit.reason)).toEqual(["exception", "exception"]);
+});
+```
+
+- [ ] **Step 4: Run the focused tests and verify current interpreter fails**
 
 Run:
 
@@ -653,7 +753,7 @@ npx vitest run tests/core/control-flow-interpreter.test.ts
 
 Expected: at least the completed-loop/later-exception test FAILS because the current termination fallback scans historical iterations.
 
-- [ ] **Step 4: Split all iteration history from active iteration state**
+- [ ] **Step 5: Split all iteration history from active iteration state**
 
 In `src/core/control-flow-interpreter.ts`, replace the single `open` map with:
 
@@ -706,7 +806,7 @@ activeLoops.set(controlFlowLoopKey(event.frameId, event.loopId), {
 
 Do not create active-loop state from the static plan alone.
 
-- [ ] **Step 5: Make iteration resolution remove only active state**
+- [ ] **Step 6: Make iteration resolution remove only active state**
 
 Update `findOccurrence()` to read from `activeIterations`.
 
@@ -735,7 +835,7 @@ if (iteration && iteration.status === "open") {
 }
 ```
 
-- [ ] **Step 6: Close active-loop state on authoritative `loop_exit`**
+- [ ] **Step 7: Close active-loop state on authoritative `loop_exit`**
 
 When processing a `loop_exit` event:
 
@@ -750,7 +850,7 @@ Then apply the existing precise iteration status projection:
 
 For `exhausted` / `condition_false`, do not invent `completed` for an unexplained active iteration. If one remains because upstream evidence is partial, leave it unresolved until the final "incomplete evidence" cleanup in Step 8.
 
-- [ ] **Step 7: Finalize terminal fallback from active state only, inner-to-outer**
+- [ ] **Step 8: Finalize terminal fallback from active state only, inner-to-outer**
 
 Replace the current historical scan with:
 
@@ -795,7 +895,7 @@ if (needsInterruption) {
 
 This fallback must remain triggered only by terminal session status, never by `controlFlowTracing.status === "truncated"`.
 
-- [ ] **Step 8: Preserve incomplete evidence conservatively at non-interrupting termination**
+- [ ] **Step 9: Preserve incomplete evidence conservatively at non-interrupting termination**
 
 After all events are processed, any `activeIterations` left open without a terminal interruption means the control-flow stream is incomplete. Mark those iterations `interrupted` for UI safety, but do **not** synthesize a new loop exit:
 
@@ -818,7 +918,7 @@ const iterations = [...iterationsById.values()].filter(
 );
 ```
 
-- [ ] **Step 9: Run interpreter tests**
+- [ ] **Step 10: Run interpreter tests**
 
 Run:
 
@@ -828,7 +928,7 @@ npx vitest run tests/core/control-flow-interpreter.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit Task 2**
+- [ ] **Step 11: Commit Task 2**
 
 ```bash
 git add   src/core/control-flow-interpreter.ts   tests/core/control-flow-interpreter.test.ts

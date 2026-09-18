@@ -492,4 +492,222 @@ Transfer phases render `Observed`, `Committed`, `Superseded`, or `Confirmation u
 
 - [ ] **Step 6: Render activation-local history**
 
-Visible rows use loca
+Visible rows use local ordinals `#1`, `#2`, ... and keep raw worker iteration in `data-raw-iteration`.
+
+History buttons navigate to `anchorStepStart`.
+
+- [ ] **Step 7: Add focused CSS**
+
+Add `.execution-story*` rules using current Side Panel spacing/border/button conventions. No new global color system.
+
+Run:
+
+```bash
+npx vitest run tests/sidepanel/execution-story.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Commit Task 2**
+
+```bash
+git add \
+  src/sidepanel/components/ExecutionStory.ts \
+  tests/sidepanel/execution-story.test.ts \
+  src/sidepanel/styles.css
+git commit -m "feat: render control flow execution story"
+```
+
+---
+
+### Task 3: Integrate Execution Story With the Existing Raw Trace Cursor
+
+**Files:**
+- Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+
+**Interfaces:**
+- `TraceVisualizer` remains the sole raw cursor owner.
+- Story navigation is `anchorStep -> traceIndex.stepToIndex -> navigateDirect(index)`.
+
+- [ ] **Step 1: Add a failing Side Panel integration fixture**
+
+Create a `TraceSession` fixture with `controlFlowPlan`, `controlFlowBatches`, and `controlFlowTracing`.
+
+Assert the panel exists and shows `Iteration #1`.
+
+Expected before implementation: FAIL because `TraceVisualizer` does not yet pass Control-Flow evidence into `interpretTrace()`.
+
+- [ ] **Step 2: Pass Control-Flow evidence into `interpretTrace()`**
+
+Use:
+
+```ts
+const interpretation = interpretTrace(
+  session.events,
+  session.subscriptRelations ?? [],
+  session.expressionPlan,
+  session.expressionBatches ?? [],
+  session.conditionPlan,
+  session.decisionBatches ?? [],
+  session.controlFlowPlan,
+  session.controlFlowBatches ?? [],
+  {
+    status: session.status,
+    terminationReason: session.terminationReason
+  }
+);
+```
+
+- [ ] **Step 3: Create the panel conditionally**
+
+Render it when Control-Flow plan/batches exist or tracing is non-complete.
+
+Insert order:
+
+```text
+Code
+Visual State
+Execution Story
+Decision Evidence
+Expression Evidence
+...
+```
+
+- [ ] **Step 4: Rebuild only the body on `setStep()`**
+
+Call `buildControlFlowUiModel()` for the current raw event and render `createExecutionStory()`.
+
+Do not replace the outer `<details>` panel so collapsed/open state survives navigation.
+
+- [ ] **Step 5: Add cursor-navigation regression**
+
+Click a story/history item and assert root `data-step-index` changes. Also verify Previous/Next/Play still use the same cursor.
+
+- [ ] **Step 6: Keep the panel absent for sessions with no Control-Flow evidence**
+
+Existing fixtures must not gain an empty panel.
+
+Run:
+
+```bash
+npx vitest run tests/sidepanel/trace-visualizer.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit Task 3**
+
+```bash
+git add \
+  src/sidepanel/components/TraceVisualizer.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+git commit -m "feat: integrate execution story with trace navigation"
+```
+
+---
+
+### Task 4: Make Decision Evidence Occurrence-Contextual in the UI
+
+**Files:**
+- Modify: `src/sidepanel/components/DecisionEvidence.ts`
+- Modify: `tests/sidepanel/decision-evidence.test.ts`
+- Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+
+**Interfaces:**
+- `DecisionEvidenceOptions.chain` becomes `DecisionChainOccurrence | undefined`.
+
+- [ ] **Step 1: Change the Decision component input type**
+
+Replace `DecisionChainEvidence` with `DecisionChainOccurrence`.
+
+- [ ] **Step 2: Render occurrence metadata**
+
+Set:
+
+```text
+data-chain-id
+data-chain-occurrence-id
+data-frame-id
+data-anchor-step-start
+data-anchor-step-end
+```
+
+Use title `Branch chain · steps 12–14` instead of a static ID-centric label.
+
+- [ ] **Step 3: Add two-occurrence DOM regression**
+
+Create two occurrences with the same static chain but different contexts/selected branches and assert no selection leaks.
+
+- [ ] **Step 4: Select exact current-step chain first, contextual chain second**
+
+In `TraceVisualizer`:
+1. exact current decision anchor lookup wins;
+2. otherwise use `controlFlowUiModel.decisionChainOccurrence`.
+
+- [ ] **Step 5: Run and commit**
+
+```bash
+npx vitest run \
+  tests/sidepanel/decision-evidence.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+```
+
+Commit:
+
+```bash
+git add \
+  src/sidepanel/components/DecisionEvidence.ts \
+  tests/sidepanel/decision-evidence.test.ts \
+  src/sidepanel/components/TraceVisualizer.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+git commit -m "feat: render decision chains by runtime occurrence"
+```
+
+---
+
+### Task 5: Add One Factual Source Badge
+
+**Files:**
+- Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+- Modify: `src/sidepanel/styles.css`
+
+**Interfaces:**
+- One primary badge only.
+- Priority: committed transfer > observed transfer > iteration boundary > Decision badge.
+
+- [ ] **Step 1: Add failing priority tests**
+
+Assert:
+- committed break -> `break committed`
+- observed continue -> `continue observed`
+- iteration start -> `iteration #2`
+- otherwise decision -> `condition False`
+
+- [ ] **Step 2: Generalize the existing code badge**
+
+Use one element with:
+
+```text
+data-code-evidence-badge="true"
+```
+
+rather than independent Decision and Control-Flow badges.
+
+- [ ] **Step 3: Implement factual priority selection**
+
+Only current-step evidence may produce a Control-Flow badge; do not infer from source text.
+
+- [ ] **Step 4: Run and commit**
+
+```bash
+npx vitest run tests/sidepanel/trace-visualizer.test.ts
+```
+
+Commit:
+
+```bash
+git add \
+  src/sidepanel/components/Tra

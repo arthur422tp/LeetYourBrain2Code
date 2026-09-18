@@ -30,3 +30,17 @@ describe("Execution Story", () => {
     expect(root.textContent).toBe("No control-flow evidence for this step.");
   });
 });
+
+it("keeps incomplete transfer evidence neutral and gives every destination a name",()=>{
+  const input=storyInput(); input.controlFlow.actions[0]!.status='interrupted';
+  input.controlFlow.iterations[1]!.status='interrupted'; input.controlFlow.loopExits=[];
+  const root=createExecutionStory({model:buildControlFlowUiModel(input),onNavigateStep:()=>{}});
+  expect(root.textContent).toContain('Control-flow evidence incomplete.');
+  expect(root.textContent).toContain('Transfer observed; confirmation unavailable.');
+  expect(root.textContent).toContain('Iteration outcome unavailable.');
+  expect(root.textContent).toContain('Loop exit evidence unavailable.');
+  const buttons=[...root.querySelectorAll('button')];
+  expect(buttons.every(button=>!!button.getAttribute('aria-label'))).toBe(true);
+  expect(new Set(buttons.map(button=>button.getAttribute('aria-label'))).size).toBe(buttons.length);
+  expect(root.textContent).not.toMatch(/correct branch|wrong branch|root cause|should continue|expected path/i);
+});

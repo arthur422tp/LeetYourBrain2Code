@@ -1655,3 +1655,17 @@ it("resolves outline anchors through raw indexes and omits unknown destinations"
   const rows=handle.element.querySelectorAll<HTMLButtonElement>('.trace-viewer__outline-loop-iteration');
   expect(rows).toHaveLength(1); rows[0]!.click(); expect(handle.element.dataset.stepIndex).toBe('0'); handle.dispose();
 });
+
+it("keeps Failure-First and timeline behavioral selection unchanged with control flow",()=>{
+  const fixture=failureFirstSession('timeout');
+  const before=createTraceVisualizer(fixture);
+  fixture.controlFlowPlan=controlFlowSession().controlFlowPlan;
+  fixture.controlFlowBatches=[{batchId:1,events:[{eventId:1,anchorStep:fixture.events[0]!.step,frameId:1,context:{loopStack:[{loopId:'f1',iteration:1}]},kind:'iteration_begin',loopId:'f1',loopKind:'for',iteration:1,bindings:[]}]}];
+  const after=createTraceVisualizer(fixture);
+  const lanes=(root:HTMLElement)=>[...root.querySelectorAll('[data-timeline-kind]')].map(node=>node.getAttribute('data-timeline-kind'));
+  expect(lanes(after.element)).toEqual(lanes(before.element));
+  after.element.querySelector<HTMLButtonElement>('.trace-viewer__failure-first-inspect')!.click();
+  expect(after.element.dataset.stepIndex).toBe('5');
+  expect(after.element.querySelector('.execution-story')?.textContent).toContain('Incomplete evidence');
+  before.dispose(); after.dispose();
+});

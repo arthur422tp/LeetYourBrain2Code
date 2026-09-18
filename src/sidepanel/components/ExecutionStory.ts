@@ -54,6 +54,7 @@ export function createExecutionStory({model, onNavigateStep}: ExecutionStoryOpti
   for (const item of model.storyItems) {
     const row=element("li","execution-story__item");
     const button=element("button","execution-story__navigate",itemText(item)); button.type="button";
+    button.setAttribute("aria-label", `Inspect ${itemText(item)} · step ${item.anchorStep}${item.kind === "transfer" || item.kind === "frame_exit" ? ` · ${item.actionId}` : ""}`);
     button.dataset.storyKind=item.kind; button.dataset.anchorStep=String(item.anchorStep);
     if (item.kind === "transfer") {
       button.dataset.transferPhase=item.phase; button.dataset.actionId=item.actionId;
@@ -65,10 +66,17 @@ export function createExecutionStory({model, onNavigateStep}: ExecutionStoryOpti
     button.addEventListener("click",()=>onNavigateStep(item.anchorStep)); row.append(button); list.append(row);
   }
   if (list.childElementCount) root.append(list);
+  const incompleteIteration = model.currentIteration?.iteration.status === "interrupted";
+  const unconfirmedTransfer = model.currentActions.some(action => action.status === "observed" || action.status === "interrupted");
+  if (incompleteIteration || unconfirmedTransfer) root.append(element("div","execution-story__incomplete","Control-flow evidence incomplete."));
+  if (unconfirmedTransfer) root.append(element("div","execution-story__incomplete","Transfer observed; confirmation unavailable."));
+  if (incompleteIteration) root.append(element("div","execution-story__incomplete","Iteration outcome unavailable."));
+  if (model.currentActivation && !model.currentLoopExit) root.append(element("div","execution-story__incomplete","Loop exit evidence unavailable."));
   if (model.iterationHistory.length) {
     const history=element("section","execution-story__history"); history.append(element("h3","execution-story__heading","Iteration History"));
     for (const {ordinal,iteration} of model.iterationHistory) {
       const button=element("button","execution-story__history-entry",`#${ordinal} · ${iteration.bindings.map(binding=>`${binding.name} = ${formatValue(binding.value)}`).join(", ")} · ${outcomes[iteration.status]}`);
+      button.setAttribute("aria-label", `Inspect iteration #${ordinal} · step ${iteration.anchorStepStart}`);
       button.type="button"; button.dataset.rawIteration=String(iteration.iteration); button.dataset.iterationStatus=iteration.status;
       button.dataset.anchorStep=String(iteration.anchorStepStart);
       if (ordinal===model.currentIteration?.ordinal) button.setAttribute("aria-current","step");

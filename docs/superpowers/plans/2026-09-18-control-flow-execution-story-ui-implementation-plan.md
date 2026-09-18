@@ -297,4 +297,199 @@ export interface LoopActivationView {
 export type ExecutionStoryItem =
   | { kind: "iteration_start"; anchorStep: number; ordinal: number; loopId: string; bindings: ControlFlowBindingSnapshot[] }
   | { kind: "decision"; anchorStep: number; siteId: string; source: string; status: "true" | "false" | "partial"; shortCircuited: boolean }
-  | { kind: "transfer"; anchorStep: number; actionId: string; transferId: string; transferKind: TransferKind; pha
+  | { kind: "transfer"; anchorStep: number; actionId: string; transferId: string; transferKind: TransferKind; phase: "observed" | "committed" | "superseded" | "interrupted"; source: string; supersededByActionId?: string }
+  | { kind: "iteration_outcome"; anchorStep: number; status: IterationStatus }
+  | { kind: "loop_exit"; anchorStep: number; loopId: string; reason: LoopExitReason }
+  | { kind: "frame_exit"; anchorStep: number; actionId: string };
+
+export interface ControlFlowUiModel {
+  currentContext?: ExecutionContextRef;
+  currentActivation?: LoopActivationView;
+  currentIteration?: LoopActivationIterationView;
+  currentActions: ControlActionEvidence[];
+  currentLoopExit?: LoopExitEvidence;
+  iterationHistory: LoopActivationIterationView[];
+  decisionChainOccurrence?: DecisionChainOccurrence;
+  storyItems: ExecutionStoryItem[];
+  tracingState?: ControlFlowTracingState;
+}
+```
+
+- [ ] **Step 4: Implement activation/current-iteration selection**
+
+Use `controlFlow.contextByStep.get(step)` and the deepest loop entry.
+
+Derive `activationKey` with `controlFlowActivationKey(frameId, deepest.loopId, currentContext)` and retrieve that history from `iterationsByActivation`.
+
+Visible ordinal is history index + 1; raw worker iteration remains untouched.
+
+- [ ] **Step 5: Project decisions and transfers only into the matching activation**
+
+Decision matching uses:
+
+```ts
+controlFlowActivationKey(
+  decision.frameId,
+  currentActivation.loopId,
+  decision.context
+) === currentActivation.activationKey
+```
+
+plus the current iteration anchor range.
+
+Use the same activation rule for `ControlActionEvidence.context`.
+
+For every action emit:
+1. observation row at `anchorStepObserved`;
+2. resolved row at `anchorStepResolved` if status is no longer `observed`.
+
+A committed return also emits `frame_exit`.
+
+Use transfer source text from `ControlFlowPlan` span + `sourceCode`; fall back to transfer kind if unavailable.
+
+- [ ] **Step 6: Project iteration outcome and loop exit conservatively**
+
+Emit `iteration_outcome` from the selected iteration status.
+
+Associate a loop exit only when matching `frameId + loopId` and temporal ordering unambiguously places it after the current activation and before the next activation of the same static loop. Otherwise omit it.
+
+For zero-iteration loops, expose a loop exit only when the current raw step equals authoritative `LoopExitEvidence.anchorStep`; never fabricate an iteration.
+
+- [ ] **Step 7: Project Decision chain occurrence contextually**
+
+Select a `DecisionChainOccurrence` only when:
+- frame matches;
+- activation key matches;
+- anchor range overlaps current iteration;
+- current raw step falls inside the chain.
+
+If multiple chains exist and none contains the current step, leave it undefined.
+
+- [ ] **Step 8: Stable ordering**
+
+Sort by `anchorStep`, then:
+
+```text
+iteration_start
+decision
+transfer observed
+transfer resolved
+iteration_outcome
+loop_exit
+frame_exit
+```
+
+Never move evidence across different raw anchors.
+
+Run:
+
+```bash
+npx vitest run \
+  tests/core/execution-story.test.ts \
+  tests/core/decision-e2e.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Commit Task 1**
+
+```bash
+git add \
+  src/core/execution-story.ts \
+  tests/core/execution-story.test.ts \
+  src/shared/decision-types.ts \
+  src/core/decision-interpreter.ts \
+  tests/core/decision-e2e.test.ts
+git commit -m "feat: project control flow into execution story model"
+```
+
+---
+
+### Task 2: Render the Execution Story Panel
+
+**Files:**
+- Create: `src/sidepanel/components/ExecutionStory.ts`
+- Create: `tests/sidepanel/execution-story.test.ts`
+- Modify: `src/sidepanel/styles.css`
+
+**Interfaces:**
+- Consumes `ControlFlowUiModel`.
+- Consumes `onNavigateStep(step: number): void`.
+- Produces DOM only; it never owns a cursor.
+
+- [ ] **Step 1: Add failing DOM tests**
+
+Construct a model for:
+
+```text
+FOR · line 8
+Iteration #2
+x = 7
+decision False
+break Observed
+break Committed
+Broke loop
+Loop exited · break
+```
+
+Assert required data attributes and click an item with anchor step `14`; expect `onNavigateStep(14)`.
+
+- [ ] **Step 2: Add neutral/tracing-state tests**
+
+Assert:
+- `Control-flow tracing truncated · control_flow_event_limit`
+- `Control-flow tracing unavailable · instrumentation_failed`
+- `No control-flow evidence for this step.`
+
+Captured story/history must remain visible below a truncation banner.
+
+- [ ] **Step 3: Implement `createExecutionStory()`**
+
+```ts
+export interface ExecutionStoryOptions {
+  model: ControlFlowUiModel;
+  onNavigateStep(step: number): void;
+}
+
+export function createExecutionStory(
+  options: ExecutionStoryOptions
+): HTMLElement;
+```
+
+Render tracing state, loop context, story items, then iteration history.
+
+- [ ] **Step 4: Render context and bindings**
+
+Header:
+
+```text
+FOR · line 8
+Iteration #2
+```
+
+Nested ancestry remains textual. Use `formatValue()` for compact captured bindings; do not duplicate Locals.
+
+- [ ] **Step 5: Render factual row copy**
+
+Required mappings:
+
+```text
+completed         -> Completed normally
+continued         -> Continued
+broke             -> Broke loop
+function_returned -> Function returned
+interrupted       -> Incomplete evidence
+
+exhausted       -> Loop exited · iterable exhausted
+condition_false -> Loop exited · condition False
+break           -> Loop exited · break
+function_return -> Loop exited · function returned
+exception       -> Loop interrupted · exception
+trace_ended     -> Loop evidence ended · trace ended
+```
+
+Transfer phases render `Observed`, `Committed`, `Superseded`, or `Confirmation unavailable`.
+
+- [ ] **Step 6: Render activation-local history**
+
+Visible rows use loca

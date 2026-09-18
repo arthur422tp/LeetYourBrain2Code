@@ -84,6 +84,7 @@ function renderCodePanel(sourceCode: string): {
   const lineLabel = createElement("span", undefined, "No active line");
   const decisionBadge = createElement("span", "trace-viewer__decision-badge");
   decisionBadge.dataset.decisionBadge = "true";
+  decisionBadge.dataset.codeEvidenceBadge = "true";
   decisionBadge.hidden = true;
   header.append(language, lineLabel, decisionBadge);
 
@@ -467,7 +468,13 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     const decisionHistory = decisionEvidence
       ? interpretation.decisionHistory.get(decisionEvidence.siteId) ?? []
       : [];
-    const badge = decisionBadgeText(decisionEvidence);
+    const committed = interpretation.controlFlow.actions.find(action => action.frameId === event?.frameId && action.status === "committed" && action.anchorStepResolved === event?.step);
+    const observed = interpretation.controlFlow.actions.find(action => action.frameId === event?.frameId && action.anchorStepObserved === event?.step);
+    const boundary = controlFlowUiModel.currentIteration;
+    const badge = committed ? `${committed.kind} committed`
+      : observed ? `${observed.kind} observed`
+      : boundary?.iteration.anchorStepStart === event?.step ? `iteration #${boundary.ordinal}`
+      : decisionBadgeText(decisionEvidence);
     codePanel.decisionBadge.hidden = badge === null;
     codePanel.decisionBadge.textContent = badge ?? "";
 

@@ -1636,3 +1636,14 @@ describe("Execution Story trace integration",()=>{
     expect(handle.element.querySelector('.execution-story')).toBeNull(); handle.dispose();
   });
 });
+
+it("shows one factual badge with exact-anchor transfer priority",()=>{
+  const fixture=controlFlowSession();
+  const handle=createTraceVisualizer(fixture);
+  const badge=()=>handle.element.querySelector('[data-code-evidence-badge="true"]');
+  expect(badge()?.textContent).toBe("iteration #1");
+  handle.setStep(1); expect(badge()?.textContent).toBe("break observed");
+  handle.setStep(2); expect(badge()?.textContent).toBe("break committed");
+  expect(handle.element.querySelectorAll('[data-code-evidence-badge="true"]')).toHaveLength(1);
+  handle.setStep(3); expect((badge() as HTMLElement).hidden).toBe(true); handle.dispose();
+});

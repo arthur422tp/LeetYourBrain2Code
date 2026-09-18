@@ -9,6 +9,17 @@ from control_flow_instrumenter import instrument_control_flow
 
 
 class ControlFlowInstrumenterTests(unittest.TestCase):
+    def test_break_and_continue_are_not_gated_by_observer_return_value(self):
+        for transfer, observer_value, expected in [("break", False, []), ("continue", None, [2])]:
+            with self.subTest(transfer=transfer):
+                source = f"def solve(xs):\n    seen = []\n    for x in xs:\n        if x == 1:\n            {transfer}\n        seen.append(x)\n    return seen\n"
+                result = instrument_control_flow(source, ast.parse(source), "ib", "ic", "to", "ro", "ne", "after")
+                namespace = {"ib": lambda *_: None, "ic": lambda *_: None,
+                             "to": lambda *_: observer_value, "ro": lambda _site, value: value,
+                             "ne": lambda *_: None, "after": lambda *_: None}
+                exec(compile(result.instrumented_tree, "<test>", "exec"), namespace, namespace)
+                self.assertEqual(namespace["solve"]([1, 2]), expected)
+
     def test_allocates_global_ids_and_respects_lexical_loop_ownership(self):
         source = """def solve(xs, ready):
     for x in xs:

@@ -1,3 +1,4 @@
+import { iterationActivationKey } from "./control-flow-scope";
 import type { TerminationReason, TraceSessionStatus } from "../shared/execution-types";
 import type {
   ControlActionEvidence,
@@ -21,6 +22,7 @@ export interface ControlFlowInterpretation {
   loopExits: LoopExitEvidence[];
   contextByStep: Map<number, ExecutionContextRef>;
   iterationsByLoop: Map<string, LoopIterationEvidence[]>;
+  iterationsByActivation: Map<string, LoopIterationEvidence[]>;
 }
 
 interface OpenIteration extends Omit<LoopIterationEvidence, "status"> {
@@ -242,7 +244,17 @@ export function buildControlFlowEvidence(
   }
   for (const history of iterationsByLoop.values()) history.sort((left, right) => left.iteration - right.iteration || left.anchorStepStart - right.anchorStepStart);
 
+  const iterationsByActivation = new Map<string, LoopIterationEvidence[]>();
+  for (const iteration of iterations) {
+    const key = iterationActivationKey(iteration);
+    const history = iterationsByActivation.get(key) ?? [];
+    history.push(iteration);
+    iterationsByActivation.set(key, history);
+  }
+  for (const history of iterationsByActivation.values()) history.sort((a, b) => a.anchorStepStart - b.anchorStepStart);
+
   return {
+    iterationsByActivation,
     iterations,
     actions: [...actions.values()],
     loopExits,

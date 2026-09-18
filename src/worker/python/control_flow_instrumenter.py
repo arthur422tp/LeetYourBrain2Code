@@ -186,9 +186,8 @@ class _Instrumenter(ast.NodeTransformer):
         args = [ast.Constant(descriptor["transferId"]), ast.Constant(kind)]
         if target_loop_id is not None:
             args.append(ast.Constant(target_loop_id))
-        condition = self._call(self.transfer_observed_name, args, node)
-        guarded = ast.If(test=condition, body=[node], orelse=[])
-        return ast.copy_location(guarded, node)
+        probe = self._synthetic_expr(self.transfer_observed_name, args, node)
+        return [probe, node]
 
     def visit_Break(self, node):
         return self._transfer(node, "break")

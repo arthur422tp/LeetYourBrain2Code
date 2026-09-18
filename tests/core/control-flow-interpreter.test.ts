@@ -65,4 +65,159 @@ describe("control-flow-interpreter", () => {
     ])], reconstructStates([rawEvent(3), rawEvent(4), rawEvent(5), rawEvent(6)]));
     expect(result.contextByStep.get(5)).toEqual(nested);
   });
+
+  it("does not re-finalize an exhausted loop when the frame later throws", () => {
+    const result = buildControlFlowEvidence(
+      plan,
+      [batch([
+        {
+          ...baseEvent(1, 3),
+          kind: "iteration_begin",
+          loopId: "f1",
+          loopKind: "for",
+          iteration: 1,
+          bindings: []
+        },
+        {
+          ...baseEvent(2, 4),
+          kind: "iteration_complete",
+          loopId: "f1",
+          iteration: 1
+        },
+        {
+          ...baseEvent(3, 5, { loopStack: [] }),
+          kind: "loop_exit",
+          loopId: "f1",
+          loopKind: "for",
+          reason: "exhausted"
+        }
+      ])],
+      reconstructStates([rawEvent(3), rawEvent(4), rawEvent(5), rawEvent(6)]),
+      { status: "exception", terminationReason: "exception" }
+    );
+
+    expect(result.iterations).toEqual([
+      expect.objectContaining({ loopId: "f1", iteration: 1, status: "completed" })
+    ]);
+    expect(result.loopExits).toEqual([
+      expect.objectContaining({ loopId: "f1", reason: "exhausted" })
+    ]);
+  });
+
+  it("finalizes only the second active loop when an earlier loop already exited", () => {
+    const twoLoopPlan: ControlFlowPlan = {
+      version: 1,
+      loops: [
+        { loopId: "f1", kind: "for", span: { line: 2, column: 0, endLine: 3, endColumn: 1 } },
+        { loopId: "w2", kind: "while", span: { line: 5, column: 0, endLine: 6, endColumn: 1 } }
+      ],
+      transfers: []
+    };
+
+    const result = buildControlFlowEvidence(
+      twoLoopPlan,
+      [batch([
+        {
+          eventId: 1,
+          anchorStep: 2,
+          frameId: 1,
+          context: { loopStack: [{ loopId: "f1", iteration: 1 }] },
+          kind: "iteration_begin",
+          loopId: "f1",
+          loopKind: "for",
+          iteration: 1,
+          bindings: []
+        },
+        {
+          eventId: 2,
+          anchorStep: 3,
+          frameId: 1,
+          context: { loopStack: [{ loopId: "f1", iteration: 1 }] },
+          kind: "iteration_complete",
+          loopId: "f1",
+          iteration: 1
+        },
+        {
+          eventId: 3,
+          anchorStep: 4,
+          frameId: 1,
+          context: { loopStack: [] },
+          kind: "loop_exit",
+          loopId: "f1",
+          loopKind: "for",
+          reason: "exhausted"
+        },
+        {
+          eventId: 4,
+          anchorStep: 6,
+          frameId: 1,
+          context: { loopStack: [{ loopId: "w2", iteration: 1 }] },
+          kind: "iteration_begin",
+          loopId: "w2",
+          loopKind: "while",
+          iteration: 1,
+          bindings: []
+        }
+      ])],
+      reconstructStates([2, 3, 4, 5, 6].map(rawEvent)),
+      { status: "timeout", terminationReason: "hard_timeout" }
+    );
+
+    expect(result.loopExits.filter((item) => item.loopId === "f1"))
+      .toEqual([expect.objectContaining({ reason: "exhausted" })]);
+    expect(result.loopExits.filter((item) => item.loopId === "w2"))
+      .toEqual([expect.objectContaining({ reason: "trace_ended" })]);
+    expect(result.iterations.find((item) => item.loopId === "w2"))
+      .toMatchObject({ status: "interrupted" });
+  });
+
+  it("finalizes nested active loops from inner to outer", () => {
+    const nestedPlan: ControlFlowPlan = {
+      version: 1,
+      loops: [
+        { loopId: "f1", kind: "for", span: { line: 2, column: 0, endLine: 6, endColumn: 1 } },
+        { loopId: "w2", kind: "while", span: { line: 3, column: 0, endLine: 5, endColumn: 1 } }
+      ],
+      transfers: []
+    };
+    const nestedContext = {
+      loopStack: [
+        { loopId: "f1", iteration: 1 },
+        { loopId: "w2", iteration: 1 }
+      ]
+    };
+
+    const result = buildControlFlowEvidence(
+      nestedPlan,
+      [batch([
+        {
+          eventId: 1,
+          anchorStep: 2,
+          frameId: 1,
+          context: { loopStack: [{ loopId: "f1", iteration: 1 }] },
+          kind: "iteration_begin",
+          loopId: "f1",
+          loopKind: "for",
+          iteration: 1,
+          bindings: []
+        },
+        {
+          eventId: 2,
+          anchorStep: 3,
+          frameId: 1,
+          context: nestedContext,
+          kind: "iteration_begin",
+          loopId: "w2",
+          loopKind: "while",
+          iteration: 1,
+          bindings: []
+        }
+      ])],
+      reconstructStates([rawEvent(2), rawEvent(3)]),
+      { status: "exception", terminationReason: "exception" }
+    );
+
+    expect(result.loopExits.map((exit) => exit.loopId)).toEqual(["w2", "f1"]);
+    expect(result.loopExits.map((exit) => exit.reason)).toEqual(["exception", "exception"]);
+  });
 });

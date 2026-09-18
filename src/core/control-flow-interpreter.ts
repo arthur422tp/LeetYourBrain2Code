@@ -27,6 +27,14 @@ interface OpenIteration extends Omit<LoopIterationEvidence, "status"> {
   status: LoopIterationEvidence["status"] | "open";
 }
 
+interface ActiveLoopRuntime {
+  frameId: number;
+  loopId: string;
+  loopKind: "for" | "while";
+  context: ExecutionContextRef;
+  lastAnchorStep: number;
+}
+
 export function controlFlowLoopKey(frameId: number, loopId: string): string {
   return `${frameId}:${loopId}`;
 }
@@ -55,7 +63,9 @@ export function buildControlFlowEvidence(
   runtimeStates: RuntimeState[],
   termination?: TraceTerminationContext
 ): ControlFlowInterpretation {
-  const open = new Map<string, OpenIteration>();
+  const iterationsById = new Map<string, OpenIteration>();
+  const activeIterations = new Map<string, OpenIteration>();
+  const activeLoops = new Map<string, ActiveLoopRuntime>();
   const actions = new Map<string, ControlActionEvidence>();
   const loopExits: LoopExitEvidence[] = [];
   const loopExitKeys = new Set<string>();
@@ -69,7 +79,7 @@ export function buildControlFlowEvidence(
   const findOccurrence = (frameId: number, loopId: string, context: ExecutionContextRef): OpenIteration | undefined => {
     const matching = [...context.loopStack].reverse().find((item) => item.loopId === loopId);
     if (!matching) return undefined;
-    return open.get(occurrenceKey(frameId, matching.loopId, matching.iteration));
+    return activeIterations.get(occurrenceKey(frameId, matching.loopId, matching.iteration));
   };
 
   const markIteration = (
@@ -85,13 +95,14 @@ export function buildControlFlowEvidence(
     iteration.status = status;
     iteration.anchorStepEnd = Math.max(iteration.anchorStepEnd, anchorStep);
     if (actionId) iteration.exitActionId = actionId;
+    activeIterations.delete(occurrenceKey(frameId, iteration.loopId, iteration.iteration));
   };
 
   for (const event of events) {
     if (event.kind === "iteration_begin") {
       const key = occurrenceKey(event.frameId, event.loopId, event.iteration);
-      if (!open.has(key)) {
-        open.set(key, {
+      if (!iterationsById.has(key)) {
+        const iteration: OpenIteration = {
           frameId: event.frameId,
           loopId: event.loopId,
           iteration: event.iteration,
@@ -100,15 +111,26 @@ export function buildControlFlowEvidence(
           anchorStepEnd: event.anchorStep,
           bindings: event.bindings.map((binding) => ({ name: binding.name, value: binding.value })),
           status: "open"
-        });
+        };
+        iterationsById.set(key, iteration);
+        activeIterations.set(key, iteration);
       }
+      activeLoops.set(controlFlowLoopKey(event.frameId, event.loopId), {
+        frameId: event.frameId,
+        loopId: event.loopId,
+        loopKind: event.loopKind,
+        context: cloneContext(event.context),
+        lastAnchorStep: event.anchorStep
+      });
       continue;
     }
     if (event.kind === "iteration_complete") {
-      const iteration = open.get(occurrenceKey(event.frameId, event.loopId, event.iteration));
+      const key = occurrenceKey(event.frameId, event.loopId, event.iteration);
+      const iteration = activeIterations.get(key);
       if (iteration && iteration.status === "open") {
         iteration.status = "completed";
         iteration.anchorStepEnd = Math.max(iteration.anchorStepEnd, event.anchorStep);
+        activeIterations.delete(key);
       }
       continue;
     }
@@ -157,28 +179,32 @@ export function buildControlFlowEvidence(
       loopExitKeys.add(exitKey);
       loopExits.push(exit);
     }
+    activeLoops.delete(controlFlowLoopKey(event.frameId, event.loopId));
     if (event.reason === "break") markIteration(event.frameId, event.context, event.loopId, "broke", event.anchorStep);
     if (event.reason === "function_return") markIteration(event.frameId, event.context, event.loopId, "function_returned", event.anchorStep);
     if (event.reason === "exception" || event.reason === "trace_ended") markIteration(event.frameId, event.context, event.loopId, "interrupted", event.anchorStep);
   }
 
   const needsInterruption = termination?.status === "timeout" || termination?.status === "trace_limit" || termination?.status === "internal_error" || termination?.status === "exception";
-  for (const iteration of open.values()) {
-    if (iteration.status === "open") {
+  if (needsInterruption) {
+    const reason = termination?.status === "exception" ? "exception" : "trace_ended";
+    for (const iteration of activeIterations.values()) {
+      if (iteration.status !== "open") continue;
       iteration.status = "interrupted";
       iteration.anchorStepEnd = lastCapturedStep;
     }
-  }
+    activeIterations.clear();
 
-  if (needsInterruption) {
-    const reason = termination?.status === "exception" ? "exception" : "trace_ended";
-    for (const iteration of open.values()) {
-      if (!iteration.context.loopStack.some((item) => item.loopId === iteration.loopId)) continue;
+    const activeLoopList = [...activeLoops.values()].sort((left, right) =>
+      right.context.loopStack.length - left.context.loopStack.length
+      || right.lastAnchorStep - left.lastAnchorStep
+    );
+    for (const loop of activeLoopList) {
       const exit: LoopExitEvidence = {
-        frameId: iteration.frameId,
-        loopId: iteration.loopId,
-        loopKind: _plan?.loops.find((loop) => loop.loopId === iteration.loopId)?.kind ?? "for",
-        context: cloneContext(iteration.context),
+        frameId: loop.frameId,
+        loopId: loop.loopId,
+        loopKind: loop.loopKind,
+        context: cloneContext(loop.context),
         anchorStep: lastCapturedStep,
         reason
       };
@@ -188,9 +214,18 @@ export function buildControlFlowEvidence(
         loopExits.push(exit);
       }
     }
+    activeLoops.clear();
   }
 
-  const iterations = [...open.values()].filter((iteration): iteration is LoopIterationEvidence => iteration.status !== "open");
+  for (const iteration of activeIterations.values()) {
+    if (iteration.status === "open") {
+      iteration.status = "interrupted";
+      iteration.anchorStepEnd = lastCapturedStep;
+    }
+  }
+  activeIterations.clear();
+
+  const iterations = [...iterationsById.values()].filter((iteration): iteration is LoopIterationEvidence => iteration.status !== "open");
   const contextByStep = new Map<number, ExecutionContextRef>();
   for (const state of runtimeStates) {
     const matching = iterations

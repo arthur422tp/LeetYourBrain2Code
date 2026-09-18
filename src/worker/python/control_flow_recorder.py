@@ -17,7 +17,7 @@ class ControlFlowRecorder:
         self.next_action_id = 1
         self.iteration_counts = {}
         self.active_loop_stacks = {}
-        self.pending_transfers = {}
+        self.unresolved_transfers = {}
         self.natural_exit_seen = set()
         self.completed_batches = []
         self.control_flow_event_count = 0
@@ -163,18 +163,35 @@ class ControlFlowRecorder:
             return occurrence
         return None
 
-    def _commit_pending(self, frame_id, status, superseded_by=None):
-        pending = self.pending_transfers.get(frame_id)
-        if pending is None:
-            return None
+    def _ledger(self, frame_id):
+        return self.unresolved_transfers.setdefault(frame_id, [])
+
+    @staticmethod
+    def _context_contains_loop(action, loop_id):
+        return any(
+            item["loop_id"] == loop_id
+            for item in action["observed_context"]["loop_stack"]
+        )
+
+    def _emit_transfer_status(self, frame_id, action, status, superseded_by=None):
         fields = {
-            "action_id": pending["action_id"],
+            "action_id": action["action_id"],
             "status": status,
         }
         if superseded_by is not None:
             fields["superseded_by_action_id"] = superseded_by
         self._emit([self._event(frame_id, "transfer_status", **fields)])
-        return pending
+
+    def _remove_actions(self, frame_id, action_ids):
+        remaining = [
+            action
+            for action in self.unresolved_transfers.get(frame_id, [])
+            if action["action_id"] not in action_ids
+        ]
+        if remaining:
+            self.unresolved_transfers[frame_id] = remaining
+        else:
+            self.unresolved_transfers.pop(frame_id, None)
 
     def iteration_begin(self, loop_id, loop_kind, binding_names, binding_values):
         if self.status != "complete":
@@ -182,10 +199,8 @@ class ControlFlowRecorder:
         frame_id = self._current_frame_id()
         if frame_id is None:
             return None
-        pending = self.pending_transfers.get(frame_id)
-        if pending is not None and pending["kind"] == "continue" and pending.get("target_loop_id") == loop_id:
-            self._commit_pending(frame_id, "committed")
-            self.pending_transfers.pop(frame_id, None)
+        winner = self._resolve_loop_transfer(frame_id, loop_id, "continue")
+        if winner is not None:
             self._pop_active_loop(frame_id, loop_id)
         key = (frame_id, loop_id)
         iteration = self.iteration_counts.get(key, 0) + 1
@@ -223,18 +238,18 @@ class ControlFlowRecorder:
             return True
         if frame_id is None:
             return True
-        previous = self.pending_transfers.get(frame_id)
         action_id = f"a{self.next_action_id}"
+        observed_order = self.next_action_id
         self.next_action_id += 1
-        if previous is not None:
-            self._commit_pending(frame_id, "superseded", action_id)
-        pending = {
+        action = {
             "action_id": action_id,
             "transfer_id": transfer_id,
             "kind": transfer_kind,
             "target_loop_id": target_loop_id,
+            "observed_order": observed_order,
+            "observed_context": self._copy_context(self.active_loop_stacks.get(frame_id, [])),
         }
-        self.pending_transfers[frame_id] = pending
+        self._ledger(frame_id).append(action)
         self._emit([self._event(
             frame_id,
             "transfer_observed",
@@ -260,10 +275,8 @@ class ControlFlowRecorder:
         frame_id = self._current_frame_id()
         if frame_id is None:
             return None
-        pending = self.pending_transfers.get(frame_id)
-        if pending is not None and pending["kind"] == "continue" and pending.get("target_loop_id") == loop_id:
-            self._commit_pending(frame_id, "committed")
-            self.pending_transfers.pop(frame_id, None)
+        winner = self._resolve_loop_transfer(frame_id, loop_id, "continue")
+        if winner is not None:
             self._pop_active_loop(frame_id, loop_id)
         self._emit([self._event(
             frame_id,
@@ -284,28 +297,71 @@ class ControlFlowRecorder:
         if marker in self.natural_exit_seen:
             self.natural_exit_seen.discard(marker)
             return None
-        pending = self.pending_transfers.get(frame_id)
-        reason = "exhausted" if loop_kind == "for" else "condition_false"
-        if pending is not None and pending.get("target_loop_id") == loop_id:
-            if pending["kind"] == "break":
-                self._commit_pending(frame_id, "committed")
-                self.pending_transfers.pop(frame_id, None)
-                self._pop_active_loop(frame_id, loop_id)
-                reason = "break"
-            elif pending["kind"] == "continue":
-                self._commit_pending(frame_id, "committed")
-                self.pending_transfers.pop(frame_id, None)
-                self._pop_active_loop(frame_id, loop_id)
-        self._emit([self._event(frame_id, "loop_exit", loop_id=loop_id, loop_kind=loop_kind, reason=reason)])
+        winner = self._resolve_loop_transfer(frame_id, loop_id, "break")
+        if winner is None:
+            return None
+        self._pop_active_loop(frame_id, loop_id)
+        self._emit([self._event(frame_id, "loop_exit", loop_id=loop_id, loop_kind=loop_kind, reason="break")])
+
+    def _resolve_loop_transfer(self, frame_id, loop_id, kind):
+        ledger = self.unresolved_transfers.get(frame_id, [])
+        candidates = [
+            action for action in ledger
+            if action["kind"] == kind
+            and action.get("target_loop_id") == loop_id
+        ]
+        if not candidates:
+            return None
+
+        winner = max(candidates, key=lambda action: action["observed_order"])
+        resolved_ids = {winner["action_id"]}
+        self._emit_transfer_status(frame_id, winner, "committed")
+
+        for action in ledger:
+            if action["action_id"] == winner["action_id"]:
+                continue
+            if action["observed_order"] >= winner["observed_order"]:
+                continue
+            same_target = action.get("target_loop_id") == loop_id
+            crosses_original_context = self._context_contains_loop(action, loop_id)
+            if same_target or crosses_original_context:
+                self._emit_transfer_status(
+                    frame_id,
+                    action,
+                    "superseded",
+                    winner["action_id"],
+                )
+                resolved_ids.add(action["action_id"])
+
+        self._remove_actions(frame_id, resolved_ids)
+        return winner
+
+    def _resolve_frame_return(self, frame_id):
+        ledger = self.unresolved_transfers.get(frame_id, [])
+        returns = [action for action in ledger if action["kind"] == "return"]
+        if not returns:
+            return None
+
+        winner = max(returns, key=lambda action: action["observed_order"])
+        self._emit_transfer_status(frame_id, winner, "committed")
+        for action in ledger:
+            if action["action_id"] == winner["action_id"]:
+                continue
+            self._emit_transfer_status(frame_id, action, "superseded", winner["action_id"])
+        self.unresolved_transfers.pop(frame_id, None)
+        return winner
+
+    def _interrupt_frame(self, frame_id):
+        ledger = self.unresolved_transfers.pop(frame_id, [])
+        for action in ledger:
+            self._emit_transfer_status(frame_id, action, "interrupted")
 
     def on_frame_return(self, frame_id, anchor_step):
         if self.status != "complete":
             return None
-        pending = self.pending_transfers.get(frame_id)
-        if pending is None or pending["kind"] != "return":
+        winner = self._resolve_frame_return(frame_id)
+        if winner is None:
             return None
-        self._commit_pending(frame_id, "committed")
-        self.pending_transfers.pop(frame_id, None)
         stack = self.active_loop_stacks.get(frame_id, [])
         for occurrence in reversed(stack):
             self._emit([self._event(
@@ -320,9 +376,8 @@ class ControlFlowRecorder:
     def _finalize(self, reason):
         if self.status != "complete":
             return
-        for frame_id in list(self.pending_transfers):
-            self._commit_pending(frame_id, "interrupted")
-        self.pending_transfers.clear()
+        for frame_id in list(self.unresolved_transfers):
+            self._interrupt_frame(frame_id)
         for frame_id, stack in list(self.active_loop_stacks.items()):
             for occurrence in reversed(stack):
                 self._emit([self._event(

@@ -249,12 +249,12 @@ class _Instrumenter(ast.NodeTransformer):
         node.body = visit_statements(node.body)
         node.orelse = visit_statements(node.orelse)
         node.body = self._loop_lifecycle(node, descriptor, node.body)
-        if node.orelse:
-            node.orelse.insert(0, self._synthetic_expr(
-                self.loop_natural_exit_name,
-                [ast.Constant(descriptor["loopId"]), ast.Constant(descriptor["kind"])],
-                node,
-            ))
+        natural_exit = self._synthetic_expr(
+            self.loop_natural_exit_name,
+            [ast.Constant(descriptor["loopId"]), ast.Constant(descriptor["kind"])],
+            node,
+        )
+        node.orelse = [natural_exit, *node.orelse]
         after = self._synthetic_expr(
             self.loop_after_name,
             [ast.Constant(descriptor["loopId"]), ast.Constant(descriptor["kind"])],

@@ -63,13 +63,59 @@ class ControlFlowInstrumenterTests(unittest.TestCase):
         self.assertEqual(calls.count("begin"), 2)
         self.assertEqual(calls.count("complete"), 2)
 
+    def test_loop_without_source_else_still_marks_natural_exit(self):
+        source = """def solve(xs):
+    for x in xs:
+        pass
+"""
+        calls = []
+        result = instrument_control_flow(
+            source, ast.parse(source),
+            "ib", "ic", "to", "ro", "ne", "after"
+        )
+        namespace = {
+            "ib": lambda *_args: calls.append("begin"),
+            "ic": lambda *_args: calls.append("complete"),
+            "to": lambda *_args: True,
+            "ro": lambda _site, value: value,
+            "ne": lambda *_args: calls.append("natural"),
+            "after": lambda *_args: calls.append("after"),
+        }
+        exec(compile(result.instrumented_tree, "<test>", "exec"), namespace, namespace)
+        namespace["solve"]([1])
+
+        self.assertEqual(calls, ["begin", "complete", "natural", "after"])
+
+    def test_break_skips_synthetic_natural_exit(self):
+        source = """def solve(xs):
+    for x in xs:
+        break
+"""
+        calls = []
+        result = instrument_control_flow(
+            source, ast.parse(source),
+            "ib", "ic", "to", "ro", "ne", "after"
+        )
+        namespace = {
+            "ib": lambda *_args: calls.append("begin"),
+            "ic": lambda *_args: calls.append("complete"),
+            "to": lambda *_args: calls.append("transfer") or True,
+            "ro": lambda _site, value: value,
+            "ne": lambda *_args: calls.append("natural"),
+            "after": lambda *_args: calls.append("after"),
+        }
+        exec(compile(result.instrumented_tree, "<test>", "exec"), namespace, namespace)
+        namespace["solve"]([1])
+
+        self.assertEqual(calls, ["begin", "transfer", "after"])
+
     def test_unsupported_for_target_still_gets_iteration_probe_without_bindings(self):
         source = "def solve(xs, obj):\n    for obj.value in xs:\n        pass\n"
         result = instrument_control_flow(source, ast.parse(source), "ib", "ic", "to", "ro", "ne", "after")
         target = result.plan_dict["loops"][0]["target"]
         self.assertFalse(target["capturable"])
         self.assertEqual(target["bindingNames"], [])
-        self.assertEqual(result.synthetic_line_map, {1003: 2, 1004: 2, 1005: 2})
+        self.assertEqual(result.synthetic_line_map, {1003: 2, 1004: 2, 1005: 2, 1006: 2})
 
 
 if __name__ == "__main__":

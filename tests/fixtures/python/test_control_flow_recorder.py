@@ -33,29 +33,102 @@ class ControlFlowRecorderTests(unittest.TestCase):
     def events(self, recorder):
         return [event for batch in recorder.completed_batches for event in batch["events"]]
 
+    def status_by_action(self, recorder):
+        return {
+            event["action_id"]: event["status"]
+            for event in self.events(recorder)
+            if event["kind"] == "transfer_status"
+        }
+
     def test_records_iteration_lifecycle_and_context(self):
         recorder = self.make_recorder()
         recorder.iteration_begin("f1", "for", ("x",), (7,))
         self.assertEqual(recorder.current_execution_context(7), {"loop_stack": [{"loop_id": "f1", "iteration": 1}]})
         recorder.iteration_complete("f1")
         self.assertIsNone(recorder.current_execution_context(7))
+        recorder.loop_natural_exit("f1", "for")
         recorder.loop_after("f1", "for")
 
         self.assertEqual([event["kind"] for event in self.events(recorder)], ["iteration_begin", "iteration_complete", "loop_exit"])
         self.assertEqual(self.events(recorder)[0]["bindings"], [{"name": "x", "value": {"type": "int", "value": "7"}}])
         self.assertEqual(self.events(recorder)[-1]["reason"], "exhausted")
 
-    def test_transfer_status_reflects_finally_override_and_boundary_commit(self):
+    def test_same_loop_continue_supersedes_older_break_when_next_iteration_begins(self):
         recorder = self.make_recorder()
         recorder.iteration_begin("f1", "for", (), ())
-        recorder.transfer_observed("t1", "break", "f1")
-        recorder.transfer_observed("t2", "continue", "f1")
+        recorder.transfer_observed("t_break", "break", "f1")
+        recorder.transfer_observed("t_continue", "continue", "f1")
         recorder.iteration_begin("f1", "for", (), ())
+        self.assertEqual(self.status_by_action(recorder), {"a1": "superseded", "a2": "committed"})
+
+    def test_inner_break_commits_without_superseding_outer_return(self):
+        recorder = self.make_recorder()
+
+        self.assertEqual(recorder.return_observed("t_return", 1), 1)
+        recorder.iteration_begin("f2", "for", (), ())
+        recorder.transfer_observed("t_inner_break", "break", "f2")
+        recorder.loop_after("f2", "for")
+        recorder.on_frame_return(7, 20)
+
+        self.assertEqual(self.status_by_action(recorder), {"a1": "committed", "a2": "committed"})
+
+    def test_outer_break_survives_inner_break_until_outer_boundary(self):
+        recorder = self.make_recorder()
+
+        recorder.iteration_begin("f1", "for", (), ())
+        recorder.transfer_observed("t_outer_break", "break", "f1")
+        recorder.iteration_begin("f2", "for", (), ())
+        recorder.transfer_observed("t_inner_break", "break", "f2")
+
+        recorder.loop_after("f2", "for")
+        self.assertNotIn("a1", self.status_by_action(recorder))
+
         recorder.loop_after("f1", "for")
-        events = self.events(recorder)
-        statuses = [(event["action_id"], event["status"]) for event in events if event["kind"] == "transfer_status"]
-        self.assertEqual(statuses, [("a1", "superseded"), ("a2", "committed")])
-        self.assertEqual([event["reason"] for event in events if event["kind"] == "loop_exit"], ["exhausted"])
+        self.assertEqual(self.status_by_action(recorder), {"a1": "committed", "a2": "committed"})
+
+    def test_same_loop_break_supersedes_older_continue_at_loop_after(self):
+        recorder = self.make_recorder()
+
+        recorder.iteration_begin("f1", "for", (), ())
+        recorder.transfer_observed("t_continue", "continue", "f1")
+        recorder.transfer_observed("t_break", "break", "f1")
+        recorder.loop_after("f1", "for")
+
+        self.assertEqual(self.status_by_action(recorder), {"a1": "superseded", "a2": "committed"})
+
+    def test_inner_continue_commits_without_superseding_outer_return(self):
+        recorder = self.make_recorder()
+
+        self.assertEqual(recorder.return_observed("t_return", 1), 1)
+        recorder.iteration_begin("f2", "for", (), ())
+        recorder.transfer_observed("t_inner_continue", "continue", "f2")
+        recorder.iteration_begin("f2", "for", (), ())
+        recorder.iteration_complete("f2")
+        recorder.loop_natural_exit("f2", "for")
+        recorder.loop_after("f2", "for")
+        recorder.on_frame_return(7, 20)
+
+        self.assertEqual(self.status_by_action(recorder), {"a1": "committed", "a2": "committed"})
+
+    def test_outer_continue_supersedes_return_when_next_outer_iteration_begins(self):
+        recorder = self.make_recorder()
+
+        recorder.iteration_begin("f1", "for", (), ())
+        self.assertEqual(recorder.return_observed("t_return", 1), 1)
+        recorder.transfer_observed("t_continue", "continue", "f1")
+        recorder.iteration_begin("f1", "for", (), ())
+
+        self.assertEqual(self.status_by_action(recorder), {"a1": "superseded", "a2": "committed"})
+
+    def test_frame_return_supersedes_older_break(self):
+        recorder = self.make_recorder()
+
+        recorder.iteration_begin("f1", "for", (), ())
+        recorder.transfer_observed("t_break", "break", "f1")
+        self.assertEqual(recorder.return_observed("t_return", 2), 2)
+        recorder.on_frame_return(7, 20)
+
+        self.assertEqual(self.status_by_action(recorder), {"a1": "superseded", "a2": "committed"})
 
     def test_return_override_commits_only_the_final_return(self):
         recorder = self.make_recorder()
@@ -67,7 +140,7 @@ class ControlFlowRecorderTests(unittest.TestCase):
             for event in self.events(recorder)
             if event["kind"] == "transfer_status"
         ]
-        self.assertEqual(statuses, [("a1", "superseded"), ("a2", "committed")])
+        self.assertEqual(statuses, [("a2", "committed"), ("a1", "superseded")])
 
     def test_exception_finalization_interrupts_pending_return_and_active_loop(self):
         recorder = self.make_recorder()
@@ -136,6 +209,68 @@ class ControlFlowRecorderTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["return_value"], {"type": "none", "value": None})
         self.assertEqual(statuses, ["committed"])
+
+    def test_return_survives_inner_break_in_finally(self):
+        result = run_request(
+            """class Solution:
+    def solve(self):
+        try:
+            return 1
+        finally:
+            for _ in [1]:
+                break
+""",
+            "",
+            {"class_name": "Solution", "method_name": "solve", "parameter_count": 0},
+            LIMITS,
+        )
+        events = [event for batch in result["control_flow_batches"] for event in batch["events"]]
+        actions = {
+            event["action_id"]: event
+            for event in events
+            if event["kind"] == "transfer_observed"
+        }
+        statuses = {
+            event["action_id"]: event["status"]
+            for event in events
+            if event["kind"] == "transfer_status"
+        }
+        return_action = next(action_id for action_id, event in actions.items() if event["transfer_kind"] == "return")
+        break_action = next(action_id for action_id, event in actions.items() if event["transfer_kind"] == "break")
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["return_value"], {"type": "int", "value": "1"})
+        self.assertEqual(statuses[break_action], "committed")
+        self.assertEqual(statuses[return_action], "committed")
+
+    def test_outer_break_in_finally_supersedes_return(self):
+        result = run_request(
+            """class Solution:
+    def solve(self):
+        for _ in [1]:
+            try:
+                return 1
+            finally:
+                break
+        return 2
+""",
+            "",
+            {"class_name": "Solution", "method_name": "solve", "parameter_count": 0},
+            LIMITS,
+        )
+        events = [event for batch in result["control_flow_batches"] for event in batch["events"]]
+        observed = [event for event in events if event["kind"] == "transfer_observed"]
+        statuses = {
+            event["action_id"]: event["status"]
+            for event in events
+            if event["kind"] == "transfer_status"
+        }
+        first_return = next(event for event in observed if event["transfer_kind"] == "return")
+        committed_break = next(event for event in observed if event["transfer_kind"] == "break")
+
+        self.assertEqual(result["return_value"], {"type": "int", "value": "2"})
+        self.assertEqual(statuses[first_return["action_id"]], "superseded")
+        self.assertEqual(statuses[committed_break["action_id"]], "committed")
 
 
 if __name__ == "__main__":

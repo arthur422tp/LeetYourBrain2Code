@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Python tests
+        run: python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
+
       - name: Test
         run: npm test
 

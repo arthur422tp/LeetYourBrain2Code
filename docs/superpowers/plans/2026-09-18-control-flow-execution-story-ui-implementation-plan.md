@@ -902,4 +902,110 @@ git commit -m "test: harden execution story evidence boundaries"
 
 - [ ] **Step 1: Add one realistic nested-loop runtime-to-UI regression**
 
-Use source equivale
+Use source equivalent to:
+
+```python
+class Solution:
+    def classify(self, matrix):
+        for row in matrix:
+            for value in row:
+                if value < 0:
+                    continue
+                if value == 0:
+                    break
+        return 1
+```
+
+Generate or reuse real runtime evidence, construct the Side Panel session, and assert:
+- outer + inner context;
+- activation-local inner history;
+- Decision summary;
+- committed continue/break;
+- iteration outcome;
+- loop exit when captured;
+- committed return;
+- raw-step navigation.
+
+- [ ] **Step 2: Run Python fixtures**
+
+```bash
+python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
+```
+
+Expected: PASS.
+
+- [ ] **Step 3: Run complete Vitest**
+
+```bash
+npm test
+```
+
+Expected: PASS.
+
+- [ ] **Step 4: Run typecheck**
+
+```bash
+npm run typecheck
+```
+
+Expected: exit code 0.
+
+- [ ] **Step 5: Run production builds**
+
+```bash
+npm run build
+```
+
+Expected: Side Panel/worker, content script, and page bridge all build.
+
+- [ ] **Step 6: Verify Definition of Done**
+
+Confirm tests protect:
+
+```text
+Execution Story visible only with evidence/tracing state
+nested activations do not merge
+activation-local ordinals restart at #1
+safe bindings render compactly
+story ordering follows raw anchors
+Decision rows summarize only
+Expression Evidence stays separate
+observed/committed/superseded/interrupted stay distinct
+superseded transfers stay visible
+bare return can show committed None/function exit
+loop exit reasons stay factual
+Decision chain UI is occurrence-scoped
+history navigates by anchor step
+Trace Outline preserves raw navigation and behavioral folding
+Behavioral Timeline has no generic Control-Flow lane
+one factual source badge
+truncation preserves captured evidence
+partial evidence stays neutral
+Failure-First remains unchanged
+keyboard/data semantics exist
+```
+
+- [ ] **Step 7: Commit final test-only adjustment if needed**
+
+Do not create an empty commit.
+
+- [ ] **Step 8: Push and confirm GitHub Actions is green**
+
+Required CI steps:
+
+```text
+Python tests
+Test
+Typecheck
+Build
+```
+
+Do not mark this phase complete until the pushed head SHA is green.
+
+---
+
+## Execution Handoff
+
+Execute Tasks 0 → 8 in order.
+
+Task 0 folds the two post-review prerequisites into this phase without reopening the worker protocol. Task 1 creates the pure activation-scoped projection. Tasks 2–6 add the UI while preserving the current cursor and neighboring debugger surfaces. Task 7 locks epistemic/accessibility boundaries. Task 8 validates the full runtime-to-UI path.

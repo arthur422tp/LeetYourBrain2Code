@@ -459,11 +459,11 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     const decisionEvidence = event
       ? interpretation.decisionEvidence.get(event.step)
       : undefined;
-    const decisionChain = decisionEvidence
-      ? interpretation.decisionChains.find((chain) => chain.branches.some((branch) =>
+    const decisionChain = (decisionEvidence
+      ? interpretation.decisionChains.find((chain) => chain.frameId === event?.frameId && chain.branches.some((branch) =>
         branch.siteId === decisionEvidence.siteId && branch.anchorStep === decisionEvidence.anchorStep
       ))
-      : undefined;
+      : undefined) ?? controlFlowUiModel.decisionChainOccurrence;
     const decisionHistory = decisionEvidence
       ? interpretation.decisionHistory.get(decisionEvidence.siteId) ?? []
       : [];

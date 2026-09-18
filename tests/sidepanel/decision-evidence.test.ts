@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type {
-  DecisionChainEvidence,
+  DecisionChainOccurrence,
   DecisionHistoryEntry,
   DecisionStepEvidence
 } from "../../src/shared/decision-types";
@@ -42,7 +42,8 @@ const evidence: DecisionStepEvidence = {
   structureReferences: []
 };
 
-const chain: DecisionChainEvidence = {
+const chain: DecisionChainOccurrence = {
+  occurrenceId: "chain1:1", frameId: 2, context: { loopStack: [] }, anchorStepStart: 4, anchorStepEnd: 7,
   chainId: "chain1",
   selectedBranchIndex: 1,
   branches: [
@@ -127,3 +128,13 @@ describe("createDecisionEvidence", () => {
     expect(view.textContent).toContain("loop_exited");
   });
 });
+
+ it("renders distinct runtime occurrences without leaking branch selection", () => {
+   const first=createDecisionEvidence({evidence,chain,history:[],tracingState:undefined,onNavigateStep:()=>{}});
+   const later={...chain,occurrenceId:"chain1:2",anchorStepStart:12,anchorStepEnd:14,selectedBranchIndex:0,branches:chain.branches.map((branch,index)=>({...branch,status:index===0 ? "selected" as const : "not_reached" as const}))};
+   const second=createDecisionEvidence({evidence:undefined,chain:later,history:[],tracingState:undefined,onNavigateStep:()=>{}});
+   expect(first.querySelector('[data-chain-occurrence-id="chain1:1"]')).not.toBeNull();
+   expect(second.textContent).toContain("Branch chain · steps 12–14");
+   expect(second.querySelector('[data-branch-status="selected"]')?.getAttribute('data-branch-index')).toBe("0");
+   expect(first.querySelector('[data-branch-status="selected"]')?.getAttribute('data-branch-index')).toBe("1");
+ });

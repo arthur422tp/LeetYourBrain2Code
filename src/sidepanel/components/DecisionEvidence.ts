@@ -1,6 +1,6 @@
 import type {
   ConditionEvidenceNode,
-  DecisionChainEvidence,
+  DecisionChainOccurrence,
   DecisionHistoryEntry,
   DecisionStepEvidence,
   DecisionTracingState
@@ -10,7 +10,7 @@ import { formatValue } from "./value-format";
 export interface DecisionEvidenceOptions {
   evidence: DecisionStepEvidence | undefined;
   tracingState: DecisionTracingState | undefined;
-  chain: DecisionChainEvidence | undefined;
+  chain: DecisionChainOccurrence | undefined;
   history: readonly DecisionHistoryEntry[];
   onNavigateStep(step: number): void;
 }
@@ -91,10 +91,14 @@ function renderTracingStatus(state: DecisionTracingState): HTMLElement {
   return status;
 }
 
-function renderChain(chain: DecisionChainEvidence): HTMLElement {
+function renderChain(chain: DecisionChainOccurrence): HTMLElement {
   const section = createElement("section", "decision-evidence__chain");
   section.dataset.chainId = chain.chainId;
-  section.append(createElement("h3", "decision-evidence__subheading", `Branch chain ${chain.chainId}`));
+  section.dataset.chainOccurrenceId = chain.occurrenceId;
+  section.dataset.frameId = String(chain.frameId);
+  section.dataset.anchorStepStart = String(chain.anchorStepStart);
+  section.dataset.anchorStepEnd = String(chain.anchorStepEnd);
+  section.append(createElement("h3", "decision-evidence__subheading", `Branch chain · steps ${chain.anchorStepStart}–${chain.anchorStepEnd}`));
   const rows = createElement("div", "decision-evidence__branches");
   for (const branch of chain.branches) {
     const row = createElement("div", "decision-evidence__branch");

@@ -145,6 +145,7 @@ describe("decision tracing end to end", () => {
 
     expect(result.terminal.status).toBe("completed");
     const evidence = [...result.interpretation.decisionEvidence.values()][0]!;
+    expect(evidence.context).toEqual(result.batches[0]!.context ?? { loopStack: [] });
     expect(evidence.condition.children[0]?.truth).toBe(false);
     expect(evidence.condition.children[1]?.status).toBe("short_circuited");
     expect(result.terminal.exception).toBeUndefined();

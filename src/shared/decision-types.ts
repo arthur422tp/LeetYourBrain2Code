@@ -150,6 +150,7 @@ export interface ConditionEvidenceNode {
 }
 
 export interface DecisionStepEvidence {
+  context: ExecutionContextRef;
   anchorStep: number;
   frameId: number;
   siteId: string;

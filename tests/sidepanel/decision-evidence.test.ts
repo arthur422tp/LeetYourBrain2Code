@@ -27,6 +27,7 @@ function node(
 }
 
 const evidence: DecisionStepEvidence = {
+  context: { loopStack: [] },
   anchorStep: 4,
   frameId: 2,
   siteId: "d1",

@@ -159,6 +159,7 @@ export function buildDecisionEvidence(
     const condition = buildNode(batch.condition.conditionId, resultByConditionId, evaluationsByOperandId, batch.status);
     if (!condition) continue;
     const stepEvidence: DecisionStepEvidence = {
+      context: batch.context ?? { loopStack: [] },
       anchorStep: batch.anchorStep,
       frameId: batch.frameId,
       siteId: batch.siteId,

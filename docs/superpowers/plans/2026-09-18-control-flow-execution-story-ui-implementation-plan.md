@@ -710,4 +710,196 @@ Commit:
 
 ```bash
 git add \
-  src/sidepanel/components/Tra
+  src/sidepanel/components/TraceVisualizer.ts \
+  tests/sidepanel/trace-visualizer.test.ts \
+  src/sidepanel/styles.css
+git commit -m "feat: show factual control flow source badges"
+```
+
+---
+
+### Task 6: Add Loop Activations to Trace Outline Without Replacing Behavioral Folding
+
+**Files:**
+- Modify: `src/core/execution-story.ts`
+- Modify: `tests/core/execution-story.test.ts`
+- Modify: `src/sidepanel/components/TraceOutline.ts`
+- Modify: `tests/sidepanel/trace-outline.test.ts`
+- Modify: `src/sidepanel/components/TraceVisualizer.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+- Modify: `src/sidepanel/styles.css`
+
+**Interfaces:**
+- Produces `ControlFlowOutlineGroup[]`.
+- Existing `TraceFoldModel` and repeated-transition behavior remain unchanged.
+
+- [ ] **Step 1: Add outline projection types**
+
+Add:
+
+```ts
+export interface ControlFlowOutlineIteration {
+  ordinal: number;
+  rawIteration: number;
+  anchorStepStart: number;
+  anchorStepEnd: number;
+  status: IterationStatus;
+}
+
+export interface ControlFlowOutlineGroup {
+  activationKey: string;
+  frameId: number;
+  loopId: string;
+  loopKind: LoopKind;
+  line: number;
+  iterations: ControlFlowOutlineIteration[];
+}
+```
+
+Implement `buildControlFlowOutlineGroups(plan, controlFlow)` from `iterationsByActivation`.
+
+- [ ] **Step 2: Test repeated inner activations stay separate**
+
+Two outer iterations must produce two separate inner `f2` groups, with local ordinals restarting at 1.
+
+- [ ] **Step 3: Extend `TraceOutlineOptions`**
+
+Add optional Control-Flow groups already converted to raw indexes:
+
+```ts
+controlFlowGroups?: Array<{
+  activationKey: string;
+  title: string;
+  iterations: Array<{
+    ordinal: number;
+    rawIteration: number;
+    startIndex: number;
+    endIndex: number;
+    status: IterationStatus;
+  }>;
+}>;
+```
+
+Render a collapsible `Loop iterations` section above existing fold segments.
+
+- [ ] **Step 4: Preserve behavioral folding unchanged**
+
+Do not alter repeated-transition fold semantics, expansion state, or raw-range navigation.
+
+- [ ] **Step 5: Convert anchor steps to indexes in `TraceVisualizer`**
+
+Use `traceIndex.stepToIndex`. If an anchor cannot resolve, omit that navigable row instead of inventing an index.
+
+- [ ] **Step 6: Add DOM/navigation regressions**
+
+Assert:
+- repeated inner activations are separate;
+- local iteration `#2` navigates correctly;
+- existing motif fold tests still pass.
+
+Run:
+
+```bash
+npx vitest run \
+  tests/core/execution-story.test.ts \
+  tests/sidepanel/trace-outline.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+```
+
+- [ ] **Step 7: Commit Task 6**
+
+```bash
+git add \
+  src/core/execution-story.ts \
+  tests/core/execution-story.test.ts \
+  src/sidepanel/components/TraceOutline.ts \
+  tests/sidepanel/trace-outline.test.ts \
+  src/sidepanel/components/TraceVisualizer.ts \
+  tests/sidepanel/trace-visualizer.test.ts \
+  src/sidepanel/styles.css
+git commit -m "feat: group trace outline by loop activation"
+```
+
+---
+
+### Task 7: Harden Partial Evidence, Accessibility, and Product Boundaries
+
+**Files:**
+- Modify: `src/sidepanel/components/ExecutionStory.ts`
+- Modify: `tests/sidepanel/execution-story.test.ts`
+- Modify: `tests/sidepanel/behavioral-timeline.test.ts`
+- Modify: `tests/sidepanel/failure-first-entry.test.ts`
+- Modify: `tests/sidepanel/trace-visualizer.test.ts`
+
+**Interfaces:**
+- No new runtime interfaces.
+- Locks neutral copy and unchanged neighboring features.
+
+- [ ] **Step 1: Test neutral partial states**
+
+Cover:
+- `No control-flow evidence for this step.`
+- `Control-flow evidence incomplete.`
+- `Transfer observed; confirmation unavailable.`
+- `Iteration outcome unavailable.`
+- `Loop exit evidence unavailable.`
+
+Never turn absence into a negative factual claim.
+
+- [ ] **Step 2: Test truncation preserves captured evidence**
+
+A truncation banner must coexist with already captured story/history.
+
+- [ ] **Step 3: Lock accessibility semantics**
+
+Every navigable row must be keyboard-accessible and have a distinct `aria-label`, e.g. `Inspect break committed · step 14`.
+
+- [ ] **Step 4: Verify Behavioral Timeline stays Control-Flow-free**
+
+Add regression assertions only; do not change `BehavioralTimeline.ts`.
+
+- [ ] **Step 5: Verify Failure-First stays unchanged**
+
+Use a timeout session containing both Control-Flow evidence and an existing behavioral pattern. Failure-First must still navigate to the current behavioral selection.
+
+Do not change `failure-first-selection.ts`.
+
+- [ ] **Step 6: Verify Decision and Expression panels stay independently usable**
+
+Their existing controls must continue to navigate the same raw cursor.
+
+- [ ] **Step 7: Run and commit**
+
+```bash
+npx vitest run \
+  tests/sidepanel/execution-story.test.ts \
+  tests/sidepanel/behavioral-timeline.test.ts \
+  tests/sidepanel/failure-first-entry.test.ts \
+  tests/sidepanel/decision-evidence.test.ts \
+  tests/sidepanel/expression-evidence.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+```
+
+Commit:
+
+```bash
+git add \
+  src/sidepanel/components/ExecutionStory.ts \
+  tests/sidepanel/execution-story.test.ts \
+  tests/sidepanel/behavioral-timeline.test.ts \
+  tests/sidepanel/failure-first-entry.test.ts \
+  tests/sidepanel/trace-visualizer.test.ts
+git commit -m "test: harden execution story evidence boundaries"
+```
+
+---
+
+### Task 8: Full End-to-End Validation and CI Gate
+
+**Files:**
+- Modify tests only if a real uncovered regression is discovered.
+- No unrelated refactors.
+
+- [ ] **Step 1: Add one realistic nested-loop runtime-to-UI regression**
+
+Use source equivale

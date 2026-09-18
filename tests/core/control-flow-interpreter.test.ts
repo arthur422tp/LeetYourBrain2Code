@@ -93,7 +93,7 @@ describe("control-flow-interpreter", () => {
         }
       ])],
       reconstructStates([rawEvent(3), rawEvent(4), rawEvent(5), rawEvent(6)]),
-      { status: "exception", terminationReason: "exception" }
+      { status: "exception", terminationReason: "runtime_exception" }
     );
 
     expect(result.iterations).toEqual([
@@ -214,7 +214,7 @@ describe("control-flow-interpreter", () => {
         }
       ])],
       reconstructStates([rawEvent(2), rawEvent(3)]),
-      { status: "exception", terminationReason: "exception" }
+      { status: "exception", terminationReason: "runtime_exception" }
     );
 
     expect(result.loopExits.map((exit) => exit.loopId)).toEqual(["w2", "f1"]);

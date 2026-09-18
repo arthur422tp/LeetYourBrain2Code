@@ -150,3 +150,14 @@ describe("TraceOutline", () => {
     expect(handle.element.querySelector("button")).toBeNull();
   });
 });
+
+it("navigates loop iterations without changing behavioral fold state",()=>{
+  const visited:number[]=[];
+  const handle=createTraceOutline({model,currentIndex:0,onNavigate:index=>visited.push(index),controlFlowGroups:[{activationKey:"1:f1#2>f2",title:"FOR · line 3",iterations:[{ordinal:1,rawIteration:3,startIndex:2,endIndex:3,status:"completed"},{ordinal:2,rawIteration:4,startIndex:4,endIndex:5,status:"continued"}]}]});
+  expect(handle.element.textContent).toContain("Loop iterations");
+  const toggle=handle.element.querySelector<HTMLButtonElement>('[data-outline-action="toggle"]')!; toggle.click();
+  const iteration=handle.element.querySelector<HTMLButtonElement>('[data-raw-iteration="4"]')!;
+  expect(iteration.textContent).toContain("#2"); iteration.click(); expect(visited).toEqual([4]);
+  handle.setCurrentIndex(4); expect(iteration.getAttribute('aria-current')).toBe('step');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+});

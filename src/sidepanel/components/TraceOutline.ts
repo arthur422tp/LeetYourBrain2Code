@@ -1,3 +1,4 @@
+import type { IterationStatus } from "../../shared/control-flow-types";
 import type {
   RepeatedTransitionFoldSegment,
   RepeatedTransitionIteration,
@@ -6,6 +7,10 @@ import type {
 } from "../trace-folding";
 
 export interface TraceOutlineOptions {
+  controlFlowGroups?: Array<{
+    activationKey: string; title: string;
+    iterations: Array<{ordinal: number; rawIteration: number; startIndex: number; endIndex: number; status: IterationStatus}>;
+  }>;
   model: TraceFoldModel;
   currentIndex: number;
   onNavigate(index: number): void;
@@ -38,6 +43,24 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
   const header = createElement("div", "trace-viewer__outline-header", "Trace Outline");
   const segmentHost = createElement("div", "trace-viewer__outline-segments");
   root.append(header, segmentHost);
+  const loopRows: Array<{startIndex: number; endIndex: number; button: HTMLButtonElement}> = [];
+  if (options.controlFlowGroups?.length) {
+    const section=createElement("details","trace-viewer__outline-loops");
+    section.append(createElement("summary",undefined,"Loop iterations"));
+    for (const group of options.controlFlowGroups) {
+      const host=createElement("details","trace-viewer__outline-loop"); host.dataset.activationKey=group.activationKey;
+      host.append(createElement("summary",undefined,group.title));
+      for (const iteration of group.iterations) {
+        const button=createElement("button","trace-viewer__outline-loop-iteration",`Iteration #${iteration.ordinal} · ${iteration.status} · ${displayRange(iteration.startIndex,iteration.endIndex)}`);
+        button.type="button"; button.dataset.rawIteration=String(iteration.rawIteration); button.dataset.iterationStatus=iteration.status;
+        button.setAttribute("aria-label",`Inspect ${group.title} · iteration #${iteration.ordinal} · ${displayRange(iteration.startIndex,iteration.endIndex)}`);
+        button.addEventListener("click",()=>options.onNavigate(iteration.startIndex)); host.append(button);
+        loopRows.push({...iteration,button});
+      }
+      section.append(host);
+    }
+    root.insertBefore(section,segmentHost);
+  }
   const expandedPatternIds = new Set<string>();
   const segmentRows: Array<{ segment: TracePresentationSegment; row: HTMLDivElement }> = [];
   const iterationRows = new Map<string, Array<{
@@ -54,6 +77,10 @@ export function createTraceOutline(options: TraceOutlineOptions): TraceOutlineHa
 
   const syncCurrentClasses = (index: number): void => {
     currentIndex = index;
+    for (const {startIndex,endIndex,button} of loopRows) {
+      if (startIndex <= index && index <= endIndex) button.setAttribute("aria-current","step");
+      else button.removeAttribute("aria-current");
+    }
     for (const { segment, row } of segmentRows) {
       const active = segment.startIndex <= index && index <= segment.endIndex;
       row.classList.toggle("is-active", active);

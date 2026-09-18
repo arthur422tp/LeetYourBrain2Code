@@ -47,3 +47,12 @@ describe("execution story projection", () => {
     expect(items.at(-1)).toMatchObject({kind:"frame_exit",anchorStep:30,actionId:"r2"});
   });
 });
+
+it("keeps outline groups separate by parent with fresh local ordinals", async()=>{
+  const {buildControlFlowOutlineGroups}=await import('../../src/core/execution-story');
+  const input=storyInput(); const earlier={...input.controlFlow.iterations[0]!,iteration:1,anchorStepStart:1,anchorStepEnd:2};
+  input.controlFlow.iterationsByActivation.set('1:f1#1>f2',[earlier]);
+  const groups=buildControlFlowOutlineGroups(input.plan,input.controlFlow);
+  expect(groups.map(group=>group.activationKey)).toEqual(['1:f1#1>f2','1:f1#2>f2']);
+  expect(groups.map(group=>group.iterations.map(item=>[item.ordinal,item.rawIteration]))).toEqual([[[1,1]],[[1,3],[2,4]]]);
+});

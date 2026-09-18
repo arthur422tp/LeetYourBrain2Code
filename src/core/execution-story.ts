@@ -138,3 +138,29 @@ export function buildControlFlowUiModel(input: BuildControlFlowUiModelInput): Co
   storyItems.sort((a,b) => a.anchorStep-b.anchorStep || itemRank(a)-itemRank(b));
   return {currentContext,currentActivation:activation,currentIteration,currentActions:actions,currentLoopExit,iterationHistory:history,decisionChainOccurrence,storyItems,tracingState:input.tracingState};
 }
+
+export interface ControlFlowOutlineIteration {
+  ordinal: number;
+  rawIteration: number;
+  anchorStepStart: number;
+  anchorStepEnd: number;
+  status: IterationStatus;
+}
+export interface ControlFlowOutlineGroup {
+  activationKey: string;
+  frameId: number;
+  loopId: string;
+  loopKind: LoopKind;
+  line: number;
+  iterations: ControlFlowOutlineIteration[];
+}
+export function buildControlFlowOutlineGroups(plan: ControlFlowPlan | undefined, controlFlow: ControlFlowInterpretation): ControlFlowOutlineGroup[] {
+  const groups: ControlFlowOutlineGroup[]=[];
+  for (const [activationKey,history] of controlFlow.iterationsByActivation) {
+    const first=history[0]; if (!first) continue;
+    const loop=plan?.loops.find(loop=>loop.loopId===first.loopId); if (!loop) continue;
+    groups.push({activationKey,frameId:first.frameId,loopId:first.loopId,loopKind:loop.kind,line:loop.span.line,
+      iterations:history.map((iteration,index)=>({ordinal:index+1,rawIteration:iteration.iteration,anchorStepStart:iteration.anchorStepStart,anchorStepEnd:iteration.anchorStepEnd,status:iteration.status}))});
+  }
+  return groups.sort((a,b)=>a.iterations[0]!.anchorStepStart-b.iterations[0]!.anchorStepStart);
+}

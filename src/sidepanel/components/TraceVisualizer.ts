@@ -1,4 +1,4 @@
-import { buildControlFlowUiModel } from "../../core/execution-story";
+import { buildControlFlowOutlineGroups, buildControlFlowUiModel } from "../../core/execution-story";
 import { createExecutionStory } from "./ExecutionStory";
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
@@ -538,6 +538,15 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     : null;
 
   outlineHandle = createTraceOutline({
+    controlFlowGroups: buildControlFlowOutlineGroups(session.controlFlowPlan, interpretation.controlFlow).map(group => ({
+      activationKey: group.activationKey,
+      title: `${group.loopKind.toUpperCase()} · line ${group.line} · frame ${group.frameId}`,
+      iterations: group.iterations.flatMap(iteration => {
+        const startIndex = traceIndex.stepToIndex.get(iteration.anchorStepStart);
+        const endIndex = traceIndex.stepToIndex.get(iteration.anchorStepEnd);
+        return startIndex === undefined || endIndex === undefined ? [] : [{...iteration, startIndex, endIndex}];
+      })
+    })).filter(group => group.iterations.length > 0),
     model: traceFoldModel,
     currentIndex,
     onNavigate: navigateDirect

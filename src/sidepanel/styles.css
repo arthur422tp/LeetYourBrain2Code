@@ -2565,3 +2565,7 @@ button.is-primary:hover:not(:disabled) {
 .execution-story__history { display: grid; gap: 6px; }
 .execution-story button[aria-current="step"] { font-weight: 700; border-color: currentColor; }
 .execution-story button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.trace-viewer__outline-loops, .trace-viewer__outline-loop { margin: 8px 0; }
+.trace-viewer__outline-loop { padding-left: 12px; }
+.trace-viewer__outline-loop-iteration { display: block; margin: 6px 0; text-align: left; }
+.trace-viewer__outline-loop-iteration[aria-current="step"] { font-weight: 700; border-color: currentColor; }

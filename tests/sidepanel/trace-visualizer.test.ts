@@ -1647,3 +1647,11 @@ it("shows one factual badge with exact-anchor transfer priority",()=>{
   expect(handle.element.querySelectorAll('[data-code-evidence-badge="true"]')).toHaveLength(1);
   handle.setStep(3); expect((badge() as HTMLElement).hidden).toBe(true); handle.dispose();
 });
+
+it("resolves outline anchors through raw indexes and omits unknown destinations",()=>{
+  const fixture=controlFlowSession();
+  fixture.controlFlowBatches![0]!.events.push({eventId:5,anchorStep:900,frameId:1,context:{loopStack:[{loopId:"f1",iteration:2}]},kind:"iteration_begin",loopId:"f1",loopKind:"for",iteration:2,bindings:[]});
+  const handle=createTraceVisualizer(fixture); handle.setStep(2);
+  const rows=handle.element.querySelectorAll<HTMLButtonElement>('.trace-viewer__outline-loop-iteration');
+  expect(rows).toHaveLength(1); rows[0]!.click(); expect(handle.element.dataset.stepIndex).toBe('0'); handle.dispose();
+});

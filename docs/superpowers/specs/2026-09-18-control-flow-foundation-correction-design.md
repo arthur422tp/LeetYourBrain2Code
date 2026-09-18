@@ -155,6 +155,38 @@ interrupt_frame(...)
 
 A generic "commit current pending transfer" helper is insufficient because different boundaries prove different control-flow outcomes.
 
+Compatibility is deterministic:
+
+```text
+loop_after(fN)
+-> only unresolved break actions with targetLoopId == fN can win
+
+next iteration_begin(fN)
+-> only unresolved continue actions with targetLoopId == fN can win
+
+natural loop exit for fN
+-> may confirm an unresolved continue targeting fN
+-> cannot commit a break targeting fN
+
+normal frame RETURN_*
+-> only unresolved return actions in that frame can win
+
+exception / trace termination
+-> no action wins; unresolved actions are interrupted
+```
+
+When several unresolved actions are compatible with the same boundary, the latest observed compatible action wins.
+
+After a winner is established, an older unresolved action is superseded only when at least one of these is true:
+
+```text
+1. it targets the same loop boundary but represents an incompatible transfer kind; or
+2. the committed loop transfer exits/continues a loop that was already present in the older action's observedContext; or
+3. a normal frame return proves a non-return unresolved action did not take effect.
+```
+
+A transfer targeting a loop created only after an older action was observed does not supersede that older action merely because it resolves first.
+
 ---
 
 # 7. Break Resolution
@@ -481,7 +513,9 @@ with:
 const activeLoops = new Map<FrameLoopKey, ActiveLoopRuntime>();
 ```
 
-Loop activity events create or refresh active loop state.
+Only runtime evidence that proves a loop occurrence is currently active may create or refresh active-loop state. In v0.1 this is primarily `iteration_begin`; an already observed `loop_exit` closes/removes state rather than opening it.
+
+The interpreter must not synthesize an active loop merely because a static `ControlFlowPlan` contains that loop. Therefore a timeout while evaluating a loop iterable/condition before any control-flow runtime event remains outside the evidence model rather than producing a guessed loop exit.
 
 An authoritative `loop_exit` removes the loop from `activeLoops`.
 

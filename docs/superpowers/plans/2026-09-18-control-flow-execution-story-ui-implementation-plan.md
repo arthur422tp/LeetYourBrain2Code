@@ -107,3 +107,194 @@ Expected: PASS.
 - [ ] **Step 3: Add failing activation-scope tests**
 
 Create `tests/core/control-flow-scope.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import {
+  controlFlowActivationKey,
+  iterationActivationKey
+} from "../../src/core/control-flow-scope";
+
+describe("control-flow activation scope", () => {
+  it("keeps one top-level activation across iterations", () => {
+    expect(controlFlowActivationKey(3, "f1", {
+      loopStack: [{ loopId: "f1", iteration: 1 }]
+    })).toBe("3:root>f1");
+    expect(controlFlowActivationKey(3, "f1", {
+      loopStack: [{ loopId: "f1", iteration: 2 }]
+    })).toBe("3:root>f1");
+  });
+
+  it("separates repeated inner-loop activations by parent occurrence", () => {
+    expect(controlFlowActivationKey(3, "f2", {
+      loopStack: [
+        { loopId: "f1", iteration: 1 },
+        { loopId: "f2", iteration: 1 }
+      ]
+    })).toBe("3:f1#1>f2");
+    expect(controlFlowActivationKey(3, "f2", {
+      loopStack: [
+        { loopId: "f1", iteration: 2 },
+        { loopId: "f2", iteration: 3 }
+      ]
+    })).toBe("3:f1#2>f2");
+  });
+});
+```
+
+Run:
+
+```bash
+npx vitest run tests/core/control-flow-scope.test.ts
+```
+
+Expected: FAIL because the module does not exist.
+
+- [ ] **Step 4: Implement activation-key helpers**
+
+Create `src/core/control-flow-scope.ts`:
+
+```ts
+import type {
+  ExecutionContextRef,
+  LoopIterationEvidence
+} from "../shared/control-flow-types";
+
+export function controlFlowActivationKey(
+  frameId: number,
+  loopId: string,
+  context: ExecutionContextRef
+): string {
+  let ownIndex = -1;
+  for (let index = context.loopStack.length - 1; index >= 0; index -= 1) {
+    if (context.loopStack[index]!.loopId === loopId) {
+      ownIndex = index;
+      break;
+    }
+  }
+  const parentStack = ownIndex >= 0
+    ? context.loopStack.slice(0, ownIndex)
+    : context.loopStack;
+  const parent = parentStack.length === 0
+    ? "root"
+    : parentStack.map((item) => `${item.loopId}#${item.iteration}`).join("/");
+  return `${frameId}:${parent}>${loopId}`;
+}
+
+export function iterationActivationKey(
+  iteration: LoopIterationEvidence
+): string {
+  return controlFlowActivationKey(
+    iteration.frameId,
+    iteration.loopId,
+    iteration.context
+  );
+}
+```
+
+- [ ] **Step 5: Extend `ControlFlowInterpretation` with activation-scoped history**
+
+Add:
+
+```ts
+iterationsByActivation: Map<string, LoopIterationEvidence[]>;
+```
+
+Build the map from final `iterations` using `iterationActivationKey()` and sort each history by `anchorStepStart`.
+
+Add a regression where the same static inner `f2` runs under outer `f1#1` and `f1#2`; assert keys `1:f1#1>f2` and `1:f1#2>f2` hold separate histories.
+
+Run:
+
+```bash
+npx vitest run \
+  tests/core/control-flow-scope.test.ts \
+  tests/core/control-flow-interpreter.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit Task 0**
+
+```bash
+git add \
+  src/worker/python/control_flow_instrumenter.py \
+  tests/fixtures/python/test_control_flow_instrumenter.py \
+  src/core/control-flow-scope.ts \
+  tests/core/control-flow-scope.test.ts \
+  src/core/control-flow-interpreter.ts \
+  tests/core/control-flow-interpreter.test.ts
+git commit -m "fix: prepare control flow evidence for execution story UI"
+```
+
+---
+
+### Task 1: Build the Pure Execution Story Projection Model
+
+**Files:**
+- Create: `src/core/execution-story.ts`
+- Create: `tests/core/execution-story.test.ts`
+- Modify: `src/shared/decision-types.ts`
+- Modify: `src/core/decision-interpreter.ts`
+- Modify: `tests/core/decision-e2e.test.ts`
+
+**Interfaces:**
+- Adds `context: ExecutionContextRef` to interpreted `DecisionStepEvidence`; it comes from existing `DecisionBatch.context`, so no worker protocol change.
+- Produces `ExecutionStoryItem`, `LoopActivationView`, `ControlFlowUiModel`.
+- Produces `buildControlFlowUiModel(input): ControlFlowUiModel`.
+
+- [ ] **Step 1: Carry runtime context into interpreted Decision evidence**
+
+Extend `DecisionStepEvidence`:
+
+```ts
+context: ExecutionContextRef;
+```
+
+In `buildDecisionEvidence()` set:
+
+```ts
+context: batch.context ?? { loopStack: [] },
+```
+
+Update direct test fixtures constructing `DecisionStepEvidence`.
+
+- [ ] **Step 2: Add failing projection tests**
+
+Create `tests/core/execution-story.test.ts`.
+
+Use an inner loop whose raw worker iterations are `3` and `4` under one activation. Assert:
+
+```ts
+expect(model.currentActivation?.activationKey).toBe("1:f1#2>f2");
+expect(model.iterationHistory.map((item) => item.ordinal)).toEqual([1, 2]);
+expect(model.iterationHistory.map((item) => item.iteration.iteration)).toEqual([3, 4]);
+expect(model.currentIteration?.ordinal).toBe(2);
+```
+
+For an iteration containing a false decision then committed break, assert story items preserve factual order and include separate `transfer observed` and `transfer committed` rows.
+
+- [ ] **Step 3: Define presentation types**
+
+In `src/core/execution-story.ts` define:
+
+```ts
+export interface LoopActivationIterationView {
+  ordinal: number;
+  iteration: LoopIterationEvidence;
+}
+
+export interface LoopActivationView {
+  activationKey: string;
+  frameId: number;
+  loopId: string;
+  loopKind: LoopKind;
+  line: number;
+  parentContext: ExecutionContextRef;
+  iterations: LoopActivationIterationView[];
+}
+
+export type ExecutionStoryItem =
+  | { kind: "iteration_start"; anchorStep: number; ordinal: number; loopId: string; bindings: ControlFlowBindingSnapshot[] }
+  | { kind: "decision"; anchorStep: number; siteId: string; source: string; status: "true" | "false" | "partial"; shortCircuited: boolean }
+  | { kind: "transfer"; anchorStep: number; actionId: string; transferId: string; transferKind: TransferKind; pha

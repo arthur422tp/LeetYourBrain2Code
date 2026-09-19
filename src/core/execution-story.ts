@@ -8,6 +8,13 @@ export interface LoopActivationIterationView {
   iteration: LoopIterationEvidence;
 }
 
+export interface LoopActivationParentView {
+  loopId: string;
+  loopKind: LoopKind;
+  line: number;
+  iteration: number;
+}
+
 export interface LoopActivationView {
   activationKey: string;
   frameId: number;
@@ -15,6 +22,7 @@ export interface LoopActivationView {
   loopKind: LoopKind;
   line: number;
   parentContext: ExecutionContextRef;
+  parentLoops: LoopActivationParentView[];
   iterations: LoopActivationIterationView[];
 }
 
@@ -57,9 +65,22 @@ function activationView(input: BuildControlFlowUiModelInput, key: string, loopId
   const descriptor = input.plan?.loops.find(loop => loop.loopId === loopId);
   if (!descriptor) return undefined;
   const own = context.loopStack.findIndex(loop => loop.loopId === loopId);
+  const parentContext = { loopStack: own < 0 ? context.loopStack : context.loopStack.slice(0, own) };
+  const parentLoops = parentContext.loopStack.flatMap((parent) => {
+    const parentDescriptor = input.plan?.loops.find(loop => loop.loopId === parent.loopId);
+    return parentDescriptor
+      ? [{
+          loopId: parent.loopId,
+          loopKind: parentDescriptor.kind,
+          line: parentDescriptor.span.line,
+          iteration: parent.iteration
+        }]
+      : [];
+  });
   return {
     activationKey: key, frameId: input.frameId, loopId, loopKind: descriptor.kind, line: descriptor.span.line,
-    parentContext: { loopStack: own < 0 ? context.loopStack : context.loopStack.slice(0, own) },
+    parentContext,
+    parentLoops,
     iterations: (input.controlFlow.iterationsByActivation.get(key) ?? []).map((iteration, index) => ({ ordinal: index + 1, iteration }))
   };
 }

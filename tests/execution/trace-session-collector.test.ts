@@ -176,10 +176,12 @@ class FakeWorker implements WorkerLike {
   private errorListeners: Array<(event: ErrorEvent) => void> = [];
   private readonly finish: boolean;
   private readonly frameEvidence: boolean;
+  private readonly partialFrameEvidence: boolean;
 
-  constructor(finish: boolean, frameEvidence = false) {
+  constructor(finish: boolean, frameEvidence = false, partialFrameEvidence = false) {
     this.finish = finish;
     this.frameEvidence = frameEvidence;
+    this.partialFrameEvidence = partialFrameEvidence;
   }
 
   addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
@@ -224,7 +226,14 @@ class FakeWorker implements WorkerLike {
         this.emit({ type: "trace_batch", sessionId: request.sessionId, events: Array.from({ length: 50 }, (_, index) => event(index + 51)) });
         if (this.frameEvidence) {
           this.emit({ type: "function_plan", sessionId: request.sessionId, plan: functionPlan });
-          this.emit({ type: "call_frame_batch", sessionId: request.sessionId, batches: [callFrameBatch] });
+          this.emit({
+            type: "call_frame_batch",
+            sessionId: request.sessionId,
+            batches: [this.partialFrameEvidence ? {
+              batchId: callFrameBatch.batchId,
+              updates: [callFrameBatch.updates[0]!]
+            } : callFrameBatch]
+          });
         }
         if (this.finish) {
           this.emit({
@@ -539,6 +548,33 @@ describe("TraceSessionCollector", () => {
     expect(session.events.at(-1)?.step).toBe(100);
     expect(session.status).toBe("timeout");
     expect(session.terminationReason).toBe("hard_timeout");
+  });
+
+  it("keeps a streamed call-frame prefix when the controller hard-times out", async () => {
+    const controller = new ExecutionController({
+      workerFactory: () => new FakeWorker(false, true, true)
+    });
+
+    const session = await controller.execute(request);
+    const model = interpretCallFrames({
+      events: session.events,
+      functionPlan: session.functionPlan,
+      batches: session.callFrameBatches,
+      tracingState: session.callFrameTracing,
+      terminationReason: session.terminationReason
+    });
+
+    expect(session.status).toBe("timeout");
+    expect(session.terminationReason).toBe("hard_timeout");
+    expect(session.functionPlan).toEqual(functionPlan);
+    expect(session.callFrameBatches).toEqual([{
+      batchId: callFrameBatch.batchId,
+      updates: [callFrameBatch.updates[0]]
+    }]);
+    expect(model.byFrameId.get(1)?.exit).toEqual({
+      status: "trace_ended",
+      reason: "hard_timeout"
+    });
   });
 
   it("routes streamed function plans and call-frame batches through the controller", async () => {

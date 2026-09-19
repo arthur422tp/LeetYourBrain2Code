@@ -371,7 +371,8 @@ it("renders a real nested-loop execution through the Side Panel raw cursor",asyn
   const observedIndex=result.events.findIndex(event=>event.step===breakAction.anchorStepObserved);
   handle.setStep(observedIndex);
   const story=()=>handle.element.querySelector('.execution-story')!;
-  expect(story().textContent).toContain('f1 · iteration #2');
+  expect(story().textContent).toContain('FOR · line 3 · iteration #2');
+  expect(story().textContent).not.toContain('f1 · iteration #2');
   expect(story().textContent).toContain('Iteration #3');
   expect([...story().querySelectorAll('[data-raw-iteration]')].map(row=>row.getAttribute('data-raw-iteration'))).toEqual(['3','4','5']);
   expect(story().textContent).toContain('value == 0 → True');

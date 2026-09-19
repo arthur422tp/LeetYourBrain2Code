@@ -1348,6 +1348,12 @@ Implemented:
 - independent bounded call-frame streaming, session transport, and backward-compatible optional fields;
 - representative Pyodide end-to-end validation, including hard-timeout and independent truncation prefixes.
 
+Correction status (2026-09-20):
+
+- exception candidates now survive `finally` line events until normal return, a newer exception, or non-normal unwind determines the factual exit;
+- frame-scoped mutation indexing uses `RuntimeMutationBatch.frameId`, including object-attribute and object-visibility mutations;
+- the controller path now has a streamed call-frame-prefix hard-timeout regression test.
+
 Deferred:
 
 - call-tree UI;

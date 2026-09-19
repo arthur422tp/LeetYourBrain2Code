@@ -1,0 +1,108 @@
+import type { CallFrameModel } from "../shared/call-frame-types";
+import type { DecisionEvidenceByStep } from "../shared/decision-types";
+import type { ExpressionEvidenceByStep } from "../shared/expression-types";
+import type { TraceEvent } from "../shared/trace-types";
+import type { ControlFlowInterpretation } from "./control-flow-interpreter";
+import type { RuntimeMutation } from "./runtime-mutation";
+
+export interface FrameEvidenceEntry {
+  frameId: number;
+  childFrameIds: number[];
+  decisionAnchors: number[];
+  controlFlowIterationRefs: Array<{
+    loopId: string;
+    iteration: number;
+    anchorStepStart: number;
+  }>;
+  expressionAnchors: number[];
+  mutationAnchors: number[];
+}
+
+export type FrameEvidenceIndex = Map<number, FrameEvidenceEntry>;
+
+export interface FrameEvidenceIndexInput {
+  callFrames: CallFrameModel;
+  events: TraceEvent[];
+  decisionEvidence: DecisionEvidenceByStep;
+  controlFlow: ControlFlowInterpretation;
+  expressionEvidence: ExpressionEvidenceByStep;
+  visualStates: Array<{ step: number; mutations?: RuntimeMutation[] }>;
+}
+
+function appendUnique(values: number[], value: number): void {
+  if (!values.includes(value)) values.push(value);
+}
+
+function createEntry(frameId: number, childFrameIds: number[]): FrameEvidenceEntry {
+  return {
+    frameId,
+    childFrameIds: [...childFrameIds],
+    decisionAnchors: [],
+    controlFlowIterationRefs: [],
+    expressionAnchors: [],
+    mutationAnchors: []
+  };
+}
+
+function mutationFrameId(mutation: RuntimeMutation): number | undefined {
+  if ("frameId" in mutation && typeof mutation.frameId === "number") {
+    return mutation.frameId;
+  }
+  if (mutation.kind === "reference" && mutation.owner.scope === "local") {
+    return mutation.owner.frameId;
+  }
+  return undefined;
+}
+
+export function buildFrameEvidenceIndex(input: FrameEvidenceIndexInput): FrameEvidenceIndex {
+  const index: FrameEvidenceIndex = new Map();
+  for (const [frameId, frame] of input.callFrames.byFrameId) {
+    index.set(frameId, createEntry(frameId, frame.childFrameIds));
+  }
+
+  for (const evidence of input.decisionEvidence.values()) {
+    const entry = index.get(evidence.frameId);
+    if (entry) appendUnique(entry.decisionAnchors, evidence.anchorStep);
+  }
+
+  for (const iteration of input.controlFlow.iterations) {
+    const entry = index.get(iteration.frameId);
+    if (!entry) continue;
+    const alreadyIndexed = entry.controlFlowIterationRefs.some(
+      (reference) => reference.loopId === iteration.loopId &&
+        reference.iteration === iteration.iteration &&
+        reference.anchorStepStart === iteration.anchorStepStart
+    );
+    if (!alreadyIndexed) {
+      entry.controlFlowIterationRefs.push({
+        loopId: iteration.loopId,
+        iteration: iteration.iteration,
+        anchorStepStart: iteration.anchorStepStart
+      });
+    }
+  }
+
+  for (const evidence of input.expressionEvidence.values()) {
+    const entry = index.get(evidence.frameId);
+    if (entry) appendUnique(entry.expressionAnchors, evidence.anchorStep);
+  }
+
+  for (const visualState of input.visualStates) {
+    const frameIds = new Set<number>();
+    for (const mutation of visualState.mutations ?? []) {
+      const frameId = mutationFrameId(mutation);
+      if (frameId !== undefined) frameIds.add(frameId);
+    }
+    for (const frameId of frameIds) {
+      const entry = index.get(frameId);
+      if (entry) appendUnique(entry.mutationAnchors, visualState.step);
+    }
+  }
+
+  // The raw trace remains the authoritative source for frame identity. The
+  // index is intentionally keyed only by already-interpreted call frames;
+  // raw events are accepted here to keep that boundary explicit without
+  // synthesizing entries for frames absent from CallFrameModel.
+  void input.events;
+  return index;
+}

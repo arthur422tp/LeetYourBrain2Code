@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SubscriptRelation } from "../../src/core/ast-relations";
 import type { MatrixSubscriptRelation, TraceEvent, ValueSnapshot } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
+import type { CallFrameBatch } from "../../src/shared/call-frame-types";
 import { interpretTrace } from "../../src/core/trace-interpreter";
 
 const int = (value: number): ValueSnapshot => ({ type: "int", value: String(value) });
@@ -86,6 +87,43 @@ describe("interpretTrace", () => {
     const result = interpretTrace([event(1, "solve", { value: int(1) })], []);
 
     expect(result.expressionEvidence).toEqual(new Map());
+  });
+
+  it("adds call-frame interpretation and frame-scoped evidence index additively", () => {
+    const callFrameBatches: CallFrameBatch[] = [{
+      batchId: 1,
+      updates: [{
+        updateId: 1,
+        kind: "frame_enter",
+        frameId: 4,
+        parentFrameId: null,
+        functionName: "solve",
+        functionId: "solve",
+        callStep: 1,
+        depth: 1,
+        arguments: []
+      }]
+    }];
+    const result = interpretTrace(
+      [event(1, "solve", { value: int(1) }, { frameId: 4, event: "line" })],
+      [],
+      undefined,
+      [],
+      undefined,
+      [],
+      undefined,
+      [],
+      { status: "completed", terminationReason: "normal_return" },
+      undefined,
+      callFrameBatches,
+      { status: "complete" }
+    );
+
+    expect(result.callFrames.byFrameId.get(4)?.functionName).toBe("solve");
+    expect(result.frameEvidenceIndex.get(4)).toMatchObject({
+      frameId: 4,
+      mutationAnchors: [1]
+    });
   });
 
   it("attaches expression evidence when optional expression inputs are supplied", () => {

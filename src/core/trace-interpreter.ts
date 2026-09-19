@@ -31,11 +31,22 @@ import type {
   DecisionChainOccurrence
 } from "../shared/decision-types";
 import type { ControlFlowBatch, ControlFlowPlan } from "../shared/control-flow-types";
+import type {
+  CallFrameBatch,
+  CallFrameModel,
+  CallFrameTracingState,
+  FunctionPlan
+} from "../shared/call-frame-types";
 import {
   buildControlFlowEvidence,
   type ControlFlowInterpretation,
   type TraceTerminationContext
 } from "./control-flow-interpreter";
+import { interpretCallFrames } from "./call-frame-interpreter";
+import {
+  buildFrameEvidenceIndex,
+  type FrameEvidenceIndex
+} from "./frame-evidence-index";
 
 export interface TraceInterpretation {
   runtimeStates: RuntimeState[];
@@ -48,6 +59,8 @@ export interface TraceInterpretation {
   decisionHistory: DecisionHistoryBySite;
   decisionChains: DecisionChainOccurrence[];
   controlFlow: ControlFlowInterpretation;
+  callFrames: CallFrameModel;
+  frameEvidenceIndex: FrameEvidenceIndex;
   visualStates: VisualState[];
 }
 
@@ -71,7 +84,10 @@ export function interpretTrace(
   decisionBatches: DecisionBatch[] = [],
   controlFlowPlan?: ControlFlowPlan,
   controlFlowBatches: ControlFlowBatch[] = [],
-  termination?: TraceTerminationContext
+  termination?: TraceTerminationContext,
+  functionPlan?: FunctionPlan,
+  callFrameBatches: CallFrameBatch[] = [],
+  callFrameTracing?: CallFrameTracingState
 ): TraceInterpretation {
   const runtimeStates = reconstructStates(events);
   const expressionEvidence = buildExpressionEvidence(
@@ -90,6 +106,13 @@ export function interpretTrace(
     runtimeStates,
     termination
   );
+  const callFrames = interpretCallFrames({
+    events,
+    functionPlan,
+    batches: callFrameBatches,
+    tracingState: callFrameTracing,
+    terminationReason: termination?.terminationReason ?? "normal_return"
+  });
   const previousFrameStates = new Map<number, FrameState>();
   const frameResults = runtimeStates.map((runtime) => {
     const currentFrame = activeFrame(runtime);
@@ -144,6 +167,14 @@ export function interpretTrace(
     );
     return visualState;
   });
+  const frameEvidenceIndex = buildFrameEvidenceIndex({
+    callFrames,
+    events,
+    decisionEvidence: decisionInterpretation.byStep,
+    controlFlow,
+    expressionEvidence,
+    visualStates
+  });
 
   return {
     runtimeStates,
@@ -156,6 +187,8 @@ export function interpretTrace(
     decisionHistory: decisionInterpretation.historyBySite,
     decisionChains: decisionInterpretation.chains,
     controlFlow,
+    callFrames,
+    frameEvidenceIndex,
     visualStates
   };
 }

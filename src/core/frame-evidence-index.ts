@@ -3,7 +3,7 @@ import type { DecisionEvidenceByStep } from "../shared/decision-types";
 import type { ExpressionEvidenceByStep } from "../shared/expression-types";
 import type { TraceEvent } from "../shared/trace-types";
 import type { ControlFlowInterpretation } from "./control-flow-interpreter";
-import type { RuntimeMutation } from "./runtime-mutation";
+import type { RuntimeMutationBatch } from "./runtime-mutation";
 
 export interface FrameEvidenceEntry {
   frameId: number;
@@ -26,7 +26,7 @@ export interface FrameEvidenceIndexInput {
   decisionEvidence: DecisionEvidenceByStep;
   controlFlow: ControlFlowInterpretation;
   expressionEvidence: ExpressionEvidenceByStep;
-  visualStates: Array<{ step: number; mutations?: RuntimeMutation[] }>;
+  mutationBatches: RuntimeMutationBatch[];
 }
 
 function appendUnique(values: number[], value: number): void {
@@ -42,16 +42,6 @@ function createEntry(frameId: number, childFrameIds: number[]): FrameEvidenceEnt
     expressionAnchors: [],
     mutationAnchors: []
   };
-}
-
-function mutationFrameId(mutation: RuntimeMutation): number | undefined {
-  if ("frameId" in mutation && typeof mutation.frameId === "number") {
-    return mutation.frameId;
-  }
-  if (mutation.kind === "reference" && mutation.owner.scope === "local") {
-    return mutation.owner.frameId;
-  }
-  return undefined;
 }
 
 export function buildFrameEvidenceIndex(input: FrameEvidenceIndexInput): FrameEvidenceIndex {
@@ -87,16 +77,10 @@ export function buildFrameEvidenceIndex(input: FrameEvidenceIndexInput): FrameEv
     if (entry) appendUnique(entry.expressionAnchors, evidence.anchorStep);
   }
 
-  for (const visualState of input.visualStates) {
-    const frameIds = new Set<number>();
-    for (const mutation of visualState.mutations ?? []) {
-      const frameId = mutationFrameId(mutation);
-      if (frameId !== undefined) frameIds.add(frameId);
-    }
-    for (const frameId of frameIds) {
-      const entry = index.get(frameId);
-      if (entry) appendUnique(entry.mutationAnchors, visualState.step);
-    }
+  for (const batch of input.mutationBatches) {
+    if (batch.frameId === null || batch.mutations.length === 0) continue;
+    const entry = index.get(batch.frameId);
+    if (entry) appendUnique(entry.mutationAnchors, batch.step);
   }
 
   // The raw trace remains the authoritative source for frame identity. The

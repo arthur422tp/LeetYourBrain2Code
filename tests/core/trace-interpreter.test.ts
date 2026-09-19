@@ -126,6 +126,58 @@ describe("interpretTrace", () => {
     });
   });
 
+  it("attributes object mutations to the active frame owning the mutation batch", () => {
+    const callFrameBatches: CallFrameBatch[] = [{
+      batchId: 1,
+      updates: [{
+        updateId: 1,
+        kind: "frame_enter",
+        frameId: 4,
+        parentFrameId: null,
+        functionName: "solve",
+        functionId: "solve",
+        callStep: 1,
+        depth: 1,
+        arguments: []
+      }]
+    }];
+    const nodeBefore = {
+      objectId: "obj-1",
+      className: "TreeNode",
+      attributes: { value: int(1) }
+    };
+    const nodeAfter = {
+      objectId: "obj-1",
+      className: "TreeNode",
+      attributes: { value: int(2) }
+    };
+    const result = interpretTrace(
+      [
+        event(1, "solve", {}, { frameId: 4, objects: [nodeBefore] }),
+        event(2, "solve", {}, { frameId: 4, objects: [nodeAfter] })
+      ],
+      [],
+      undefined,
+      [],
+      undefined,
+      [],
+      undefined,
+      [],
+      { status: "completed", terminationReason: "normal_return" },
+      undefined,
+      callFrameBatches,
+      { status: "complete" }
+    );
+
+    expect(result.mutationBatches[1]?.frameId).toBe(4);
+    expect(result.mutationBatches[1]?.mutations).toContainEqual(expect.objectContaining({
+      kind: "object_attribute",
+      objectId: "obj-1",
+      attribute: "value"
+    }));
+    expect(result.frameEvidenceIndex.get(4)?.mutationAnchors).toContain(2);
+  });
+
   it("attaches expression evidence when optional expression inputs are supplied", () => {
     const expressionPlan: ExpressionPlan = {
       version: 1,

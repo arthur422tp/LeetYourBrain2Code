@@ -173,7 +173,7 @@ export function interpretTrace(
     decisionEvidence: decisionInterpretation.byStep,
     controlFlow,
     expressionEvidence,
-    visualStates
+    mutationBatches
   });
 
   return {

@@ -153,9 +153,9 @@ describe("frame-evidence-index", () => {
       decisionEvidence,
       controlFlow,
       expressionEvidence,
-      visualStates: [
-        { step: 50, mutations: [mutation(2)] },
-        { step: 51, mutations: [mutation(2), mutation(4)] }
+      mutationBatches: [
+        { step: 50, frameId: 2, currentLine: 2, mutations: [mutation(2)] },
+        { step: 51, frameId: 4, currentLine: 4, mutations: [mutation(4)] }
       ]
     });
 
@@ -165,7 +165,7 @@ describe("frame-evidence-index", () => {
       decisionAnchors: [10, 11],
       controlFlowIterationRefs: [{ loopId: "loop-2", iteration: 1, anchorStepStart: 12 }],
       expressionAnchors: [30],
-      mutationAnchors: [50, 51]
+      mutationAnchors: [50]
     });
     expect(index.get(4)).toEqual({
       frameId: 4,

@@ -365,8 +365,6 @@ class TraceCollector:
                         depth=info["call_depth"],
                         arguments=self._bound_arguments(frame, descriptor),
                     )
-                elif event_name == "line":
-                    self._record_call_frame_update("frame_resumed", info["frame_id"])
                 elif event_name == "exception":
                     self._record_call_frame_update(
                         "exception_observed",

@@ -207,6 +207,33 @@ def test_handled_exception_clears_candidate_before_normal_return():
     assert [update["kind"] for update in updates if update["kind"] != "frame_enter"] == ["frame_return"]
 
 
+def test_finally_line_events_preserve_propagating_exception_candidate():
+    result = request(
+        """class Solution:
+    def f(self):
+        try:
+            1 / 0
+        finally:
+            marker = 1
+            marker += 1
+""",
+        "f",
+        0,
+        "",
+    )
+
+    updates = [
+        update
+        for batch in result["call_frame_batches"]
+        for update in batch["updates"]
+    ]
+    exception_updates = [update for update in updates if update["kind"] == "frame_exception"]
+
+    assert result["status"] == "exception"
+    assert len(exception_updates) == 1
+    assert exception_updates[0]["exception"]["type"] == "ZeroDivisionError"
+
+
 def test_uncaught_exception_records_unwind_at_non_normal_return_step():
     source = """class Solution:
     def f(self):

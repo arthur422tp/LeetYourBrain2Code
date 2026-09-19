@@ -1334,3 +1334,23 @@ This gives the project the missing runtime structure needed for a later **Recurs
 The foundation remains evidence-first:
 
 > show the function calls Python actually executed, with the values and exits the runtime actually produced, without turning those facts into an inferred solution or diagnosis.
+
+# 39. Implementation Status
+
+Implemented:
+
+- static `FunctionPlan` identities and post-binding argument snapshots;
+- runtime `FrameOccurrence` evidence with factual parent/child relationships;
+- authoritative normal-return, exception-unwind, and `trace_ended` exits;
+- direct and mutual recursion facts derived from active ancestry;
+- deterministic frame tree and raw-trace cursor context;
+- frame-scoped Decision, Control-Flow, Expression, and Mutation evidence indexing;
+- independent bounded call-frame streaming, session transport, and backward-compatible optional fields;
+- representative Pyodide end-to-end validation, including hard-timeout and independent truncation prefixes.
+
+Deferred:
+
+- call-tree UI;
+- recursion Execution Story;
+- backtracking semantic evidence;
+- cross-run call-tree diff.

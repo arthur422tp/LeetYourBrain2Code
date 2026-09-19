@@ -77,6 +77,7 @@ function renderCodePanel(sourceCode: string): {
   lines: HTMLDivElement[];
   lineLabel: HTMLSpanElement;
   decisionBadge: HTMLSpanElement;
+  setCurrentLine(line: number | null | undefined): void;
 } {
   const { panel, body } = createPanel("Code", "trace-viewer__code-panel");
   const header = createElement("div", "trace-viewer__code-meta");
@@ -100,7 +101,27 @@ function renderCodePanel(sourceCode: string): {
     return line;
   });
   body.append(header, code);
-  return { panel, lines, lineLabel, decisionBadge };
+  const toggle = createElement("button", "trace-viewer__code-toggle", "Show full code");
+  toggle.type = "button";
+  toggle.dataset.action = "toggle-full-code";
+  toggle.setAttribute("aria-expanded", "false");
+  header.append(toggle);
+  let fullCode = false;
+  let currentLine: number | null | undefined;
+  const updateExcerpt = (): void => {
+    for (const line of lines) {
+      const number = Number(line.dataset.line);
+      line.hidden = !fullCode && (!(currentLine && currentLine > 0) || Math.abs(number - currentLine) > 1);
+    }
+    lineLabel.textContent = currentLine && currentLine > 0 ? `Line ${currentLine}` : "No active source line";
+  };
+  toggle.addEventListener("click", () => {
+    fullCode = !fullCode;
+    toggle.textContent = fullCode ? "Show current lines" : "Show full code";
+    toggle.setAttribute("aria-expanded", String(fullCode));
+    updateExcerpt();
+  });
+  return { panel, lines, lineLabel, decisionBadge, setCurrentLine: (line) => { currentLine = line; updateExcerpt(); } };
 }
 
 function renderEmptyState(message: string): HTMLDivElement {
@@ -330,19 +351,20 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const visualStateRenderer = createVisualStateRenderer();
   visualPanel.body.append(visualStateRenderer.body);
   const decisionPanel = session.conditionPlan || (session.decisionBatches?.length ?? 0) > 0
-    ? createPanel("Decision Evidence", "trace-viewer__decision-panel")
+    ? createPanel("Decision Evidence", "trace-viewer__decision-panel", false)
     : null;
   const storyPanel = session.controlFlowPlan || (session.controlFlowBatches?.length ?? 0) > 0 || (session.controlFlowTracing && session.controlFlowTracing.status !== "complete")
-    ? createPanel("Execution Story", "trace-viewer__execution-story-panel")
+    ? createPanel("Execution Story", "trace-viewer__execution-story-panel", false)
     : null;
-  const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel");
-  const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel");
+  const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel", false);
+  const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel", false);
   const behavioralPanel = createPanel(
     "Behavioral Signals",
     "trace-viewer__behavioral-panel",
     true
   );
-  const localsPanel = createPanel("Locals", "trace-viewer__locals-panel");
+  const localsPanel = createPanel("Locals", "trace-viewer__locals-panel", false);
+  const advancedPanel = createPanel("Execution analysis & advanced", "trace-viewer__advanced", false);
   let callStackPanel = renderCallStack(undefined, "trace-viewer__call-stack-panel", false);
   const outputPanel = createPanel("Output", "trace-viewer__output-panel", false);
   const outputBody = outputPanel.body;
@@ -368,7 +390,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   controls.append(previous, stepInfo, next, play);
 
   const inspectorGrid = createElement("div", "trace-viewer__inspector-grid");
-  inspectorGrid.append(changesPanel.panel, behavioralPanel.panel, localsPanel.panel);
+  inspectorGrid.append(changesPanel.panel, localsPanel.panel);
 
   let currentIndex = 0;
   let timer: number | null = null;
@@ -394,9 +416,26 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     controlFlow: interpretation.controlFlow, decisionEvidence: interpretation.decisionEvidence,
     decisionChains: interpretation.decisionChains, tracingState: session.controlFlowTracing
   });
+  const updateEvidencePanel = (
+    target: ReturnType<typeof createPanel> | null,
+    title: string,
+    hasEvidence: boolean,
+    tracing?: { status: string }
+  ): void => {
+    if (!target) return;
+    const incomplete = tracing && tracing.status !== "complete";
+    target.panel.hidden = !hasEvidence && !incomplete;
+    target.panel.querySelector(".trace-viewer__panel-title")!.textContent = `${title}${incomplete ? ` · ${tracing.status}` : ""}`;
+  };
 
   const setStep = (requestedIndex: number): void => {
     if (interpretation.visualStates.length === 0) {
+      codePanel.setCurrentLine(undefined);
+      updateEvidencePanel(storyPanel, "Execution Story", false, session.controlFlowTracing);
+      updateEvidencePanel(decisionPanel, "Decision Evidence", false, session.decisionTracing);
+      updateEvidencePanel(expressionPanel, "Expression Evidence", false, session.expressionTracing);
+      changesPanel.panel.hidden = true;
+      localsPanel.panel.hidden = true;
       storyPanel?.body.replaceChildren(createExecutionStory({model: storyModelAt(-1, -1), onNavigateStep}));
       currentIndex = 0;
       stepLabel.textContent = "No steps";
@@ -451,9 +490,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
         line.removeAttribute("aria-current");
       }
     }
-    codePanel.lineLabel.textContent = state?.currentLine === null || state?.currentLine === undefined
-      ? "No active line"
-      : `Line ${state.currentLine}`;
+    codePanel.setCurrentLine(state?.currentLine);
 
     const controlFlowUiModel = storyModelAt(event?.step ?? -1, event?.frameId ?? -1);
     storyPanel?.body.replaceChildren(createExecutionStory({model: controlFlowUiModel, onNavigateStep}));
@@ -468,6 +505,14 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     const decisionHistory = decisionEvidence
       ? interpretation.decisionHistory.get(decisionEvidence.siteId) ?? []
       : [];
+    const activation = controlFlowUiModel.currentActivation;
+    const storyTitle = activation && controlFlowUiModel.currentIteration
+      ? `Execution Story · ${activation.loopKind.toUpperCase()} · #${controlFlowUiModel.currentIteration.ordinal}`
+      : "Execution Story";
+    updateEvidencePanel(storyPanel, storyTitle, controlFlowUiModel.storyItems.length > 0, session.controlFlowTracing);
+    updateEvidencePanel(decisionPanel, "Decision Evidence", !!decisionEvidence || !!decisionChain, session.decisionTracing);
+    updateEvidencePanel(expressionPanel, "Expression Evidence", !!event && interpretation.expressionEvidence.has(event.step), session.expressionTracing);
+    changesPanel.panel.hidden = !state?.mutations.length;
     const committed = interpretation.controlFlow.actions.find(action => action.frameId === event?.frameId && action.status === "committed" && action.anchorStepResolved === event?.step);
     const observed = interpretation.controlFlow.actions.find(action => action.frameId === event?.frameId && action.anchorStepObserved === event?.step);
     const boundary = controlFlowUiModel.currentIteration;
@@ -559,6 +604,10 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     currentIndex,
     onNavigate: navigateDirect
   });
+  // Reuse the existing raw slider and its cursor callback; only move its DOM location.
+  const rawRange = timelineHandle.element.querySelector<HTMLInputElement>('[data-role="trace-range"]');
+  if (rawRange) controls.prepend(rawRange);
+  advancedPanel.body.append(behavioralPanel.panel, outlineHandle.element, timelineHandle.element, callStackPanel, debugPanel.panel);
 
   previous.addEventListener("click", () => setStep(currentIndex - 1));
   next.addEventListener("click", () => setStep(currentIndex + 1));
@@ -589,14 +638,14 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     ...(decisionPanel ? [decisionPanel.panel] : []),
     expressionPanel.panel,
     inspectorGrid,
-    callStackPanel,
     outputPanel.panel,
-    debugPanel.panel,
-    outlineHandle.element,
-    timelineHandle.element,
+    advancedPanel.panel,
     controls
   );
-  setStep(0);
+  const firstSolutionLine = session.events.findIndex(event =>
+    event.event === "line" && event.line !== null && event.line > 0 && event.function === session.entrypoint.methodName
+  );
+  setStep(Math.max(0, firstSolutionLine));
 
   return {
     element: root,

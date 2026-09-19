@@ -70,6 +70,27 @@ function deferred<T>() {
 }
 
 describe("renderSidePanel", () => {
+  it("collapses synced mirrors while keeping case selection and Run accessible", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, { controller: { execute }, activeTabSourceFactory: source.factory, liveDebounceMs: 0 });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState({ testcase: "7\n8" }) });
+    await vi.waitFor(() => expect(root.querySelector("#runtime-status")?.textContent).toBe("Live: synced"));
+    const mirrors = root.querySelector<HTMLDetailsElement>(".input-panel")!;
+    expect(mirrors.open).toBe(false);
+    expect(root.querySelector("#testcase-case")!.closest("details")).toBeNull();
+    expect(root.querySelector("#run")!.closest("details")).toBeNull();
+    mirrors.open = true;
+    const cases = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    cases.value = "1";
+    cases.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute.mock.calls[1]![0].rawTestcase).toBe("8");
+    expect(mirrors.open).toBe(true);
+    handle.dispose();
+  });
   it("renders the initial live status", () => {
     const root = document.createElement("main");
     const controller: SidePanelController = { execute: vi.fn() };

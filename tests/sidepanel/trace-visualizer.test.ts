@@ -719,6 +719,84 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("keeps visual state and a single raw scrubber outside collapsed analysis", () => {
+    const view = createTraceVisualizer(controlFlowSession());
+    const advanced = view.element.querySelector<HTMLDetailsElement>(".trace-viewer__advanced")!;
+    expect(advanced).not.toBeNull();
+    expect(advanced.open).toBe(false);
+    expect(advanced.contains(view.element.querySelector(".trace-viewer__outline"))).toBe(true);
+    expect(advanced.contains(view.element.querySelector(".trace-viewer__behavioral-panel"))).toBe(true);
+    expect(advanced.contains(view.element.querySelector(".trace-viewer__debug"))).toBe(true);
+    expect(advanced.contains(view.element.querySelector(".trace-viewer__visual-panel"))).toBe(false);
+    const ranges = view.element.querySelectorAll<HTMLInputElement>('[data-role="trace-range"]');
+    expect(ranges).toHaveLength(1);
+    expect(advanced.contains(ranges[0]!)).toBe(false);
+    ranges[0]!.value = "2";
+    ranges[0]!.dispatchEvent(new Event("input"));
+    expect(view.element.dataset.stepIndex).toBe("2");
+    expect(view.element.querySelector<HTMLDetailsElement>(".trace-viewer__execution-story-panel")!.open).toBe(false);
+    view.dispose();
+  });
+
+  it("hides empty evidence while preserving disclosure choice across navigation", () => {
+    const view = createTraceVisualizer(decisionSession());
+    const panel = view.element.querySelector<HTMLDetailsElement>("details.trace-viewer__decision-panel")!;
+    expect(panel.hidden).toBe(false);
+    expect(panel.open).toBe(false);
+    panel.open = true;
+    view.setStep(1);
+    expect(panel.hidden).toBe(true);
+    view.setStep(0);
+    expect(panel.hidden).toBe(false);
+    expect(panel.open).toBe(true);
+    expect(view.element.querySelector<HTMLElement>(".trace-viewer__expression-panel")!.hidden).toBe(true);
+    view.dispose();
+  });
+
+  it("keeps incomplete tracing discoverable without current evidence", () => {
+    const fixture = decisionSession();
+    fixture.decisionTracing = { status: "truncated", reason: "decision_event_limit" };
+    const view = createTraceVisualizer(fixture);
+    view.setStep(1);
+    const panel = view.element.querySelector<HTMLDetailsElement>("details.trace-viewer__decision-panel")!;
+    expect(panel.hidden).toBe(false);
+    expect(panel.querySelector("summary")!.textContent).toContain("truncated");
+    view.dispose();
+  });
+
+  it("shows a source excerpt and preserves the full-code toggle during navigation", () => {
+    const fixture = session();
+    fixture.sourceCode += "\n".repeat(15);
+    const view = createTraceVisualizer(fixture);
+    const visibleLines = () => [...view.element.querySelectorAll<HTMLElement>(".trace-viewer__code-line")].filter(line => !line.hidden);
+    expect(visibleLines().map(line => line.dataset.line)).toEqual(["4", "5", "6"]);
+    const toggle = view.element.querySelector<HTMLButtonElement>('[data-action="toggle-full-code"]')!;
+    toggle.click();
+    expect(visibleLines().length).toBeGreaterThan(3);
+    view.setStep(1);
+    expect(visibleLines().length).toBeGreaterThan(3);
+    toggle.click();
+    expect(visibleLines().map(line => line.dataset.line)).toEqual(["5", "6", "7"]);
+    view.dispose();
+  });
+
+  it("starts at the solution body but retains every earlier raw step", () => {
+    const fixture = session();
+    const event = fixture.events[0]!;
+    fixture.events = [
+      { ...event, step: 1, event: "call", function: "<module>", line: 0 },
+      { ...event, step: 2, event: "call", function: "twoSum", line: 2 },
+      { ...event, step: 3, event: "line", function: "twoSum", line: 3 }
+    ];
+    const view = createTraceVisualizer(fixture);
+    expect(view.element.dataset.stepIndex).toBe("2");
+    view.element.querySelector<HTMLButtonElement>("#trace-previous")!.click();
+    expect(view.element.dataset.stepIndex).toBe("1");
+    view.setStep(0);
+    expect(view.element.dataset.stepIndex).toBe("0");
+    expect(view.element.querySelector(".trace-viewer__code-meta")!.textContent).not.toContain("Line 0");
+    view.dispose();
+  });
   it("renders decision evidence between visual state and expression evidence and adds a factual badge", () => {
     const view = createTraceVisualizer(decisionSession());
 

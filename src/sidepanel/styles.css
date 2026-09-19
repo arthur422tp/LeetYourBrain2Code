@@ -152,7 +152,8 @@ button.is-primary:hover:not(:disabled) {
   padding: 11px 13px 13px;
 }
 
-.input-panel label {
+.input-panel label,
+.input-controls label {
   color: #475569;
   font-size: 11px;
   font-weight: 700;
@@ -161,7 +162,8 @@ button.is-primary:hover:not(:disabled) {
 }
 
 .input-panel textarea,
-.input-panel select {
+.input-panel select,
+.input-controls select {
   width: 100%;
   resize: vertical;
   border: 1px solid #d7dee9;
@@ -189,6 +191,18 @@ button.is-primary:hover:not(:disabled) {
   gap: 8px;
   padding-top: 3px;
 }
+
+.input-controls {
+  display: grid;
+  grid-template-columns: auto minmax(70px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.trace-viewer [hidden] { display: none !important; }
+.trace-viewer__controls > [data-role="trace-range"] { grid-column: 1 / -1; width: 100%; margin: 0; }
+.trace-viewer__code-toggle { margin-left: auto; padding: 3px 6px; font-size: 11px; }
+.trace-viewer__advanced > .trace-viewer__panel-body { display: grid; gap: 10px; }
 
 .visualization-output {
   display: flex;
@@ -329,6 +343,8 @@ button.is-primary:hover:not(:disabled) {
 .trace-viewer__code-meta,
 .trace-viewer__state-meta {
   display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   justify-content: space-between;
   color: #64748b;
   font-size: 11px;

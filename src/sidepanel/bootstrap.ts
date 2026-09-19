@@ -171,14 +171,14 @@ export function renderSidePanel(
   const actions = document.createElement("div");
   actions.className = "input-panel__actions";
   actions.append(runButton);
+  const inputControls = document.createElement("div");
+  inputControls.className = "input-controls";
+  inputControls.append(caseLabel, caseSelector, actions);
   inputBody.append(
     sourceLabel,
     source,
     testcaseLabel,
-    testcase,
-    caseLabel,
-    caseSelector,
-    actions
+    testcase
   );
   inputPanel.append(inputBody);
 
@@ -204,6 +204,7 @@ export function renderSidePanel(
   let selectedCaseIndex = 0;
   let ownershipGeneration = 0;
   let disposed = false;
+  let collapsedInitialMirrors = false;
   let renderedPageIdentity: {
     slug: string | null;
     sourceCode: string;
@@ -292,6 +293,10 @@ export function renderSidePanel(
       renderLiveStatus();
     },
     onSession: (session) => {
+      if (!collapsedInitialMirrors) {
+        inputPanel.open = false;
+        collapsedInitialMirrors = true;
+      }
       activeVisualizer?.dispose();
       activeVisualizer = createTraceVisualizer(session);
       renderedPageIdentity = {
@@ -407,7 +412,7 @@ export function renderSidePanel(
     }
   });
 
-  app.append(header, status, inputPanel, result);
+  app.append(header, status, inputPanel, inputControls, result);
   root.replaceChildren(app);
 
   if (activeTabSource) {

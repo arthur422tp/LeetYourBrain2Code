@@ -46,7 +46,7 @@ export function createExecutionStory({ model, onNavigateStep }: ExecutionStoryOp
     const activation = model.currentActivation;
     root.dataset.activationKey = activation.activationKey;
     root.append(element("h3", "execution-story__context", `${activation.loopKind.toUpperCase()} · line ${activation.line}`));
-    if (activation.parentContext.loopStack.length) root.append(element("div", "execution-story__ancestry", activation.parentContext.loopStack.map(loop => `${loop.loopId} · iteration #${loop.iteration}`).join(" → ")));
+    if (activation.parentLoops.length) root.append(element("div", "execution-story__ancestry", activation.parentLoops.map(loop => `${loop.loopKind.toUpperCase()} · line ${loop.line} · iteration #${loop.iteration}`).join(" → ")));
     if (model.currentIteration) root.append(element("div", "execution-story__current", `Iteration #${model.currentIteration.ordinal}`));
   }
   if (!model.storyItems.length) root.append(element("div", "trace-viewer__empty", "No control-flow evidence for this step."));

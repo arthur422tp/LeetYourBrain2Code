@@ -91,7 +91,10 @@ function renderTracingStatus(state: DecisionTracingState): HTMLElement {
   return status;
 }
 
-function renderChain(chain: DecisionChainOccurrence): HTMLElement {
+function renderChain(
+  chain: DecisionChainOccurrence,
+  onNavigateStep: (step: number) => void
+): HTMLElement {
   const section = createElement("section", "decision-evidence__chain");
   section.dataset.chainId = chain.chainId;
   section.dataset.chainOccurrenceId = chain.occurrenceId;
@@ -112,7 +115,12 @@ function renderChain(chain: DecisionChainOccurrence): HTMLElement {
         : branch.status === "rejected" ? "Rejected" : "Not reached")
     );
     if (branch.anchorStep !== undefined) {
-      row.append(createElement("span", "decision-evidence__branch-step", `step ${branch.anchorStep}`));
+      const inspect = createElement("button", "decision-evidence__branch-step", `step ${branch.anchorStep}`);
+      inspect.type = "button";
+      inspect.dataset.branchAnchorStep = String(branch.anchorStep);
+      inspect.setAttribute("aria-label", `Inspect ${branch.kind} branch · step ${branch.anchorStep}`);
+      inspect.addEventListener("click", () => onNavigateStep(branch.anchorStep!));
+      row.append(inspect);
     }
     if (branch.condition) row.append(renderConditionNode(branch.condition));
     rows.append(row);
@@ -175,7 +183,7 @@ export function createDecisionEvidence(options: DecisionEvidenceOptions): HTMLEl
     section.append(createElement("div", "trace-viewer__empty decision-evidence__empty", "No decision evidence for this step."));
   }
 
-  if (options.chain) section.append(renderChain(options.chain));
+  if (options.chain) section.append(renderChain(options.chain, options.onNavigateStep));
   const history = renderHistory(options.history, options.onNavigateStep);
   if (history) section.append(history);
   return section;

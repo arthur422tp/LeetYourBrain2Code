@@ -33,6 +33,8 @@ describe("createExecutionRequest", () => {
       expect(result.request.limits.maxDecisionBytes).toBe(2_000_000);
       expect(result.request.limits.maxControlFlowEvents).toBe(20_000);
       expect(result.request.limits.maxControlFlowBytes).toBe(2_000_000);
+      expect(result.request.limits.maxCallFrameEvents).toBe(20_000);
+      expect(result.request.limits.maxCallFrameBytes).toBe(2_000_000);
     }
   });
 

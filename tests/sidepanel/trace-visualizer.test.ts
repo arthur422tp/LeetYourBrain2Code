@@ -102,7 +102,9 @@ function session(): TraceSession {
       maxDecisionEvents: 20_000,
     maxDecisionBytes: 2_000_000,
     maxControlFlowEvents: 20_000,
-    maxControlFlowBytes: 2_000_000
+    maxControlFlowBytes: 2_000_000,
+    maxCallFrameEvents: 20_000,
+    maxCallFrameBytes: 2_000_000
     },
     subscriptRelations: relations,
     returnValue: null

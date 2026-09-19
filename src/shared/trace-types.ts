@@ -20,8 +20,13 @@ import type {
   ControlFlowPlan,
   ControlFlowTracingState
 } from "./control-flow-types";
+import type {
+  CallFrameBatch,
+  CallFrameTracingState,
+  FunctionPlan
+} from "./call-frame-types";
 
-export const TRACE_SCHEMA_VERSION = 5;
+export const TRACE_SCHEMA_VERSION = 6;
 
 export type ObjectId = string;
 
@@ -218,6 +223,9 @@ export interface TraceSession {
   controlFlowPlan?: ControlFlowPlan;
   controlFlowBatches?: ControlFlowBatch[];
   controlFlowTracing?: ControlFlowTracingState;
+  functionPlan?: FunctionPlan;
+  callFrameBatches?: CallFrameBatch[];
+  callFrameTracing?: CallFrameTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

@@ -14,6 +14,11 @@ import type {
   ControlFlowPlan,
   ControlFlowTracingState
 } from "./control-flow-types";
+import type {
+  CallFrameBatch,
+  CallFrameTracingState,
+  FunctionPlan
+} from "./call-frame-types";
 
 export const TRACE_SESSION_STATUSES = [
   "running",
@@ -71,6 +76,8 @@ export interface ExecutionLimits {
   maxDecisionBytes: number;
   maxControlFlowEvents: number;
   maxControlFlowBytes: number;
+  maxCallFrameEvents: number;
+  maxCallFrameBytes: number;
 }
 
 export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
@@ -89,7 +96,9 @@ export const DEFAULT_EXECUTION_LIMITS: Readonly<ExecutionLimits> = {
   maxDecisionEvents: 20_000,
   maxDecisionBytes: 2_000_000,
   maxControlFlowEvents: 20_000,
-  maxControlFlowBytes: 2_000_000
+  maxControlFlowBytes: 2_000_000,
+  maxCallFrameEvents: 20_000,
+  maxCallFrameBytes: 2_000_000
 };
 
 export interface ExecutionRequest {
@@ -125,6 +134,9 @@ export interface ExecutionTerminalResult {
   controlFlowPlan?: ControlFlowPlan;
   controlFlowBatches?: ControlFlowBatch[];
   controlFlowTracing?: ControlFlowTracingState;
+  functionPlan?: FunctionPlan;
+  callFrameBatches?: CallFrameBatch[];
+  callFrameTracing?: CallFrameTracingState;
   returnValue?: ValueSnapshot | null;
   exception?: ExceptionInfo;
 }

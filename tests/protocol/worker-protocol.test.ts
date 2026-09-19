@@ -241,6 +241,169 @@ describe("worker protocol", () => {
     })).toBe(true);
   });
 
+  it("accepts function plans and call-frame batches with bound arguments", () => {
+    expect(isWorkerOutboundMessage({
+      type: "function_plan",
+      sessionId: "s1",
+      plan: {
+        version: 1,
+        functions: [{
+          functionId: "fn1",
+          kind: "method",
+          name: "maxDepth",
+          qualifiedName: "Solution.maxDepth",
+          span: { line: 2, column: 4, endLine: 6, endColumn: 20 },
+          firstBodyLine: 3,
+          parameterNames: ["self", "root"],
+          parameterKinds: ["positional_or_keyword", "positional_or_keyword"],
+          parentClassName: "Solution"
+        }]
+      }
+    })).toBe(true);
+
+    expect(isWorkerOutboundMessage({
+      type: "call_frame_batch",
+      sessionId: "s1",
+      batches: [{
+        batchId: 1,
+        updates: [{
+          updateId: 1,
+          kind: "frame_enter",
+          frameId: 2,
+          parentFrameId: 1,
+          functionName: "depth",
+          functionId: "fn2",
+          callStep: 7,
+          depth: 2,
+          arguments: [{
+            name: "node",
+            kind: "positional_or_keyword",
+            value: { type: "none", value: null }
+          }]
+        }]
+      }]
+    })).toBe(true);
+  });
+
+  it("rejects malformed function plans and call-frame updates", () => {
+    const plan = {
+      type: "function_plan",
+      sessionId: "s1",
+      plan: {
+        version: 1,
+        functions: [{
+          functionId: "fn1",
+          kind: "function",
+          name: "f",
+          qualifiedName: "f",
+          span: { line: 1, column: 0, endLine: 2, endColumn: 10 },
+          firstBodyLine: 1,
+          parameterNames: ["value"],
+          parameterKinds: ["positional_or_keyword"]
+        }]
+      }
+    } as const;
+
+    expect(isWorkerOutboundMessage({
+      ...plan,
+      plan: { ...plan.plan, version: 2 }
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...plan,
+      plan: {
+        ...plan.plan,
+        functions: [plan.plan.functions[0], plan.plan.functions[0]]
+      }
+    })).toBe(false);
+
+    const enter = {
+      updateId: 1,
+      kind: "frame_enter",
+      frameId: 2,
+      parentFrameId: 1,
+      functionName: "f",
+      callStep: 7,
+      depth: 2,
+      arguments: [{
+        name: "value",
+        kind: "positional_or_keyword",
+        value: { type: "int", value: "1" }
+      }]
+    } as const;
+    const base = {
+      type: "call_frame_batch",
+      sessionId: "s1",
+      batches: [{ batchId: 1, updates: [enter] }]
+    } as const;
+
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{ ...enter, frameId: 0 }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{ ...enter, parentFrameId: enter.frameId }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{ ...enter, callStep: 0 }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{ ...enter, arguments: [{ ...enter.arguments[0], kind: "invalid" } as never] }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [
+        enter,
+        { ...enter, updateId: 1, frameId: 3 }
+      ] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{
+        updateId: 2,
+        kind: "frame_return",
+        frameId: 2,
+        exitStep: 0
+      }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{
+        updateId: 2,
+        kind: "frame_return",
+        frameId: 2,
+        exitStep: 8
+      }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{
+        updateId: 2,
+        kind: "frame_exception",
+        frameId: 2,
+        exitStep: 8
+      }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{
+        updateId: 2,
+        kind: "frame_trace_ended",
+        frameId: 2
+      }] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{ ...enter, kind: "unknown" } as never] }]
+    })).toBe(false);
+    expect(isWorkerOutboundMessage({
+      ...base,
+      batches: [{ batchId: 1, updates: [{ ...enter, recursionDepth: 0 }] }]
+    })).toBe(false);
+  });
+
   it("rejects malformed control-flow protocol fields", () => {
     const plan = {
       type: "control_flow_plan",

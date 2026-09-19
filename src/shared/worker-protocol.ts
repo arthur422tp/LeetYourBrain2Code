@@ -44,6 +44,16 @@ import type {
   SelectionEvidence,
   SourceSpan
 } from "./expression-types";
+import type {
+  BoundArgumentSnapshot,
+  CallFrameBatch,
+  CallFrameRuntimeUpdate,
+  CallFrameTracingState,
+  FunctionDescriptor,
+  FunctionKind,
+  FunctionPlan,
+  ParameterBindingKind
+} from "./call-frame-types";
 
 export type WorkerInboundMessage = {
   type: "execute";
@@ -59,6 +69,8 @@ export type WorkerOutboundMessage =
   | { type: "decision_batch"; sessionId: string; batches: DecisionBatch[] }
   | { type: "control_flow_plan"; sessionId: string; plan: ControlFlowPlan }
   | { type: "control_flow_batch"; sessionId: string; batches: ControlFlowBatch[] }
+  | { type: "function_plan"; sessionId: string; plan: FunctionPlan }
+  | { type: "call_frame_batch"; sessionId: string; batches: CallFrameBatch[] }
   | {
       type: "execution_finished";
       sessionId: string;
@@ -98,6 +110,19 @@ function isPositiveInteger(value: unknown): value is number {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isFunctionKind(value: unknown): value is FunctionKind {
+  return value === "function" || value === "method" || value === "nested_function";
+}
+
+function isParameterBindingKind(value: unknown): value is ParameterBindingKind {
+  return value === "positional_only" ||
+    value === "positional_or_keyword" ||
+    value === "keyword_only" ||
+    value === "varargs" ||
+    value === "varkw" ||
+    value === "unknown";
 }
 
 function isSourceSpan(value: unknown): value is SourceSpan {
@@ -169,6 +194,97 @@ function isValueSnapshot(value: unknown): boolean {
     default:
       return false;
   }
+}
+
+function isFunctionDescriptor(value: unknown): value is FunctionDescriptor {
+  return isRecord(value) &&
+    typeof value.functionId === "string" && value.functionId.length > 0 &&
+    isFunctionKind(value.kind) &&
+    typeof value.name === "string" && value.name.length > 0 &&
+    typeof value.qualifiedName === "string" && value.qualifiedName.length > 0 &&
+    isSourceSpan(value.span) &&
+    (value.firstBodyLine === null || isInteger(value.firstBodyLine)) &&
+    isStringArray(value.parameterNames) &&
+    Array.isArray(value.parameterKinds) &&
+    value.parameterKinds.length === value.parameterNames.length &&
+    value.parameterKinds.every(isParameterBindingKind) &&
+    (value.parentFunctionId === undefined || typeof value.parentFunctionId === "string") &&
+    (value.parentClassName === undefined || typeof value.parentClassName === "string");
+}
+
+function isFunctionPlan(value: unknown): value is FunctionPlan {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.functions) ||
+      !value.functions.every(isFunctionDescriptor)) {
+    return false;
+  }
+
+  const ids = new Set(value.functions.map((descriptor) => descriptor.functionId));
+  return ids.size === value.functions.length;
+}
+
+function isBoundArgumentSnapshot(value: unknown): value is BoundArgumentSnapshot {
+  return isRecord(value) &&
+    typeof value.name === "string" && value.name.length > 0 &&
+    isParameterBindingKind(value.kind) &&
+    isValueSnapshot(value.value);
+}
+
+function isExceptionInfo(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.type === "string" &&
+    typeof value.message === "string" &&
+    (value.line === null || isInteger(value.line)) &&
+    isStringArray(value.stack) &&
+    (value.frameId === null || isPositiveInteger(value.frameId));
+}
+
+function isCallFrameRuntimeUpdate(value: unknown): value is CallFrameRuntimeUpdate {
+  if (!isRecord(value) || !isPositiveInteger(value.updateId) || !isPositiveInteger(value.frameId)) {
+    return false;
+  }
+
+  if (value.kind === "frame_enter") {
+    return (value.parentFrameId === null || isPositiveInteger(value.parentFrameId)) &&
+      value.parentFrameId !== value.frameId &&
+      typeof value.functionName === "string" && value.functionName.length > 0 &&
+      (value.functionId === undefined || (typeof value.functionId === "string" && value.functionId.length > 0)) &&
+      isPositiveInteger(value.callStep) &&
+      isPositiveInteger(value.depth) &&
+      Array.isArray(value.arguments) && value.arguments.every(isBoundArgumentSnapshot) &&
+      (value.recursionDepth === undefined || isPositiveInteger(value.recursionDepth));
+  }
+
+  if (value.kind === "frame_return") {
+    return isPositiveInteger(value.exitStep) && isValueSnapshot(value.value);
+  }
+
+  if (value.kind === "frame_exception") {
+    return isPositiveInteger(value.exitStep) && isExceptionInfo(value.exception);
+  }
+
+  if (value.kind === "frame_trace_ended") {
+    return typeof value.reason === "string" && value.reason.length > 0 &&
+      (value.exitStep === undefined || isPositiveInteger(value.exitStep));
+  }
+
+  return false;
+}
+
+function isCallFrameBatch(value: unknown): value is CallFrameBatch {
+  if (!isRecord(value) || !isPositiveInteger(value.batchId) || !Array.isArray(value.updates) ||
+      !value.updates.every(isCallFrameRuntimeUpdate)) {
+    return false;
+  }
+
+  return value.updates.every((update, index, updates) =>
+    index === 0 || update.updateId > updates[index - 1]!.updateId
+  );
+}
+
+function isCallFrameTracingState(value: unknown): value is CallFrameTracingState {
+  return isRecord(value) &&
+    (value.status === "complete" || value.status === "truncated" || value.status === "unavailable") &&
+    (value.reason === undefined || typeof value.reason === "string");
 }
 
 function isStaticStructureHint(value: unknown): boolean {
@@ -504,6 +620,10 @@ function isExecutionTerminalResult(value: unknown): value is ExecutionTerminalRe
     && (value.controlFlowPlan === undefined || isControlFlowPlan(value.controlFlowPlan))
     && (value.controlFlowBatches === undefined || (Array.isArray(value.controlFlowBatches) && value.controlFlowBatches.every(isControlFlowBatch)))
     && (value.controlFlowTracing === undefined || isControlFlowTracingState(value.controlFlowTracing))
+    && (value.functionPlan === undefined || isFunctionPlan(value.functionPlan))
+    && (value.callFrameBatches === undefined ||
+      (Array.isArray(value.callFrameBatches) && value.callFrameBatches.every(isCallFrameBatch)))
+    && (value.callFrameTracing === undefined || isCallFrameTracingState(value.callFrameTracing))
   );
 }
 
@@ -535,6 +655,10 @@ export function isWorkerOutboundMessage(value: unknown): value is WorkerOutbound
       return typeof value.sessionId === "string" && isControlFlowPlan(value.plan);
     case "control_flow_batch":
       return typeof value.sessionId === "string" && Array.isArray(value.batches) && value.batches.every(isControlFlowBatch);
+    case "function_plan":
+      return typeof value.sessionId === "string" && isFunctionPlan(value.plan);
+    case "call_frame_batch":
+      return typeof value.sessionId === "string" && Array.isArray(value.batches) && value.batches.every(isCallFrameBatch);
     case "execution_finished":
       return (
         typeof value.sessionId === "string" &&

@@ -8,6 +8,8 @@ describe("Execution Story", () => {
     const steps: number[] = [];
     const root = createExecutionStory({ model: buildControlFlowUiModel(storyInput()), onNavigateStep: step => steps.push(step) });
     expect(root.textContent).toContain("FOR · line 2"); expect(root.textContent).toContain("Iteration #2");
+    expect(root.textContent).toContain("FOR · line 1 · iteration #2");
+    expect(root.textContent).not.toContain("f1 · iteration #2");
     expect(root.textContent).toContain("x = 7"); expect(root.textContent).toContain("x < 0 → False");
     expect(root.textContent).toContain("break · Observed"); expect(root.textContent).toContain("break · Committed");
     expect(root.textContent).toContain("Broke loop"); expect(root.textContent).toContain("Loop exited · break");

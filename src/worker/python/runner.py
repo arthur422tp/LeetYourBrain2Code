@@ -16,6 +16,7 @@ from condition_instrumenter import instrument_condition_sites
 from decision_recorder import DecisionRecorder
 from control_flow_instrumenter import instrument_control_flow
 from control_flow_recorder import ControlFlowRecorder
+from function_planner import plan_user_functions
 
 
 class UnsupportedTestcaseFormat(Exception):
@@ -357,6 +358,7 @@ def run_request(
         decision_complete_name,
     )
     condition_plan = condition.plan_dict if condition.available else None
+    function_plan = plan_user_functions(source_code).plan_dict
     try:
         decision_tree = condition.instrumented_tree if condition.available else expression_tree
         control = instrument_control_flow(
@@ -414,6 +416,7 @@ def run_request(
             "syntax_error",
             exception=_exception_info(error),
             control_flow_plan=control_plan,
+            function_plan=function_plan,
         )
 
     subscript_relations = relations_as_dicts(analyze_subscript_relations(source_code))
@@ -504,6 +507,7 @@ def run_request(
             subscript_relations=subscript_relations,
             expression_plan=expression_plan,
             control_flow_plan=control_plan,
+            function_plan=function_plan,
             **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
@@ -522,6 +526,7 @@ def run_request(
             exception=_exception_info(error),
             expression_plan=expression_plan,
             control_flow_plan=control_plan,
+            function_plan=function_plan,
             **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
@@ -541,6 +546,7 @@ def run_request(
             exception=exception,
             expression_plan=expression_plan,
             control_flow_plan=control_plan,
+            function_plan=function_plan,
             **({"condition_plan": condition_plan} if condition_plan is not None else {}),
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
@@ -560,6 +566,7 @@ def run_request(
         subscript_relations=subscript_relations,
         expression_plan=expression_plan,
         control_flow_plan=control_plan,
+        function_plan=function_plan,
         **({"condition_plan": condition_plan} if condition_plan is not None else {}),
         **recorder.result_dict(),
         **decision_recorder.result_dict(),

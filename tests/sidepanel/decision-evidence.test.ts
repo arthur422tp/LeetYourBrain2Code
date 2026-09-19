@@ -120,6 +120,11 @@ describe("createDecisionEvidence", () => {
     expect(view.querySelector('[data-branch-status="selected"]')?.textContent).toContain("Selected");
     expect(view.querySelector('[data-branch-status="rejected"]')?.textContent).toContain("Rejected");
     expect(view.querySelector('[data-branch-status="not_reached"]')?.textContent).toContain("Not reached");
+    const branchButton = view.querySelector<HTMLButtonElement>('[data-branch-anchor-step="7"]');
+    expect(branchButton?.textContent).toContain("step 7");
+    branchButton?.click();
+    expect(onNavigateStep).toHaveBeenCalledWith(7);
+
     const button = view.querySelector<HTMLButtonElement>('[data-anchor-step="9"]');
     expect(button?.textContent).toContain("loop_exited");
     button?.click();

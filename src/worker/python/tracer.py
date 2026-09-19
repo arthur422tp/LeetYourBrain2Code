@@ -64,6 +64,7 @@ class TraceCollector:
         self.step_count = 0
         self.session_bytes = 0
         self.frame_ids = {}
+        self.frame_references = {}
         self.frame_info = {}
         self.frame_objects = {}
         self.frame_stack = []
@@ -128,9 +129,12 @@ class TraceCollector:
 
     def _frame_id_for(self, frame):
         object_id = id(frame)
-        if object_id not in self.frame_ids:
+        if self.frame_references.get(object_id) is not frame:
             self.frame_ids[object_id] = self.next_frame_id
             self.next_frame_id += 1
+            # Keep the frame alive for the duration of tracing so CPython
+            # cannot recycle its id for a later sequential call.
+            self.frame_references[object_id] = frame
         return self.frame_ids[object_id]
 
     def _function_descriptor_for(self, frame):
@@ -401,6 +405,7 @@ class TraceCollector:
 
     def stop(self):
         sys.settrace(self.previous_trace)
+        self.frame_references.clear()
 
     def serialize_value(self, value):
         return ValueSerializer(

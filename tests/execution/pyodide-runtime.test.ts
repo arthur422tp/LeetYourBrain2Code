@@ -251,6 +251,33 @@ describe("Pyodide runtime", () => {
     expect(finished[0]?.callFrameTracing).toEqual({ status: "complete" });
   });
 
+  it("keeps raw tracing alive when call-frame evidence reaches its soft limit", async () => {
+    const traceEvents: TraceEvent[] = [];
+    const callFrameBatches: CallFrameBatch[] = [];
+    const finished: ExecutionTerminalResult[] = [];
+    const runtime = createPyodideRuntime({
+      indexURL: `${process.cwd()}/node_modules/pyodide/`,
+      onTraceBatch: (_sessionId, events) => traceEvents.push(...events),
+      onCallFrameBatch: (_sessionId, batches) => callFrameBatches.push(...batches),
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute({
+      ...request,
+      sessionId: "call-frame-limit-runtime-session",
+      limits: { ...request.limits, maxCallFrameEvents: 1 }
+    });
+
+    expect(finished[0]?.status).toBe("completed");
+    expect(finished[0]?.callFrameTracing).toEqual({
+      status: "truncated",
+      reason: "call_frame_event_limit"
+    });
+    expect(callFrameBatches).toHaveLength(1);
+    expect(callFrameBatches[0]?.updates).toHaveLength(1);
+    expect(traceEvents.length).toBeGreaterThan(1);
+  });
+
   it("normalizes object references and bounded topology fields", () => {
     const event = normalizePythonTraceEvent({
       step: 1,

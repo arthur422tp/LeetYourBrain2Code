@@ -11,6 +11,7 @@ import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expressio
 import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
 import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
 import type { CallFrameBatch, FunctionPlan } from "../../src/shared/call-frame-types";
+import { interpretCallFrames } from "../../src/core/call-frame-interpreter";
 import {
   TraceSessionCollector,
   type TraceSessionCollectorOptions
@@ -484,6 +485,33 @@ describe("TraceSessionCollector", () => {
     expect(session.status).toBe("timeout");
     expect(session.functionPlan).toEqual(functionPlan);
     expect(session.callFrameBatches).toEqual([callFrameBatch]);
+  });
+
+  it("projects the received call-frame prefix as hard-timeout evidence", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+    const prefix: CallFrameBatch = {
+      batchId: 1,
+      updates: [callFrameBatch.updates[0]!]
+    };
+
+    collector.setFunctionPlan(functionPlan);
+    collector.append([event(1)]);
+    collector.appendCallFrameBatches([prefix]);
+    const session = collector.forceTimeout();
+    const model = interpretCallFrames({
+      events: session.events,
+      functionPlan: session.functionPlan,
+      batches: session.callFrameBatches,
+      tracingState: session.callFrameTracing,
+      terminationReason: session.terminationReason
+    });
+
+    expect(session.status).toBe("timeout");
+    expect(session.terminationReason).toBe("hard_timeout");
+    expect(model.byFrameId.get(1)?.exit).toEqual({
+      status: "trace_ended",
+      reason: "hard_timeout"
+    });
   });
 
   it("keeps sessions without call-frame fields backward compatible", () => {

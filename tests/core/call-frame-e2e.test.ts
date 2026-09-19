@@ -192,6 +192,39 @@ describe("call-frame evidence end to end", () => {
     ]);
   });
 
+  it("captures binary-tree arguments and recursive subtree frames", async () => {
+    const capture = await run(
+      `class Solution:
+    def maxDepth(self, root):
+        if root is None:
+            return 0
+        return max(self.maxDepth(root.left), self.maxDepth(root.right)) + 1
+`,
+      "[3, 9, 20, null, null, 15, 7]",
+      { className: "Solution", methodName: "maxDepth", parameterCount: 1, parameterKinds: ["binary_tree"] }
+    );
+
+    const model = callFrameModel(capture);
+    const frames = [...model.byFrameId.values()];
+    const rootFrame = model.byFrameId.get(model.roots[0]!);
+    const rootArgument = rootFrame?.arguments.find((argument) => argument.name === "root");
+
+    expect(capture.terminal?.status).toBe("completed");
+    expect(capture.terminal?.returnValue).toEqual({ type: "int", value: "3" });
+    expect(model.roots).toHaveLength(1);
+    expect(rootFrame?.functionName).toBe("maxDepth");
+    expect(rootArgument?.value).toEqual(expect.objectContaining({
+      type: "reference",
+      className: "TreeNode"
+    }));
+    expect(frames.length).toBeGreaterThan(1);
+    expect(frames.every((frame) => frame.functionId === rootFrame?.functionId)).toBe(true);
+    expect(frames.every((frame) =>
+      frame.frameId === rootFrame?.frameId || model.byFrameId.has(frame.parentFrameId!)
+    )).toBe(true);
+    expect(rootFrame?.childFrameIds.length).toBe(2);
+  });
+
   it("keeps sequential same-named helpers in distinct lexical parents", async () => {
     const capture = await run(
       `def outer(value):

@@ -1,5 +1,6 @@
 import json
 import dis
+import inspect
 import sys
 import time
 import traceback
@@ -40,6 +41,8 @@ class TraceCollector:
         decision_recorder=None,
         control_flow_recorder=None,
         synthetic_line_map=None,
+        call_frame_recorder=None,
+        function_mapper=None,
     ):
         self.limits = limits
         self.stdout_buffer = stdout_buffer
@@ -50,6 +53,8 @@ class TraceCollector:
         self.decision_recorder = decision_recorder
         self.control_flow_recorder = control_flow_recorder
         self.synthetic_line_map = dict(synthetic_line_map or {})
+        self.call_frame_recorder = call_frame_recorder
+        self.function_mapper = function_mapper
         self.last_visible_step_by_frame = {}
         self.return_offsets = {}
         self.events = []
@@ -127,6 +132,66 @@ class TraceCollector:
             self.frame_ids[object_id] = self.next_frame_id
             self.next_frame_id += 1
         return self.frame_ids[object_id]
+
+    def _function_descriptor_for(self, frame):
+        if self.function_mapper is None:
+            return None
+        try:
+            mapped = self.function_mapper(frame)
+        except Exception:
+            return None
+        if isinstance(mapped, str) and mapped:
+            return {"functionId": mapped}
+        if not isinstance(mapped, dict):
+            return None
+        function_id = mapped.get("functionId", mapped.get("function_id"))
+        if not isinstance(function_id, str) or not function_id:
+            return None
+        return mapped
+
+    @staticmethod
+    def _is_user_function_frame(frame):
+        # Module and class-body code objects share the user filename but are
+        # not function invocations and must not become frame occurrences.
+        return frame.f_code.co_name != "<module>" and bool(
+            frame.f_code.co_flags & inspect.CO_OPTIMIZED
+        )
+
+    @staticmethod
+    def _descriptor_value(descriptor, camel_name, snake_name, default=None):
+        if descriptor is None:
+            return default
+        return descriptor.get(camel_name, descriptor.get(snake_name, default))
+
+    def _bound_arguments(self, frame, descriptor):
+        if descriptor is None:
+            return []
+        names = self._descriptor_value(descriptor, "parameterNames", "parameter_names", [])
+        kinds = self._descriptor_value(descriptor, "parameterKinds", "parameter_kinds", [])
+        if not isinstance(names, list):
+            return []
+        if not isinstance(kinds, list):
+            kinds = []
+        arguments = []
+        for index, name in enumerate(names):
+            if not isinstance(name, str) or name not in frame.f_locals:
+                continue
+            try:
+                value = self.serialize_value(frame.f_locals[name])
+            except Exception:
+                continue
+            kind = kinds[index] if index < len(kinds) and isinstance(kinds[index], str) else "unknown"
+            arguments.append({"name": name, "kind": kind, "value": value})
+        return arguments
+
+    def _record_call_frame_update(self, method_name, *args, **kwargs):
+        if self.call_frame_recorder is None:
+            return
+        try:
+            getattr(self.call_frame_recorder, method_name)(*args, **kwargs)
+        except Exception:
+            # Evidence collection must never alter user execution semantics.
+            pass
 
     def _visible_locals(self, frame):
         return {
@@ -253,6 +318,7 @@ class TraceCollector:
             self.frame_info[object_id] = info
             self.frame_objects[frame_id] = frame
             self.frame_stack.append(frame_id)
+            info["function_descriptor"] = self._function_descriptor_for(frame)
         else:
             info = self.frame_info.get(object_id)
             if info is None:
@@ -268,12 +334,46 @@ class TraceCollector:
             display_line = self.synthetic_line_map.get(frame.f_lineno, frame.f_lineno)
             step = self._record(frame, event_name, argument, info, display_line)
             self.last_visible_step_by_frame[info["frame_id"]] = step
+            if self.call_frame_recorder is not None and self._is_user_function_frame(frame):
+                if event_name == "call":
+                    descriptor = info.get("function_descriptor")
+                    function_id = self._descriptor_value(descriptor, "functionId", "function_id")
+                    self._record_call_frame_update(
+                        "frame_enter",
+                        frame_id=info["frame_id"],
+                        parent_frame_id=info["parent_frame_id"],
+                        function_name=frame.f_code.co_name,
+                        function_id=function_id,
+                        call_step=step,
+                        depth=info["call_depth"],
+                        arguments=self._bound_arguments(frame, descriptor),
+                    )
+                elif event_name == "line":
+                    self._record_call_frame_update("frame_resumed", info["frame_id"])
+                elif event_name == "exception":
+                    self._record_call_frame_update(
+                        "exception_observed",
+                        info["frame_id"],
+                        self.events[-1]["event_payload"]["exception"],
+                    )
             if self.expression_recorder is not None and event_name == "line":
                 self.expression_recorder.set_anchor(info["frame_id"], step, frame.f_lineno)
             if self.decision_recorder is not None and event_name == "line":
                 self.decision_recorder.set_anchor(info["frame_id"], step, frame.f_lineno)
-            if event_name == "return" and self.control_flow_recorder is not None and self._is_normal_frame_return(frame):
-                self.control_flow_recorder.on_frame_return(info["frame_id"], step)
+            if event_name == "return":
+                normal_return = self._is_normal_frame_return(frame)
+                if self.call_frame_recorder is not None and self._is_user_function_frame(frame):
+                    if normal_return:
+                        self._record_call_frame_update(
+                            "frame_return",
+                            info["frame_id"],
+                            step,
+                            self.events[-1]["event_payload"]["return_value"],
+                        )
+                    else:
+                        self._record_call_frame_update("frame_unwind", info["frame_id"], step)
+                if self.control_flow_recorder is not None and normal_return:
+                    self.control_flow_recorder.on_frame_return(info["frame_id"], step)
 
         if event_name == "return":
             if self.frame_stack and self.frame_stack[-1] == info["frame_id"]:

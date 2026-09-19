@@ -1,3 +1,4 @@
+import io
 import sys
 import json
 import time
@@ -9,6 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "worker" / 
 from runner import run_request
 import runtime_prelude
 from runtime_prelude import TreeNode
+from call_frame_recorder import CallFrameRecorder
+from function_planner import plan_user_functions
+from tracer import TraceCollector, USER_CODE_FILENAME
 
 
 LIMITS = {
@@ -39,6 +43,43 @@ def request(source: str, method_name: str, parameter_count: int, testcase: str) 
 
 def function_events(result: dict, function_name: str) -> list[dict]:
     return [event for event in result["events"] if event["function"] == function_name]
+
+
+def traced_call_frame_result(source: str, method_name: str, arguments=()):
+    plan = plan_user_functions(source)
+    descriptors = {
+        (item["name"], item["span"]["line"]): item
+        for item in plan.plan_dict["functions"]
+    }
+
+    def function_mapper(frame):
+        return descriptors.get((frame.f_code.co_name, frame.f_code.co_firstlineno))
+
+    recorder = CallFrameRecorder(LIMITS)
+    collector = TraceCollector(
+        LIMITS,
+        io.StringIO(),
+        call_frame_recorder=recorder,
+        function_mapper=function_mapper,
+    )
+    namespace = {}
+    collector.start()
+    try:
+        exec(compile(source, USER_CODE_FILENAME, "exec"), namespace, namespace)
+        result = getattr(namespace["Solution"](), method_name)(*arguments)
+    finally:
+        collector.stop()
+        collector.flush()
+        recorder.flush()
+    return result, collector.events, recorder
+
+
+def frame_updates(recorder: CallFrameRecorder) -> list[dict]:
+    return [
+        update
+        for batch in recorder.result_batches()
+        for update in batch["updates"]
+    ]
 
 
 def test_two_sum_normal_case_returns_result_without_line_offset():
@@ -112,6 +153,121 @@ def test_recursive_calls_receive_distinct_monotonic_frame_ids():
     assert call_events[0]["parent_frame_id"] is None
     assert [event["parent_frame_id"] for event in call_events[1:]] == frame_ids[:-1]
     assert [event["call_depth"] for event in call_events] == [1, 2, 3, 4]
+
+
+def test_call_frame_entry_uses_authoritative_call_step_and_bound_arguments():
+    source = """class Solution:
+    def f(self, value):
+        return value
+"""
+
+    result, events, recorder = traced_call_frame_result(source, "f", (4,))
+
+    assert result == 4
+    call_event = next(event for event in events if event["event"] == "call" and event["function"] == "f")
+    entry = next(update for update in frame_updates(recorder) if update["kind"] == "frame_enter")
+    assert entry["call_step"] == call_event["step"]
+    assert entry["frame_id"] == call_event["frame_id"]
+    assert entry["parent_frame_id"] == call_event["parent_frame_id"]
+    assert next(argument for argument in entry["arguments"] if argument["name"] == "value")["value"] == {
+        "type": "int",
+        "value": "4",
+    }
+
+
+def test_normal_return_none_is_recorded_as_a_frame_return():
+    source = """class Solution:
+    def f(self):
+        return None
+"""
+
+    result, _events, recorder = traced_call_frame_result(source, "f")
+
+    assert result is None
+    updates = frame_updates(recorder)
+    returns = [update for update in updates if update["kind"] == "frame_return"]
+    assert len(returns) == 1
+    assert returns[0]["value"] == {"type": "none", "value": None}
+
+
+def test_handled_exception_clears_candidate_before_normal_return():
+    source = """class Solution:
+    def f(self):
+        try:
+            1 / 0
+        except ZeroDivisionError:
+            return 7
+"""
+
+    result, events, recorder = traced_call_frame_result(source, "f")
+
+    assert result == 7
+    assert any(event["event"] == "exception" for event in events)
+    updates = frame_updates(recorder)
+    assert [update["kind"] for update in updates if update["kind"] != "frame_enter"] == ["frame_return"]
+
+
+def test_uncaught_exception_records_unwind_at_non_normal_return_step():
+    source = """class Solution:
+    def f(self):
+        raise ValueError("boom")
+"""
+
+    _result, events, recorder = traced_call_frame_result_with_exception(source, "f")
+    exception_event = next(event for event in events if event["event"] == "exception")
+    return_event = next(event for event in events if event["event"] == "return" and event["function"] == "f")
+    updates = frame_updates(recorder)
+    exception_update = next(update for update in updates if update["kind"] == "frame_exception")
+    assert exception_update["exit_step"] == return_event["step"]
+    assert exception_update["exception"]["type"] == exception_event["event_payload"]["exception"]["type"]
+
+
+def traced_call_frame_result_with_exception(source: str, method_name: str):
+    plan = plan_user_functions(source)
+    descriptors = {
+        (item["name"], item["span"]["line"]): item
+        for item in plan.plan_dict["functions"]
+    }
+
+    def function_mapper(frame):
+        return descriptors.get((frame.f_code.co_name, frame.f_code.co_firstlineno))
+
+    recorder = CallFrameRecorder(LIMITS)
+    collector = TraceCollector(
+        LIMITS,
+        io.StringIO(),
+        call_frame_recorder=recorder,
+        function_mapper=function_mapper,
+    )
+    namespace = {}
+    collector.start()
+    try:
+        exec(compile(source, USER_CODE_FILENAME, "exec"), namespace, namespace)
+        getattr(namespace["Solution"](), method_name)()
+    except ValueError:
+        pass
+    finally:
+        collector.stop()
+        collector.flush()
+        recorder.flush()
+    return None, collector.events, recorder
+
+
+def test_recursive_call_frame_entries_preserve_authoritative_parent_ids():
+    source = """class Solution:
+    def f(self, n):
+        if n == 0:
+            return 0
+        return self.f(n - 1)
+"""
+
+    result, _events, recorder = traced_call_frame_result(source, "f", (3,))
+
+    assert result == 0
+    entries = [update for update in frame_updates(recorder) if update["kind"] == "frame_enter"]
+    assert len(entries) == 4
+    assert entries[0]["parent_frame_id"] is None
+    assert [entry["parent_frame_id"] for entry in entries[1:]] == [entry["frame_id"] for entry in entries[:-1]]
 
 
 def test_unhandled_exception_preserves_exception_event_and_trace_prefix():

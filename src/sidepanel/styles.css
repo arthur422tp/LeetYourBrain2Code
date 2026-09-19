@@ -2558,7 +2558,7 @@ button.is-primary:hover:not(:disabled) {
 
 .execution-story { display: grid; gap: 10px; }
 .execution-story__context, .execution-story__heading { margin: 0; font-size: 12px; }
-.execution-story__ancestry, .execution-story__tracing { font-size: 11px; color: var(--text-muted, #94a3b8); overflow-wrap: anywhere; }
+.execution-story__ancestry, .execution-story__tracing { font-size: 11px; color: #64748b; overflow-wrap: anywhere; }
 .execution-story__items { margin: 0; padding-left: 22px; }
 .execution-story__item { margin: 4px 0; }
 .execution-story__navigate, .execution-story__history-entry { text-align: left; width: 100%; white-space: normal; overflow-wrap: anywhere; }

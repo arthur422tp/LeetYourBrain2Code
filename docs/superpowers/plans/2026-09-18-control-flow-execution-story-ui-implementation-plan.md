@@ -1,6 +1,6 @@
 # Control-Flow Execution Story UI Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Turn the existing Control-Flow Evidence foundation into an occurrence-scoped Execution Story UI that explains factual loop iterations, decisions, transfers, and loop exits while preserving the existing raw trace cursor and evidence-first product boundary.
 
@@ -47,7 +47,7 @@
 - Extends `ControlFlowInterpretation` with `iterationsByActivation: Map<string, LoopIterationEvidence[]>`.
 - Keeps all public worker messages and `ControlFlowRuntimeEvent` wire types unchanged.
 
-- [ ] **Step 1: Add a failing instrumenter regression proving `break/continue` do not depend on observer truthiness**
+- [x] **Step 1: Add a failing instrumenter regression proving `break/continue` do not depend on observer truthiness**
 
 Add to `tests/fixtures/python/test_control_flow_instrumenter.py`:
 
@@ -85,7 +85,7 @@ python3 -m unittest \
 
 Expected: FAIL with the current synthetic `if observer(): break/continue` rewrite.
 
-- [ ] **Step 2: Rewrite `break/continue` as side-effect-only synthetic probe + original statement**
+- [x] **Step 2: Rewrite `break/continue` as side-effect-only synthetic probe + original statement**
 
 In `src/worker/python/control_flow_instrumenter.py`, replace the guarded rewrite with:
 
@@ -104,7 +104,7 @@ python3 -m unittest tests.fixtures.python.test_control_flow_instrumenter
 
 Expected: PASS.
 
-- [ ] **Step 3: Add failing activation-scope tests**
+- [x] **Step 3: Add failing activation-scope tests**
 
 Create `tests/core/control-flow-scope.test.ts`:
 
@@ -150,7 +150,7 @@ npx vitest run tests/core/control-flow-scope.test.ts
 
 Expected: FAIL because the module does not exist.
 
-- [ ] **Step 4: Implement activation-key helpers**
+- [x] **Step 4: Implement activation-key helpers**
 
 Create `src/core/control-flow-scope.ts`:
 
@@ -192,7 +192,7 @@ export function iterationActivationKey(
 }
 ```
 
-- [ ] **Step 5: Extend `ControlFlowInterpretation` with activation-scoped history**
+- [x] **Step 5: Extend `ControlFlowInterpretation` with activation-scoped history**
 
 Add:
 
@@ -214,7 +214,7 @@ npx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 0**
+- [x] **Step 6: Commit Task 0**
 
 ```bash
 git add \
@@ -258,7 +258,7 @@ export interface BuildControlFlowUiModelInput {
 }
 ```
 
-- [ ] **Step 1: Carry runtime context into interpreted Decision evidence**
+- [x] **Step 1: Carry runtime context into interpreted Decision evidence**
 
 Extend `DecisionStepEvidence`:
 
@@ -274,7 +274,7 @@ context: batch.context ?? { loopStack: [] },
 
 Update direct test fixtures constructing `DecisionStepEvidence`.
 
-- [ ] **Step 2: Add failing projection tests**
+- [x] **Step 2: Add failing projection tests**
 
 Create `tests/core/execution-story.test.ts`.
 
@@ -300,7 +300,7 @@ expect(buildControlFlowUiModel({ ...inputAtZeroIterationExit }).currentIteration
 
 The first fixture must have an empty current `contextByStep` at the exit anchor to prove the exact-exit fallback works.
 
-- [ ] **Step 3: Define presentation types**
+- [x] **Step 3: Define presentation types**
 
 In `src/core/execution-story.ts` define:
 
@@ -341,7 +341,7 @@ export interface ControlFlowUiModel {
 }
 ```
 
-- [ ] **Step 4: Implement activation/current-iteration selection, including exact loop-exit steps**
+- [x] **Step 4: Implement activation/current-iteration selection, including exact loop-exit steps**
 
 First use `controlFlow.contextByStep.get(step)` and the deepest loop entry. When a deepest loop exists, derive `activationKey` with `controlFlowActivationKey(frameId, deepest.loopId, currentContext)` and retrieve that history from `iterationsByActivation`.
 
@@ -359,7 +359,7 @@ For an authoritative zero-iteration exit, create an exit-only `LoopActivationVie
 
 Visible iteration ordinal is history index + 1; raw worker iteration remains untouched.
 
-- [ ] **Step 5: Project decisions and transfers only into the matching activation**
+- [x] **Step 5: Project decisions and transfers only into the matching activation**
 
 Decision matching uses:
 
@@ -383,7 +383,7 @@ A committed return also emits `frame_exit`.
 
 Use transfer source text from `ControlFlowPlan` span + `sourceCode`; fall back to transfer kind if unavailable.
 
-- [ ] **Step 6: Project iteration outcome and loop exit conservatively**
+- [x] **Step 6: Project iteration outcome and loop exit conservatively**
 
 Emit `iteration_outcome` from the selected iteration status when a current iteration exists.
 
@@ -391,7 +391,7 @@ Prefer an exact-step `LoopExitEvidence` when `exit.anchorStep === input.step`. O
 
 For zero-iteration loops, expose only the authoritative loop-exit item on the exact exit step; never fabricate an iteration, binding, or iteration outcome.
 
-- [ ] **Step 7: Project Decision chain occurrence contextually**
+- [x] **Step 7: Project Decision chain occurrence contextually**
 
 Select a `DecisionChainOccurrence` only when:
 - frame matches;
@@ -401,7 +401,7 @@ Select a `DecisionChainOccurrence` only when:
 
 If multiple chains exist and none contains the current step, leave it undefined.
 
-- [ ] **Step 8: Stable ordering**
+- [x] **Step 8: Stable ordering**
 
 Sort by `anchorStep`, then:
 
@@ -427,7 +427,7 @@ npx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Task 1**
+- [x] **Step 9: Commit Task 1**
 
 ```bash
 git add \
@@ -453,7 +453,7 @@ git commit -m "feat: project control flow into execution story model"
 - Consumes `onNavigateStep(step: number): void`.
 - Produces DOM only; it never owns a cursor.
 
-- [ ] **Step 1: Add failing DOM tests**
+- [x] **Step 1: Add failing DOM tests**
 
 Construct a model for:
 
@@ -470,7 +470,7 @@ Loop exited · break
 
 Assert required data attributes and click an item with anchor step `14`; expect `onNavigateStep(14)`.
 
-- [ ] **Step 2: Add neutral/tracing-state tests**
+- [x] **Step 2: Add neutral/tracing-state tests**
 
 Assert:
 - `Control-flow tracing truncated · control_flow_event_limit`
@@ -479,7 +479,7 @@ Assert:
 
 Captured story/history must remain visible below a truncation banner.
 
-- [ ] **Step 3: Implement `createExecutionStory()`**
+- [x] **Step 3: Implement `createExecutionStory()`**
 
 ```ts
 export interface ExecutionStoryOptions {
@@ -494,7 +494,7 @@ export function createExecutionStory(
 
 Render tracing state, loop context, story items, then iteration history.
 
-- [ ] **Step 4: Render context and bindings**
+- [x] **Step 4: Render context and bindings**
 
 Header:
 
@@ -505,7 +505,7 @@ Iteration #2
 
 Nested ancestry remains textual. Use `formatValue()` for compact captured bindings; do not duplicate Locals.
 
-- [ ] **Step 5: Render factual row copy**
+- [x] **Step 5: Render factual row copy**
 
 Required mappings:
 
@@ -526,13 +526,13 @@ trace_ended     -> Loop evidence ended · trace ended
 
 Transfer phases render `Observed`, `Committed`, `Superseded`, or `Confirmation unavailable`.
 
-- [ ] **Step 6: Render activation-local history**
+- [x] **Step 6: Render activation-local history**
 
 Visible rows use local ordinals `#1`, `#2`, ... and keep raw worker iteration in `data-raw-iteration`.
 
 History buttons navigate to `anchorStepStart`.
 
-- [ ] **Step 7: Add focused CSS**
+- [x] **Step 7: Add focused CSS**
 
 Add `.execution-story*` rules using current Side Panel spacing/border/button conventions. No new global color system.
 
@@ -544,7 +544,7 @@ npx vitest run tests/sidepanel/execution-story.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 ```bash
 git add \
@@ -566,7 +566,7 @@ git commit -m "feat: render control flow execution story"
 - `TraceVisualizer` remains the sole raw cursor owner.
 - Story navigation is `anchorStep -> traceIndex.stepToIndex -> navigateDirect(index)`.
 
-- [ ] **Step 1: Add a failing Side Panel integration fixture**
+- [x] **Step 1: Add a failing Side Panel integration fixture**
 
 Create a `TraceSession` fixture with `controlFlowPlan`, `controlFlowBatches`, and `controlFlowTracing`.
 
@@ -574,7 +574,7 @@ Assert the panel exists and shows `Iteration #1`.
 
 Expected before implementation: FAIL because `TraceVisualizer` does not yet pass Control-Flow evidence into `interpretTrace()`.
 
-- [ ] **Step 2: Pass Control-Flow evidence into `interpretTrace()`**
+- [x] **Step 2: Pass Control-Flow evidence into `interpretTrace()`**
 
 Use:
 
@@ -595,7 +595,7 @@ const interpretation = interpretTrace(
 );
 ```
 
-- [ ] **Step 3: Create the panel conditionally**
+- [x] **Step 3: Create the panel conditionally**
 
 Render it when Control-Flow plan/batches exist or tracing is non-complete.
 
@@ -610,17 +610,17 @@ Expression Evidence
 ...
 ```
 
-- [ ] **Step 4: Rebuild only the body on `setStep()`**
+- [x] **Step 4: Rebuild only the body on `setStep()`**
 
 Call `buildControlFlowUiModel()` for the current raw event and render `createExecutionStory()`.
 
 Do not replace the outer `<details>` panel so collapsed/open state survives navigation.
 
-- [ ] **Step 5: Add cursor-navigation regression**
+- [x] **Step 5: Add cursor-navigation regression**
 
 Click a story/history item and assert root `data-step-index` changes. Also verify Previous/Next/Play still use the same cursor.
 
-- [ ] **Step 6: Keep the panel absent for sessions with no Control-Flow evidence**
+- [x] **Step 6: Keep the panel absent for sessions with no Control-Flow evidence**
 
 Existing fixtures must not gain an empty panel.
 
@@ -632,7 +632,7 @@ npx vitest run tests/sidepanel/trace-visualizer.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
 git add \
@@ -654,11 +654,11 @@ git commit -m "feat: integrate execution story with trace navigation"
 **Interfaces:**
 - `DecisionEvidenceOptions.chain` becomes `DecisionChainOccurrence | undefined`.
 
-- [ ] **Step 1: Change the Decision component input type**
+- [x] **Step 1: Change the Decision component input type**
 
 Replace `DecisionChainEvidence` with `DecisionChainOccurrence`.
 
-- [ ] **Step 2: Render occurrence metadata**
+- [x] **Step 2: Render occurrence metadata**
 
 Set:
 
@@ -672,17 +672,17 @@ data-anchor-step-end
 
 Use title `Branch chain · steps 12–14` instead of a static ID-centric label.
 
-- [ ] **Step 3: Add two-occurrence DOM regression**
+- [x] **Step 3: Add two-occurrence DOM regression**
 
 Create two occurrences with the same static chain but different contexts/selected branches and assert no selection leaks.
 
-- [ ] **Step 4: Select exact current-step chain first, contextual chain second**
+- [x] **Step 4: Select exact current-step chain first, contextual chain second**
 
 In `TraceVisualizer`:
 1. exact current decision anchor lookup wins;
 2. otherwise use `controlFlowUiModel.decisionChainOccurrence`.
 
-- [ ] **Step 5: Run and commit**
+- [x] **Step 5: Run and commit**
 
 ```bash
 npx vitest run \
@@ -714,7 +714,7 @@ git commit -m "feat: render decision chains by runtime occurrence"
 - One primary badge only.
 - Priority: committed transfer > observed transfer > iteration boundary > Decision badge.
 
-- [ ] **Step 1: Add failing priority tests**
+- [x] **Step 1: Add failing priority tests**
 
 Assert:
 - committed break -> `break committed`
@@ -722,7 +722,7 @@ Assert:
 - iteration start -> `iteration #2`
 - otherwise decision -> `condition False`
 
-- [ ] **Step 2: Generalize the existing code badge**
+- [x] **Step 2: Generalize the existing code badge**
 
 Use one element with:
 
@@ -732,11 +732,11 @@ data-code-evidence-badge="true"
 
 rather than independent Decision and Control-Flow badges.
 
-- [ ] **Step 3: Implement factual priority selection**
+- [x] **Step 3: Implement factual priority selection**
 
 Only current-step evidence may produce a Control-Flow badge; do not infer from source text.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 ```bash
 npx vitest run tests/sidepanel/trace-visualizer.test.ts
@@ -769,7 +769,7 @@ git commit -m "feat: show factual control flow source badges"
 - Produces `ControlFlowOutlineGroup[]`.
 - Existing `TraceFoldModel` and repeated-transition behavior remain unchanged.
 
-- [ ] **Step 1: Add outline projection types**
+- [x] **Step 1: Add outline projection types**
 
 Add:
 
@@ -794,11 +794,11 @@ export interface ControlFlowOutlineGroup {
 
 Implement `buildControlFlowOutlineGroups(plan, controlFlow)` from `iterationsByActivation`.
 
-- [ ] **Step 2: Test repeated inner activations stay separate**
+- [x] **Step 2: Test repeated inner activations stay separate**
 
 Two outer iterations must produce two separate inner `f2` groups, with local ordinals restarting at 1.
 
-- [ ] **Step 3: Extend `TraceOutlineOptions`**
+- [x] **Step 3: Extend `TraceOutlineOptions`**
 
 Add optional Control-Flow groups already converted to raw indexes:
 
@@ -818,15 +818,15 @@ controlFlowGroups?: Array<{
 
 Render a collapsible `Loop iterations` section above existing fold segments.
 
-- [ ] **Step 4: Preserve behavioral folding unchanged**
+- [x] **Step 4: Preserve behavioral folding unchanged**
 
 Do not alter repeated-transition fold semantics, expansion state, or raw-range navigation.
 
-- [ ] **Step 5: Convert anchor steps to indexes in `TraceVisualizer`**
+- [x] **Step 5: Convert anchor steps to indexes in `TraceVisualizer`**
 
 Use `traceIndex.stepToIndex`. If an anchor cannot resolve, omit that navigable row instead of inventing an index.
 
-- [ ] **Step 6: Add DOM/navigation regressions**
+- [x] **Step 6: Add DOM/navigation regressions**
 
 Assert:
 - repeated inner activations are separate;
@@ -842,7 +842,7 @@ npx vitest run \
   tests/sidepanel/trace-visualizer.test.ts
 ```
 
-- [ ] **Step 7: Commit Task 6**
+- [x] **Step 7: Commit Task 6**
 
 ```bash
 git add \
@@ -871,7 +871,7 @@ git commit -m "feat: group trace outline by loop activation"
 - No new runtime interfaces.
 - Locks neutral copy and unchanged neighboring features.
 
-- [ ] **Step 1: Test neutral partial states**
+- [x] **Step 1: Test neutral partial states**
 
 Cover:
 - `No control-flow evidence for this step.`
@@ -882,29 +882,29 @@ Cover:
 
 Never turn absence into a negative factual claim.
 
-- [ ] **Step 2: Test truncation preserves captured evidence**
+- [x] **Step 2: Test truncation preserves captured evidence**
 
 A truncation banner must coexist with already captured story/history.
 
-- [ ] **Step 3: Lock accessibility semantics**
+- [x] **Step 3: Lock accessibility semantics**
 
 Every navigable row must be keyboard-accessible and have a distinct `aria-label`, e.g. `Inspect break committed · step 14`.
 
-- [ ] **Step 4: Verify Behavioral Timeline stays Control-Flow-free**
+- [x] **Step 4: Verify Behavioral Timeline stays Control-Flow-free**
 
 Add regression assertions only; do not change `BehavioralTimeline.ts`.
 
-- [ ] **Step 5: Verify Failure-First stays unchanged**
+- [x] **Step 5: Verify Failure-First stays unchanged**
 
 Use a timeout session containing both Control-Flow evidence and an existing behavioral pattern. Failure-First must still navigate to the current behavioral selection.
 
 Do not change `failure-first-selection.ts`.
 
-- [ ] **Step 6: Verify Decision and Expression panels stay independently usable**
+- [x] **Step 6: Verify Decision and Expression panels stay independently usable**
 
 Their existing controls must continue to navigate the same raw cursor.
 
-- [ ] **Step 7: Run and commit**
+- [x] **Step 7: Run and commit**
 
 ```bash
 npx vitest run \
@@ -936,7 +936,7 @@ git commit -m "test: harden execution story evidence boundaries"
 - Modify tests only if a real uncovered regression is discovered.
 - No unrelated refactors.
 
-- [ ] **Step 1: Add one realistic nested-loop runtime-to-UI regression**
+- [x] **Step 1: Add one realistic nested-loop runtime-to-UI regression**
 
 Use source equivalent to:
 
@@ -962,7 +962,7 @@ Generate or reuse real runtime evidence, construct the Side Panel session, and a
 - committed return;
 - raw-step navigation.
 
-- [ ] **Step 2: Run Python fixtures**
+- [x] **Step 2: Run Python fixtures**
 
 ```bash
 python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
@@ -970,7 +970,7 @@ python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
 
 Expected: PASS.
 
-- [ ] **Step 3: Run complete Vitest**
+- [x] **Step 3: Run complete Vitest**
 
 ```bash
 npm test
@@ -978,7 +978,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 4: Run typecheck**
+- [x] **Step 4: Run typecheck**
 
 ```bash
 npm run typecheck
@@ -986,7 +986,7 @@ npm run typecheck
 
 Expected: exit code 0.
 
-- [ ] **Step 5: Run production builds**
+- [x] **Step 5: Run production builds**
 
 ```bash
 npm run build
@@ -994,7 +994,7 @@ npm run build
 
 Expected: Side Panel/worker, content script, and page bridge all build.
 
-- [ ] **Step 6: Verify Definition of Done**
+- [x] **Step 6: Verify Definition of Done**
 
 Confirm tests protect:
 
@@ -1021,7 +1021,7 @@ Failure-First remains unchanged
 keyboard/data semantics exist
 ```
 
-- [ ] **Step 7: Commit final test-only adjustment if needed**
+- [x] **Step 7: Commit final test-only adjustment if needed**
 
 Do not create an empty commit.
 
@@ -1045,3 +1045,17 @@ Do not mark this phase complete until the pushed head SHA is green.
 Execute Tasks 0 → 8 in order.
 
 Task 0 folds the two post-review prerequisites into this phase without reopening the worker protocol. Task 1 creates the pure activation-scoped projection. Tasks 2–6 add the UI while preserving the current cursor and neighboring debugger surfaces. Task 7 locks epistemic/accessibility boundaries. Task 8 validates the full runtime-to-UI path.
+
+
+## Execution record — 2026-09-18
+
+Implemented inline on `codex/execution-story-ui`. Each functional increment used failing tests before implementation; the full runtime-to-UI regression was then added as an integration gate.
+
+- Task 0 uses a stronger false-observer regression than the illustrative `return 7` example: break must yield `[]`, continue must yield `[2]`. Both failed with the original guarded probe and passed after the side-effect-only rewrite.
+- Activation map regressions live in `tests/core/control-flow-scope.test.ts`; additional interpreter coverage protects frame isolation and shared resolution/begin anchors.
+- Shared test inputs live in `tests/fixtures/execution-story.ts`.
+- Final boundary review added explicit occurrence checks for decisions/actions/chains sharing a raw anchor, and prevents another frame's context from creating an empty activation.
+- Bare-return display adds optional presentation-only `bareReturn` metadata to a committed frame-exit item. Missing source text never implies `None`; worker/wire types are unchanged.
+- Final local Vitest: 654 passing across 64 files. Python fixtures: 59 passing. Typecheck and all three production builds pass. Build emits Pyodide browser-externalization warnings.
+- Independent review reproduced nested and zero-iteration inner exits being attached to the still-active parent. A real Pyodide RED→GREEN regression now protects both cases; exact exit anchors select the exited activation, extending the original no-active-context-only fallback to preserve factual scope.
+- GitHub Actions validation is pending the push step above.

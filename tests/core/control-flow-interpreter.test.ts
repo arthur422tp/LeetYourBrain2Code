@@ -221,3 +221,16 @@ describe("control-flow-interpreter", () => {
     expect(result.loopExits.map((exit) => exit.reason)).toEqual(["exception", "exception"]);
   });
 });
+
+it("selects the new occurrence at a shared boundary only in its active frame",()=>{
+  const first={loopStack:[{loopId:'f1',iteration:1}]};
+  const second={loopStack:[{loopId:'f1',iteration:2}]};
+  const result=buildControlFlowEvidence(plan,[batch([
+    {...baseEvent(1,1,first),kind:'iteration_begin',loopId:'f1',loopKind:'for',iteration:1,bindings:[]},
+    {...baseEvent(2,3,first),kind:'iteration_complete',loopId:'f1',iteration:1},
+    {...baseEvent(3,3,second),kind:'iteration_begin',loopId:'f1',loopKind:'for',iteration:2,bindings:[]},
+    {...baseEvent(4,6,second),kind:'iteration_complete',loopId:'f1',iteration:2}
+  ])],reconstructStates([rawEvent(1),rawEvent(3),{...rawEvent(4),event:'call',frameId:2,parentFrameId:1,function:'inner',callDepth:2}]));
+  expect(result.contextByStep.get(3)).toEqual(second);
+  expect(result.contextByStep.get(4)).toEqual({loopStack:[]});
+});

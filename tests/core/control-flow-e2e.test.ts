@@ -350,3 +350,59 @@ describe("control-flow evidence end to end", () => {
     expect(result.events.every((event) => event.line === null || event.line <= sourceLineCount)).toBe(true);
   });
 });
+
+it("renders a real nested-loop execution through the Side Panel raw cursor",async()=>{
+  const {createTraceVisualizer}=await import('../../src/sidepanel/components/TraceVisualizer');
+  const sourceCode=`class Solution:
+    def classify(self, matrix):
+        for row in matrix:
+            for value in row:
+                if value < 0:
+                    continue
+                if value == 0:
+                    break
+        return 1
+`;
+  const point=entrypoint('classify',1,['value']);
+  const result=await run('execution-story-ui',sourceCode,'[[-1,2],[3,-1,0]]',point);
+  expect(result.terminal.status).toBe('completed');
+  const handle=createTraceVisualizer({schemaVersion:2,stdout:result.terminal.stdout,limits,sessionId:'execution-story-ui',sourceCode,rawTestcase:'[[-1,2],[3,-1,0]]',entrypoint:point,executionEnvironment:{runtime:'pyodide',pythonVersion:'3.13'},status:result.terminal.status,terminationReason:result.terminal.terminationReason,events:result.events,controlFlowPlan:result.controlPlan,controlFlowBatches:result.controlBatches,conditionPlan:result.decisionPlans[0],decisionBatches:result.decisionBatches,expressionPlan:result.expressionPlans[0],expressionBatches:result.expressionBatches});
+  const breakAction=result.interpretation.controlFlow.actions.find(action=>action.kind==='break')!;
+  const observedIndex=result.events.findIndex(event=>event.step===breakAction.anchorStepObserved);
+  handle.setStep(observedIndex);
+  const story=()=>handle.element.querySelector('.execution-story')!;
+  expect(story().textContent).toContain('f1 · iteration #2');
+  expect(story().textContent).toContain('Iteration #3');
+  expect([...story().querySelectorAll('[data-raw-iteration]')].map(row=>row.getAttribute('data-raw-iteration'))).toEqual(['3','4','5']);
+  expect(story().textContent).toContain('value == 0 → True');
+  expect(story().textContent).toContain('break · Committed');
+  expect(story().textContent).toContain('Broke loop');
+  expect(story().textContent).toContain('Loop exited · break');
+  story().querySelector<HTMLButtonElement>('[data-raw-iteration="4"]')!.click();
+  expect(story().textContent).toContain('continue · Committed');
+  expect(story().textContent).toContain('Continued');
+  const returning=result.interpretation.controlFlow.actions.find(action=>action.kind==='return')!;
+  handle.setStep(result.events.findIndex(event=>event.step===returning.anchorStepResolved));
+  expect(story().textContent).toContain('return 1 · Committed');
+  expect(story().textContent).toContain('Function exited');
+  handle.dispose();
+});
+
+it("selects the exited inner activation including its zero-iteration occurrence",async()=>{
+  const {buildControlFlowUiModel}=await import('../../src/core/execution-story');
+  const sourceCode=`class Solution:
+    def solve(self):
+        for row in [[1], []]:
+            for x in row:
+                pass
+        return 1
+`;
+  const result=await run('inner-exit-story',sourceCode,'',entrypoint('solve',0,[]));
+  const innerExits=result.interpretation.controlFlow.loopExits.filter(exit=>exit.loopId==='f2');
+  expect(innerExits).toHaveLength(2);
+  const models=innerExits.map(exit=>buildControlFlowUiModel({step:exit.anchorStep,frameId:exit.frameId,sourceCode,plan:result.controlPlan,controlFlow:result.interpretation.controlFlow,decisionEvidence:result.interpretation.decisionEvidence,decisionChains:result.interpretation.decisionChains}));
+  expect(models.map(model=>model.currentActivation?.loopId)).toEqual(['f2','f2']);
+  expect(models.map(model=>model.iterationHistory.length)).toEqual([1,0]);
+  expect(models[1]!.currentIteration).toBeUndefined();
+  expect(models[1]!.storyItems.map(item=>item.kind)).toEqual(['loop_exit']);
+});

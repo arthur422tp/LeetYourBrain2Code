@@ -231,8 +231,8 @@ export function buildControlFlowEvidence(
   const contextByStep = new Map<number, ExecutionContextRef>();
   for (const state of runtimeStates) {
     const matching = iterations
-      .filter((iteration) => iteration.anchorStepStart <= state.step && state.step <= iteration.anchorStepEnd)
-      .sort((left, right) => right.context.loopStack.length - left.context.loopStack.length);
+      .filter((iteration) => iteration.frameId === state.activeFrameId && iteration.anchorStepStart <= state.step && state.step <= iteration.anchorStepEnd)
+      .sort((left, right) => right.context.loopStack.length - left.context.loopStack.length || right.anchorStepStart - left.anchorStepStart);
     contextByStep.set(state.step, matching[0] ? cloneContext(matching[0].context) : { loopStack: [] });
   }
   const iterationsByLoop = new Map<string, LoopIterationEvidence[]>();

@@ -64,6 +64,16 @@ function isControlFlowMessage(value: unknown): boolean {
   );
 }
 
+function isCallFrameMessage(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "type" in value &&
+    (value.type === "function_plan" || value.type === "call_frame_batch")
+  );
+}
+
 function internalErrorResult(
   message: string,
   duringInitialization = false
@@ -240,7 +250,7 @@ export class ExecutionController {
 
           onMessage = (event: MessageEvent): void => {
             if (!isWorkerOutboundMessage(event.data)) {
-              if (isExpressionMessage(event.data) || isDecisionMessage(event.data) || isControlFlowMessage(event.data)) {
+              if (isExpressionMessage(event.data) || isDecisionMessage(event.data) || isControlFlowMessage(event.data) || isCallFrameMessage(event.data)) {
                 return;
               }
               fail("Worker sent malformed protocol message");
@@ -291,6 +301,18 @@ export class ExecutionController {
               }
               return;
             }
+            if (message.type === "function_plan") {
+              if (message.sessionId === request.sessionId) {
+                collector.setFunctionPlan(message.plan);
+              }
+              return;
+            }
+            if (message.type === "call_frame_batch") {
+              if (message.sessionId === request.sessionId) {
+                collector.appendCallFrameBatches(message.batches);
+              }
+              return;
+            }
             if (message.type === "execution_finished") {
               if (message.sessionId === request.sessionId) {
                 if (message.result.expressionPlan) {
@@ -319,6 +341,15 @@ export class ExecutionController {
                 }
                 if (message.result.controlFlowTracing) {
                   collector.setControlFlowTracingState(message.result.controlFlowTracing);
+                }
+                if (message.result.functionPlan) {
+                  collector.setFunctionPlan(message.result.functionPlan);
+                }
+                if (message.result.callFrameBatches) {
+                  collector.appendCallFrameBatches(message.result.callFrameBatches);
+                }
+                if (message.result.callFrameTracing) {
+                  collector.setCallFrameTracingState(message.result.callFrameTracing);
                 }
                 finish(
                   collector.finish(message.result),

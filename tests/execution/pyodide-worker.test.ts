@@ -8,6 +8,7 @@ import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
 import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
+import type { CallFrameBatch, FunctionPlan } from "../../src/shared/call-frame-types";
 import type {
   PyodideRuntime,
   PyodideRuntimeOptions
@@ -68,6 +69,20 @@ const controlFlowPlan: ControlFlowPlan = { version: 1, loops: [], transfers: [] 
 const controlFlowBatch: ControlFlowBatch = {
   batchId: 1,
   events: [{ eventId: 1, kind: "loop_exit", anchorStep: 1, frameId: 1, context: { loopStack: [] }, loopId: "f1", loopKind: "for", reason: "exhausted" }]
+};
+const functionPlan: FunctionPlan = { version: 1, functions: [] };
+const callFrameBatch: CallFrameBatch = {
+  batchId: 1,
+  updates: [{
+    updateId: 1,
+    kind: "frame_enter",
+    frameId: 1,
+    parentFrameId: null,
+    functionName: "one",
+    callStep: 1,
+    depth: 1,
+    arguments: []
+  }]
 };
 
 describe("Pyodide worker", () => {
@@ -168,6 +183,8 @@ describe("Pyodide worker", () => {
     callbacks?.onDecisionBatch?.("worker-session", [decisionBatch]);
     callbacks?.onControlFlowPlan?.("worker-session", controlFlowPlan);
     callbacks?.onControlFlowBatch?.("worker-session", [controlFlowBatch]);
+    callbacks?.onFunctionPlan?.("worker-session", functionPlan);
+    callbacks?.onCallFrameBatch?.("worker-session", [callFrameBatch]);
     callbacks?.onTraceBatch?.("worker-session", [trace]);
     callbacks?.onFinished?.(result);
 
@@ -178,6 +195,8 @@ describe("Pyodide worker", () => {
       { type: "decision_batch", sessionId: "worker-session", batches: [decisionBatch] },
       { type: "control_flow_plan", sessionId: "worker-session", plan: controlFlowPlan },
       { type: "control_flow_batch", sessionId: "worker-session", batches: [controlFlowBatch] },
+      { type: "function_plan", sessionId: "worker-session", plan: functionPlan },
+      { type: "call_frame_batch", sessionId: "worker-session", batches: [callFrameBatch] },
       { type: "trace_batch", sessionId: "worker-session", events: [trace] },
       { type: "execution_finished", sessionId: "worker-session", result }
     ]);

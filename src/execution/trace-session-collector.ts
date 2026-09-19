@@ -24,6 +24,11 @@ import type {
   ControlFlowPlan,
   ControlFlowTracingState
 } from "../shared/control-flow-types";
+import type {
+  CallFrameBatch,
+  CallFrameTracingState,
+  FunctionPlan
+} from "../shared/call-frame-types";
 
 export interface TraceSessionCollectorOptions {
   sessionId: string;
@@ -56,6 +61,11 @@ export class TraceSessionCollector {
   private readonly controlFlowBatchIds = new Set<number>();
   private controlFlowTracing: ControlFlowTracingState | undefined;
   private controlFlowBytes = 0;
+  private functionPlan: FunctionPlan | undefined;
+  private readonly callFrameBatches: CallFrameBatch[] = [];
+  private readonly callFrameBatchIds = new Set<number>();
+  private callFrameTracing: CallFrameTracingState | undefined;
+  private callFrameBytes = 0;
   private terminalSession: TraceSession | null = null;
 
   public constructor(options: TraceSessionCollectorOptions) {
@@ -171,6 +181,30 @@ export class TraceSessionCollector {
     this.controlFlowTracing = state;
   }
 
+  public setFunctionPlan(plan: FunctionPlan): void {
+    if (!this.terminalSession) this.functionPlan = plan;
+  }
+
+  public appendCallFrameBatches(batches: CallFrameBatch[]): void {
+    if (this.terminalSession || this.callFrameTracing?.status === "truncated") return;
+    for (const batch of batches) {
+      if (this.callFrameBatchIds.has(batch.batchId)) continue;
+      const batchBytes = this.encodedEventBytes.encode(JSON.stringify(batch)).byteLength;
+      if (this.callFrameBytes + batchBytes > this.options.limits.maxCallFrameBytes) {
+        this.callFrameTracing = { status: "truncated", reason: "call_frame_byte_limit" };
+        return;
+      }
+      this.callFrameBytes += batchBytes;
+      this.callFrameBatchIds.add(batch.batchId);
+      this.callFrameBatches.push(batch);
+    }
+  }
+
+  public setCallFrameTracingState(state: CallFrameTracingState): void {
+    if (this.terminalSession || this.callFrameTracing?.status === "truncated") return;
+    this.callFrameTracing = state;
+  }
+
   public finish(result: ExecutionTerminalResult): TraceSession {
     if (this.terminalSession) {
       return this.terminalSession;
@@ -179,6 +213,9 @@ export class TraceSessionCollector {
     if (result.controlFlowPlan) this.setControlFlowPlan(result.controlFlowPlan);
     if (result.controlFlowBatches) this.appendControlFlowBatches(result.controlFlowBatches);
     if (result.controlFlowTracing) this.setControlFlowTracingState(result.controlFlowTracing);
+    if (result.functionPlan) this.setFunctionPlan(result.functionPlan);
+    if (result.callFrameBatches) this.appendCallFrameBatches(result.callFrameBatches);
+    if (result.callFrameTracing) this.setCallFrameTracingState(result.callFrameTracing);
 
     const terminalResult = this.resourceLimitReached
       ? {
@@ -236,7 +273,10 @@ export class TraceSessionCollector {
       ...(this.decisionTracing ? { decisionTracing: this.decisionTracing } : {}),
       ...(this.controlFlowPlan ? { controlFlowPlan: this.controlFlowPlan } : {}),
       ...(this.controlFlowBatches.length > 0 ? { controlFlowBatches: [...this.controlFlowBatches] } : {}),
-      ...(this.controlFlowTracing ? { controlFlowTracing: this.controlFlowTracing } : {})
+      ...(this.controlFlowTracing ? { controlFlowTracing: this.controlFlowTracing } : {}),
+      ...(this.functionPlan ? { functionPlan: this.functionPlan } : {}),
+      ...(this.callFrameBatches.length > 0 ? { callFrameBatches: [...this.callFrameBatches] } : {}),
+      ...(this.callFrameTracing ? { callFrameTracing: this.callFrameTracing } : {})
     };
   }
 }

@@ -10,6 +10,7 @@ import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type { ConditionPlan, DecisionBatch } from "../../src/shared/decision-types";
 import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
+import type { CallFrameBatch, FunctionPlan } from "../../src/shared/call-frame-types";
 import {
   TraceSessionCollector,
   type TraceSessionCollectorOptions
@@ -146,15 +147,38 @@ const controlFlowBatch: ControlFlowBatch = {
   }]
 };
 
+const functionPlan: FunctionPlan = { version: 1, functions: [] };
+const callFrameBatch: CallFrameBatch = {
+  batchId: 1,
+  updates: [{
+    updateId: 1,
+    kind: "frame_enter",
+    frameId: 1,
+    parentFrameId: null,
+    functionName: "one",
+    callStep: 1,
+    depth: 1,
+    arguments: []
+  }, {
+    updateId: 2,
+    kind: "frame_return",
+    frameId: 1,
+    exitStep: 2,
+    value: { type: "int", value: "1" }
+  }]
+};
+
 class FakeWorker implements WorkerLike {
   readonly posted: unknown[] = [];
   terminated = false;
   private messageListeners: Array<(event: MessageEvent) => void> = [];
   private errorListeners: Array<(event: ErrorEvent) => void> = [];
   private readonly finish: boolean;
+  private readonly frameEvidence: boolean;
 
-  constructor(finish: boolean) {
+  constructor(finish: boolean, frameEvidence = false) {
     this.finish = finish;
+    this.frameEvidence = frameEvidence;
   }
 
   addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
@@ -197,8 +221,20 @@ class FakeWorker implements WorkerLike {
       queueMicrotask(() => {
         this.emit({ type: "trace_batch", sessionId: request.sessionId, events: Array.from({ length: 50 }, (_, index) => event(index + 1)) });
         this.emit({ type: "trace_batch", sessionId: request.sessionId, events: Array.from({ length: 50 }, (_, index) => event(index + 51)) });
+        if (this.frameEvidence) {
+          this.emit({ type: "function_plan", sessionId: request.sessionId, plan: functionPlan });
+          this.emit({ type: "call_frame_batch", sessionId: request.sessionId, batches: [callFrameBatch] });
+        }
         if (this.finish) {
-          this.emit({ type: "execution_finished", sessionId: request.sessionId, result: terminalResult() });
+          this.emit({
+            type: "execution_finished",
+            sessionId: request.sessionId,
+            result: terminalResult(this.frameEvidence ? {
+              functionPlan,
+              callFrameBatches: [callFrameBatch],
+              callFrameTracing: { status: "complete" }
+            } : {})
+          });
         }
       });
     }
@@ -406,6 +442,58 @@ describe("TraceSessionCollector", () => {
     expect(session.controlFlowBatches).toEqual([controlFlowBatch]);
   });
 
+  it("preserves streamed function plans and de-duplicates terminal frame batches", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+    collector.setFunctionPlan(functionPlan);
+    collector.appendCallFrameBatches([callFrameBatch, callFrameBatch]);
+    const session = collector.finish(terminalResult({
+      functionPlan,
+      callFrameBatches: [callFrameBatch],
+      callFrameTracing: { status: "complete" }
+    }));
+
+    expect(session.functionPlan).toEqual(functionPlan);
+    expect(session.callFrameBatches).toEqual([callFrameBatch]);
+    expect(session.callFrameTracing).toEqual({ status: "complete" });
+  });
+
+  it("truncates call-frame bytes independently while preserving raw trace events", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions({
+      limits: { ...limits, maxCallFrameBytes: 1 }
+    }));
+    collector.append([event(1)]);
+    collector.appendCallFrameBatches([callFrameBatch]);
+    const session = collector.finish(terminalResult());
+
+    expect(session.events).toHaveLength(1);
+    expect(session.callFrameBatches).toBeUndefined();
+    expect(session.callFrameTracing).toEqual({
+      status: "truncated",
+      reason: "call_frame_byte_limit"
+    });
+    expect(session.status).toBe("completed");
+  });
+
+  it("preserves streamed call-frame evidence when hard timeout closes the session", () => {
+    const collector = new TraceSessionCollector(createCollectorOptions());
+    collector.setFunctionPlan(functionPlan);
+    collector.appendCallFrameBatches([callFrameBatch]);
+
+    const session = collector.forceTimeout();
+
+    expect(session.status).toBe("timeout");
+    expect(session.functionPlan).toEqual(functionPlan);
+    expect(session.callFrameBatches).toEqual([callFrameBatch]);
+  });
+
+  it("keeps sessions without call-frame fields backward compatible", () => {
+    const session = new TraceSessionCollector(createCollectorOptions()).finish(terminalResult());
+
+    expect(session.functionPlan).toBeUndefined();
+    expect(session.callFrameBatches).toBeUndefined();
+    expect(session.callFrameTracing).toBeUndefined();
+  });
+
   it("keeps all received batches when the controller hard-times out", async () => {
     let worker: FakeWorker | undefined;
     const controller = new ExecutionController({
@@ -423,6 +511,18 @@ describe("TraceSessionCollector", () => {
     expect(session.events.at(-1)?.step).toBe(100);
     expect(session.status).toBe("timeout");
     expect(session.terminationReason).toBe("hard_timeout");
+  });
+
+  it("routes streamed function plans and call-frame batches through the controller", async () => {
+    const controller = new ExecutionController({
+      workerFactory: () => new FakeWorker(true, true)
+    });
+
+    const session = await controller.execute(request);
+
+    expect(session.functionPlan).toEqual(functionPlan);
+    expect(session.callFrameBatches).toEqual([callFrameBatch]);
+    expect(session.callFrameTracing).toEqual({ status: "complete" });
   });
 
   it("keeps a partial received batch when the controller hard-times out", async () => {

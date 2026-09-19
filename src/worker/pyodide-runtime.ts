@@ -28,6 +28,13 @@ import type {
   LoopKind,
   TransferKind
 } from "../shared/control-flow-types";
+import type {
+  BoundArgumentSnapshot,
+  CallFrameBatch,
+  CallFrameRuntimeUpdate,
+  CallFrameTracingState,
+  FunctionPlan
+} from "../shared/call-frame-types";
 import runtimePrelude from "./python/runtime_prelude.py?raw";
 import astAnalyzerSource from "./python/ast_analyzer.py?raw";
 import expressionInstrumenterSource from "./python/expression_instrumenter.py?raw";
@@ -36,6 +43,8 @@ import conditionInstrumenterSource from "./python/condition_instrumenter.py?raw"
 import decisionRecorderSource from "./python/decision_recorder.py?raw";
 import controlFlowInstrumenterSource from "./python/control_flow_instrumenter.py?raw";
 import controlFlowRecorderSource from "./python/control_flow_recorder.py?raw";
+import functionPlannerSource from "./python/function_planner.py?raw";
+import callFrameRecorderSource from "./python/call_frame_recorder.py?raw";
 import runnerSource from "./python/runner.py?raw";
 import serializerSource from "./python/serializer.py?raw";
 import tracerSource from "./python/tracer.py?raw";
@@ -70,6 +79,8 @@ export interface PyodideRuntimeOptions {
   onDecisionBatch?: (sessionId: string, batches: DecisionBatch[]) => void;
   onControlFlowPlan?: (sessionId: string, plan: ControlFlowPlan) => void;
   onControlFlowBatch?: (sessionId: string, batches: ControlFlowBatch[]) => void;
+  onFunctionPlan?: (sessionId: string, plan: FunctionPlan) => void;
+  onCallFrameBatch?: (sessionId: string, batches: CallFrameBatch[]) => void;
   onFinished?: (result: ExecutionTerminalResult) => void;
 }
 
@@ -141,6 +152,14 @@ __lc_control_flow_recorder_module = types.ModuleType("control_flow_recorder")
 sys.modules["control_flow_recorder"] = __lc_control_flow_recorder_module
 exec(compile(${quotePython(controlFlowRecorderSource)}, "<leetcode-control-flow-recorder>", "exec"), vars(__lc_control_flow_recorder_module), vars(__lc_control_flow_recorder_module))
 
+__lc_function_planner_module = types.ModuleType("function_planner")
+sys.modules["function_planner"] = __lc_function_planner_module
+exec(compile(${quotePython(functionPlannerSource)}, "<leetcode-function-planner>", "exec"), vars(__lc_function_planner_module), vars(__lc_function_planner_module))
+
+__lc_call_frame_recorder_module = types.ModuleType("call_frame_recorder")
+sys.modules["call_frame_recorder"] = __lc_call_frame_recorder_module
+exec(compile(${quotePython(callFrameRecorderSource)}, "<leetcode-call-frame-recorder>", "exec"), vars(__lc_call_frame_recorder_module), vars(__lc_call_frame_recorder_module))
+
 __lc_runner_module = types.ModuleType("runner")
 exec(compile(${quotePython(runnerSource)}, "<leetcode-runner>", "exec"), vars(__lc_runner_module), vars(__lc_runner_module))
 
@@ -169,6 +188,8 @@ __lc_runner_module.run_request(
         "max_decision_bytes": ${request.limits.maxDecisionBytes},
         "max_control_flow_events": ${request.limits.maxControlFlowEvents},
         "max_control_flow_bytes": ${request.limits.maxControlFlowBytes},
+        "max_call_frame_events": ${request.limits.maxCallFrameEvents},
+        "max_call_frame_bytes": ${request.limits.maxCallFrameBytes},
     },
     runtime_globals=__lc_runtime_namespace,
     session_id=${quotePython(request.sessionId)},
@@ -179,6 +200,8 @@ __lc_runner_module.run_request(
     emit_decision_batch=globals().get("__lc_emit_decision_batch"),
     emit_control_flow_plan=globals().get("__lc_emit_control_flow_plan"),
     emit_control_flow_batch=globals().get("__lc_emit_control_flow_batch"),
+    emit_function_plan=globals().get("__lc_emit_function_plan"),
+    emit_call_frame_batch=globals().get("__lc_emit_call_frame_batch"),
 )
 `;
 }
@@ -520,6 +543,169 @@ function normalizeSourceSpan(value: unknown): { line: number; column: number; en
     return undefined;
   }
   return { line, column, endLine, endColumn };
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function normalizeFunctionPlan(value: unknown): FunctionPlan | undefined {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.functions)) {
+    return undefined;
+  }
+
+  const functions = value.functions.map((raw) => {
+    if (!isRecord(raw)) return null;
+    const functionId = rawField(raw, "function_id", "functionId");
+    const qualifiedName = rawField(raw, "qualified_name", "qualifiedName");
+    const firstBodyLine = "first_body_line" in raw ? raw.first_body_line : raw.firstBodyLine;
+    const parameterNames = raw.parameter_names ?? raw.parameterNames;
+    const parameterKinds = raw.parameter_kinds ?? raw.parameterKinds;
+    const parentFunctionId = raw.parent_function_id ?? raw.parentFunctionId;
+    const parentClassName = raw.parent_class_name ?? raw.parentClassName;
+    const span = normalizeSourceSpan(raw.span);
+    if (
+      typeof functionId !== "string" || functionId.length === 0 ||
+      !["function", "method", "nested_function"].includes(String(raw.kind)) ||
+      typeof raw.name !== "string" || raw.name.length === 0 ||
+      typeof qualifiedName !== "string" || qualifiedName.length === 0 ||
+      !span ||
+      (firstBodyLine !== null && !isPositiveInteger(firstBodyLine)) ||
+      !Array.isArray(parameterNames) || !parameterNames.every((item) => typeof item === "string") ||
+      !Array.isArray(parameterKinds) || parameterKinds.length !== parameterNames.length ||
+      !parameterKinds.every((item) => [
+        "positional_only",
+        "positional_or_keyword",
+        "keyword_only",
+        "varargs",
+        "varkw",
+        "unknown"
+      ].includes(String(item))) ||
+      (parentFunctionId !== undefined && typeof parentFunctionId !== "string") ||
+      (parentClassName !== undefined && typeof parentClassName !== "string")
+    ) {
+      return null;
+    }
+    return {
+      functionId,
+      kind: raw.kind as FunctionPlan["functions"][number]["kind"],
+      name: raw.name,
+      qualifiedName,
+      span,
+      firstBodyLine: firstBodyLine as number | null,
+      parameterNames,
+      parameterKinds,
+      ...(typeof parentFunctionId === "string" ? { parentFunctionId } : {}),
+      ...(typeof parentClassName === "string" ? { parentClassName } : {})
+    };
+  });
+  if (functions.some((descriptor) => descriptor === null)) return undefined;
+  const normalized = functions as FunctionPlan["functions"];
+  if (new Set(normalized.map((descriptor) => descriptor.functionId)).size !== normalized.length) {
+    return undefined;
+  }
+  return { version: 1, functions: normalized };
+}
+
+function normalizeBoundArgument(value: unknown): BoundArgumentSnapshot | null {
+  if (!isRecord(value) || typeof value.name !== "string" || !isValueSnapshot(value.value)) {
+    return null;
+  }
+  const kinds = [
+    "positional_only",
+    "positional_or_keyword",
+    "keyword_only",
+    "varargs",
+    "varkw",
+    "unknown"
+  ];
+  return kinds.includes(String(value.kind))
+    ? { name: value.name, kind: value.kind as BoundArgumentSnapshot["kind"], value: value.value }
+    : null;
+}
+
+function normalizeCallFrameUpdate(value: unknown): CallFrameRuntimeUpdate | null {
+  if (!isRecord(value)) return null;
+  const updateId = rawField(value, "update_id", "updateId");
+  const frameId = rawField(value, "frame_id", "frameId");
+  if (!isPositiveInteger(updateId) || !isPositiveInteger(frameId)) return null;
+
+  if (value.kind === "frame_enter") {
+    const parentFrameId = "parent_frame_id" in value ? value.parent_frame_id : value.parentFrameId;
+    const functionId = "function_id" in value ? value.function_id : value.functionId;
+    const functionName = value.function_name ?? value.functionName;
+    const callStep = rawField(value, "call_step", "callStep");
+    const depth = value.depth;
+    const rawArguments = value.arguments;
+    const argumentsList = Array.isArray(rawArguments) ? rawArguments.map(normalizeBoundArgument) : null;
+    if (
+      (parentFrameId !== null && !isPositiveInteger(parentFrameId)) ||
+      parentFrameId === frameId ||
+      typeof functionName !== "string" || functionName.length === 0 ||
+      (functionId !== undefined && (typeof functionId !== "string" || functionId.length === 0)) ||
+      !isPositiveInteger(callStep) || !isPositiveInteger(depth) ||
+      argumentsList === null || argumentsList.some((argument) => argument === null)
+    ) {
+      return null;
+    }
+    return {
+      updateId,
+      kind: "frame_enter",
+      frameId,
+      parentFrameId: parentFrameId as number | null,
+      functionName,
+      ...(typeof functionId === "string" ? { functionId } : {}),
+      callStep,
+      depth,
+      arguments: argumentsList as BoundArgumentSnapshot[]
+    };
+  }
+
+  const exitStep = rawField(value, "exit_step", "exitStep");
+  if (value.kind === "frame_return" && isValueSnapshot(value.value)) {
+    if (!isPositiveInteger(exitStep)) return null;
+    return { updateId, kind: "frame_return", frameId, exitStep, value: value.value };
+  }
+  if (value.kind === "frame_exception") {
+    if (!isPositiveInteger(exitStep)) return null;
+    const exception = normalizeException(value.exception);
+    return exception ? { updateId, kind: "frame_exception", frameId, exitStep, exception } : null;
+  }
+  if (value.kind === "frame_trace_ended" && typeof value.reason === "string" && value.reason.length > 0) {
+    return {
+      updateId,
+      kind: "frame_trace_ended",
+      frameId,
+      reason: value.reason,
+      ...(isPositiveInteger(exitStep) ? { exitStep } : {})
+    };
+  }
+  return null;
+}
+
+function normalizeCallFrameBatch(value: unknown): CallFrameBatch | null {
+  if (!isRecord(value) || !isPositiveInteger(value.batch_id ?? value.batchId) || !Array.isArray(value.updates)) {
+    return null;
+  }
+  const batchId = rawField(value, "batch_id", "batchId") as number;
+  const updates = value.updates.map(normalizeCallFrameUpdate);
+  if (updates.some((update) => update === null)) return null;
+  const normalized = updates as CallFrameRuntimeUpdate[];
+  if (normalized.some((update, index) => index > 0 && update.updateId <= normalized[index - 1]!.updateId)) {
+    return null;
+  }
+  return { batchId, updates: normalized };
+}
+
+function normalizeCallFrameTracingState(value: unknown): CallFrameTracingState | undefined {
+  if (!isRecord(value) || !["complete", "truncated", "unavailable"].includes(String(value.status)) ||
+    (value.reason !== undefined && typeof value.reason !== "string")) {
+    return undefined;
+  }
+  return {
+    status: value.status as CallFrameTracingState["status"],
+    ...(typeof value.reason === "string" ? { reason: value.reason } : {})
+  };
 }
 
 function normalizeConditionStructureHint(value: unknown): ConditionPlan["operands"][number]["structureHint"] | undefined {
@@ -957,6 +1143,16 @@ function normalizePythonExecutionResult(
   const controlFlowTracing = normalizeControlFlowTracingState(
     value.control_flow_tracing ?? value.controlFlowTracing
   );
+  const functionPlan = normalizeFunctionPlan(value.function_plan ?? value.functionPlan);
+  const rawCallFrameBatches = value.call_frame_batches ?? value.callFrameBatches;
+  const callFrameBatches = Array.isArray(rawCallFrameBatches)
+    ? rawCallFrameBatches
+        .map((batch) => normalizeCallFrameBatch(batch))
+        .filter((batch): batch is CallFrameBatch => batch !== null)
+    : [];
+  const callFrameTracing = normalizeCallFrameTracingState(
+    value.call_frame_tracing ?? value.callFrameTracing
+  );
 
   return {
     events,
@@ -975,6 +1171,9 @@ function normalizePythonExecutionResult(
       ...(controlFlowPlan ? { controlFlowPlan } : {}),
       ...(controlFlowBatches.length > 0 ? { controlFlowBatches } : {}),
       ...(controlFlowTracing ? { controlFlowTracing } : {}),
+      ...(functionPlan ? { functionPlan } : {}),
+      ...(callFrameBatches.length > 0 ? { callFrameBatches } : {}),
+      ...(callFrameTracing ? { callFrameTracing } : {}),
       ...(isValueSnapshot(normalizedReturnValue)
         ? { returnValue: normalizedReturnValue }
         : normalizedReturnValue === null
@@ -1020,12 +1219,16 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
       let decisionBatchCallbackInstalled = false;
       let controlFlowPlanCallbackInstalled = false;
       let controlFlowBatchCallbackInstalled = false;
+      let functionPlanCallbackInstalled = false;
+      let callFrameBatchCallbackInstalled = false;
       let streamedExpressionPlan = false;
       let streamedExpressionBatches = false;
       let streamedConditionPlan = false;
       let streamedDecisionBatches = false;
       let streamedControlFlowPlan = false;
       let streamedControlFlowBatches = false;
+      let streamedFunctionPlan = false;
+      let streamedCallFrameBatches = false;
       const emitTraceBatch = (sessionId: string, eventsJson: string): void => {
         if (sessionId !== request.sessionId) {
           return;
@@ -1125,6 +1328,33 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
           // A malformed optional stream must not interrupt the Python run.
         }
       };
+      const emitFunctionPlan = (sessionId: string, planJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const plan = normalizeFunctionPlan(JSON.parse(planJson) as unknown);
+          if (!plan) return;
+          streamedFunctionPlan = true;
+          options.onFunctionPlan?.(sessionId, plan);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
+      const emitCallFrameBatch = (sessionId: string, batchesJson: string): void => {
+        if (sessionId !== request.sessionId) return;
+        try {
+          const parsed = JSON.parse(batchesJson) as unknown;
+          const batches = Array.isArray(parsed)
+            ? parsed
+                .map((batch) => normalizeCallFrameBatch(batch))
+                .filter((batch): batch is CallFrameBatch => batch !== null)
+            : [];
+          if (batches.length === 0) return;
+          streamedCallFrameBatches = true;
+          options.onCallFrameBatch?.(sessionId, batches);
+        } catch {
+          // A malformed optional stream must not interrupt the Python run.
+        }
+      };
 
       try {
         if (options.onTraceBatch && typeof pyodide.globals?.set === "function") {
@@ -1154,6 +1384,14 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         if (options.onControlFlowBatch && typeof pyodide.globals?.set === "function") {
           pyodide.globals.set("__lc_emit_control_flow_batch", emitControlFlowBatch);
           controlFlowBatchCallbackInstalled = true;
+        }
+        if (options.onFunctionPlan && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_function_plan", emitFunctionPlan);
+          functionPlanCallbackInstalled = true;
+        }
+        if (options.onCallFrameBatch && typeof pyodide.globals?.set === "function") {
+          pyodide.globals.set("__lc_emit_call_frame_batch", emitCallFrameBatch);
+          callFrameBatchCallbackInstalled = true;
         }
         const rawResult = await pyodide.runPythonAsync(buildExecutionScript(request));
         const normalized = normalizePythonExecutionResult(
@@ -1187,6 +1425,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         if (!streamedControlFlowBatches && normalized.result.controlFlowBatches) {
           options.onControlFlowBatch?.(request.sessionId, normalized.result.controlFlowBatches);
         }
+        if (!streamedFunctionPlan && normalized.result.functionPlan) {
+          options.onFunctionPlan?.(request.sessionId, normalized.result.functionPlan);
+        }
+        if (!streamedCallFrameBatches && normalized.result.callFrameBatches) {
+          options.onCallFrameBatch?.(request.sessionId, normalized.result.callFrameBatches);
+        }
         options.onFinished?.(normalized.result);
       } catch (error) {
         options.onFinished?.(errorResult(error, Date.now() - startedAt));
@@ -1211,6 +1455,12 @@ export function createPyodideRuntime(options: PyodideRuntimeOptions = {}): Pyodi
         }
         if (controlFlowBatchCallbackInstalled) {
           pyodide.globals?.delete?.("__lc_emit_control_flow_batch");
+        }
+        if (functionPlanCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_function_plan");
+        }
+        if (callFrameBatchCallbackInstalled) {
+          pyodide.globals?.delete?.("__lc_emit_call_frame_batch");
         }
       }
     }

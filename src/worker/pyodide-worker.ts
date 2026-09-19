@@ -54,6 +54,12 @@ export function createWorkerRuntime(
     onControlFlowBatch: (sessionId, batches) => {
       scope.postMessage({ type: "control_flow_batch", sessionId, batches });
     },
+    onFunctionPlan: (sessionId, plan) => {
+      scope.postMessage({ type: "function_plan", sessionId, plan });
+    },
+    onCallFrameBatch: (sessionId, batches) => {
+      scope.postMessage({ type: "call_frame_batch", sessionId, batches });
+    },
     onFinished: (result) => {
       const sessionId = activeSessionId();
       if (!sessionId) {

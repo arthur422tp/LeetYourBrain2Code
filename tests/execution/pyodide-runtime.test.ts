@@ -4,6 +4,7 @@ import type { ExecutionRequest, ExecutionTerminalResult } from "../../src/shared
 import type { TraceEvent } from "../../src/shared/trace-types";
 import type { ExpressionBatch, ExpressionPlan } from "../../src/shared/expression-types";
 import type { ControlFlowBatch, ControlFlowPlan } from "../../src/shared/control-flow-types";
+import type { CallFrameBatch, FunctionPlan } from "../../src/shared/call-frame-types";
 import { interpretTrace } from "../../src/core/trace-interpreter";
 import { createTraceVisualizer } from "../../src/sidepanel/components/TraceVisualizer";
 import {
@@ -75,6 +76,20 @@ const streamedControlFlowBatch: ControlFlowBatch = {
     reason: "exhausted"
   }]
 };
+const streamedFunctionPlan: FunctionPlan = { version: 1, functions: [] };
+const streamedCallFrameBatch: CallFrameBatch = {
+  batchId: 1,
+  updates: [{
+    updateId: 1,
+    kind: "frame_enter",
+    frameId: 1,
+    parentFrameId: null,
+    functionName: "add",
+    callStep: 1,
+    depth: 1,
+    arguments: []
+  }]
+};
 
 describe("Pyodide runtime", () => {
   it("compiles the prelude and user source independently", () => {
@@ -99,6 +114,8 @@ describe("Pyodide runtime", () => {
     expect(script).toContain("leetcode-expression-recorder");
     expect(script).toContain('sys.modules["expression_recorder"]');
     expect(script).toContain("leetcode-runner");
+    expect(script).toContain("function_planner");
+    expect(script).toContain("call_frame_recorder");
     expect(script).toContain("run_request");
     expect(script).toContain("parameter_kinds");
     expect(script).toContain("ObjectIdentityRegistry");
@@ -107,6 +124,8 @@ describe("Pyodide runtime", () => {
     expect(script).toContain("max_container_items");
     expect(script).toContain("max_expression_events");
     expect(script).toContain("max_expression_bytes");
+    expect(script).toContain("max_call_frame_events");
+    expect(script).toContain("max_call_frame_bytes");
     expect(script).toContain("_is_traversal_container");
     expect(script).toContain("_container_children");
     expect(script).toContain(JSON.stringify(request.sourceCode));
@@ -169,6 +188,67 @@ describe("Pyodide runtime", () => {
     });
     await runtime.execute(request);
     expect(callbacks).toEqual(["plan:1", "batch:1"]);
+  });
+
+  it("normalizes and forwards function plans and call-frame batches", async () => {
+    const callbacks: string[] = [];
+    const finished: ExecutionTerminalResult[] = [];
+    const globals: Record<string, (sessionId: string, payload: string) => void> = {};
+    const runtime = createPyodideRuntime({
+      loadPyodide: async () => ({
+        runPythonAsync: async () => {
+          globals.__lc_emit_function_plan!("runtime-session", JSON.stringify(streamedFunctionPlan));
+          globals.__lc_emit_call_frame_batch!("runtime-session", JSON.stringify([{
+            batch_id: 1,
+            updates: [{
+              update_id: 1,
+              kind: "frame_enter",
+              frame_id: 1,
+              parent_frame_id: null,
+              function_name: "add",
+              call_step: 1,
+              depth: 1,
+              arguments: []
+            }]
+          }]));
+          return {
+            status: "completed",
+            termination_reason: "normal_return",
+            stdout: "",
+            events: [],
+            function_plan: streamedFunctionPlan,
+            call_frame_batches: [{
+              batch_id: 1,
+              updates: [{
+                update_id: 1,
+                kind: "frame_enter",
+                frame_id: 1,
+                parent_frame_id: null,
+                function_name: "add",
+                call_step: 1,
+                depth: 1,
+                arguments: []
+              }]
+            }],
+            call_frame_tracing: { status: "complete" }
+          };
+        },
+        globals: {
+          set: (name, value) => { globals[name] = value as (sessionId: string, payload: string) => void; },
+          delete: () => undefined
+        }
+      }),
+      onFunctionPlan: (_sessionId, plan) => callbacks.push(`plan:${plan.version}`),
+      onCallFrameBatch: (_sessionId, batches) => callbacks.push(`batch:${batches[0]!.batchId}`),
+      onFinished: (result) => finished.push(result)
+    });
+
+    await runtime.execute(request);
+
+    expect(callbacks).toEqual(["plan:1", "batch:1"]);
+    expect(finished[0]?.functionPlan).toEqual(streamedFunctionPlan);
+    expect(finished[0]?.callFrameBatches).toEqual([streamedCallFrameBatch]);
+    expect(finished[0]?.callFrameTracing).toEqual({ status: "complete" });
   });
 
   it("normalizes object references and bounded topology fields", () => {

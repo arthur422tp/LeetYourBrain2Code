@@ -1,5 +1,6 @@
 import ast
 from dataclasses import dataclass, field
+from types import CodeType
 
 
 @dataclass
@@ -137,3 +138,56 @@ def plan_user_functions(source_code: str) -> FunctionPlanningResult:
             available=False,
             reason=f"{type(error).__name__}: {error}",
         )
+
+
+def _normalized_qualified_name(value):
+    return value.replace(".<locals>.", ".")
+
+
+def _code_objects(code):
+    yield code
+    for constant in code.co_consts:
+        if isinstance(constant, CodeType):
+            yield from _code_objects(constant)
+
+
+def build_runtime_function_mapper(function_plan, user_code):
+    """Map compiled user code objects to static descriptors without guessing."""
+    if not isinstance(function_plan, dict) or not isinstance(user_code, CodeType):
+        return lambda _frame: None
+
+    descriptors = function_plan.get("functions")
+    if not isinstance(descriptors, list):
+        return lambda _frame: None
+
+    by_identity = {}
+    ambiguous = set()
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict):
+            continue
+        name = descriptor.get("name")
+        qualified_name = descriptor.get("qualifiedName", descriptor.get("qualified_name"))
+        span = descriptor.get("span")
+        line = span.get("line") if isinstance(span, dict) else None
+        if not isinstance(name, str) or not isinstance(qualified_name, str) or not isinstance(line, int):
+            continue
+        key = (name, _normalized_qualified_name(qualified_name), line)
+        if key in by_identity:
+            ambiguous.add(key)
+        else:
+            by_identity[key] = descriptor
+
+    mapped = {}
+    for code in _code_objects(user_code):
+        key = (
+            code.co_name,
+            _normalized_qualified_name(code.co_qualname),
+            code.co_firstlineno,
+        )
+        if key in ambiguous:
+            continue
+        descriptor = by_identity.get(key)
+        if descriptor is not None:
+            mapped[id(code)] = descriptor
+
+    return lambda frame: mapped.get(id(frame.f_code))

@@ -270,6 +270,31 @@ def test_recursive_call_frame_entries_preserve_authoritative_parent_ids():
     assert [entry["parent_frame_id"] for entry in entries[1:]] == [entry["frame_id"] for entry in entries[:-1]]
 
 
+def test_runner_streams_function_plan_and_call_frame_batches():
+    source = """class Solution:
+    def f(self, value):
+        return value + 1
+"""
+    plans = []
+    batches = []
+
+    result = run_request(
+        source,
+        "4",
+        {"class_name": "Solution", "method_name": "f", "parameter_count": 1},
+        LIMITS,
+        emit_function_plan=lambda _session_id, plan_json: plans.append(json.loads(plan_json)),
+        emit_call_frame_batch=lambda _session_id, batch_json: batches.append(json.loads(batch_json)),
+    )
+
+    assert result["status"] == "completed"
+    assert result["function_plan"]["version"] == 1
+    descriptor = next(item for item in result["function_plan"]["functions"] if item["name"] == "f")
+    assert descriptor["functionId"] == result["call_frame_batches"][0]["updates"][0]["function_id"]
+    assert plans == [result["function_plan"]]
+    assert batches == [result["call_frame_batches"]]
+
+
 def test_unhandled_exception_preserves_exception_event_and_trace_prefix():
     result = request(
         """class Solution:

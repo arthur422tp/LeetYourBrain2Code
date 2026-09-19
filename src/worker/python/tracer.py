@@ -177,12 +177,25 @@ class TraceCollector:
             if not isinstance(name, str) or name not in frame.f_locals:
                 continue
             try:
-                value = self.serialize_value(frame.f_locals[name])
+                value = self._serialize_bound_argument(frame.f_locals[name])
             except Exception:
                 continue
             kind = kinds[index] if index < len(kinds) and isinstance(kinds[index], str) else "unknown"
             arguments.append({"name": name, "kind": kind, "value": value})
         return arguments
+
+    def _serialize_bound_argument(self, value):
+        """Snapshot a bound value without invoking a slot-only __repr__."""
+        if value is not None and not isinstance(value, (bool, int, float, str, list, tuple, dict, set, frozenset)):
+            try:
+                vars(value)
+            except Exception:
+                return {
+                    "type": "reference",
+                    "objectId": self.identity_registry.object_id(value),
+                    "className": type(value).__name__,
+                }
+        return self.serialize_value(value)
 
     def _record_call_frame_update(self, method_name, *args, **kwargs):
         if self.call_frame_recorder is None:

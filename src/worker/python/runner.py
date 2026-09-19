@@ -16,7 +16,8 @@ from condition_instrumenter import instrument_condition_sites
 from decision_recorder import DecisionRecorder
 from control_flow_instrumenter import instrument_control_flow
 from control_flow_recorder import ControlFlowRecorder
-from function_planner import plan_user_functions
+from function_planner import build_runtime_function_mapper, plan_user_functions
+from call_frame_recorder import CallFrameRecorder
 
 
 class UnsupportedTestcaseFormat(Exception):
@@ -265,6 +266,15 @@ def _emit_control_flow_plan(emit_plan, session_id, plan):
         pass
 
 
+def _emit_function_plan(emit_plan, session_id, plan):
+    if emit_plan is None:
+        return
+    try:
+        emit_plan(session_id, json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        pass
+
+
 def run_request(
     source_code,
     raw_testcase,
@@ -279,6 +289,8 @@ def run_request(
     emit_decision_batch=None,
     emit_control_flow_plan=None,
     emit_control_flow_batch=None,
+    emit_function_plan=None,
+    emit_call_frame_batch=None,
 ):
     started_at = time.monotonic()
     lines = _argument_lines(raw_testcase)
@@ -358,7 +370,8 @@ def run_request(
         decision_complete_name,
     )
     condition_plan = condition.plan_dict if condition.available else None
-    function_plan = plan_user_functions(source_code).plan_dict
+    function_planning = plan_user_functions(source_code)
+    function_plan = function_planning.plan_dict
     try:
         decision_tree = condition.instrumented_tree if condition.available else expression_tree
         control = instrument_control_flow(
@@ -410,6 +423,7 @@ def run_request(
                 user_code,
                 {marker: helper for marker, helper in capabilities.values()},
             )
+        function_mapper = build_runtime_function_mapper(function_plan, user_code)
     except SyntaxError as error:
         return _empty_result(
             "parse_error",
@@ -428,6 +442,11 @@ def run_request(
     if not control.available:
         control_recorder.status = "unavailable"
         control_recorder.reason = control.reason
+    call_frame_recorder = CallFrameRecorder(
+        limits,
+        session_id=session_id,
+        emit_batch=emit_call_frame_batch,
+    )
     baseline_global_names = set(namespace)
     stdout_buffer = io.StringIO()
     collector = TraceCollector(
@@ -440,6 +459,8 @@ def run_request(
         decision_recorder=decision_recorder,
         control_flow_recorder=control_recorder,
         synthetic_line_map=control.synthetic_line_map if control.available else {},
+        call_frame_recorder=call_frame_recorder,
+        function_mapper=function_mapper,
     )
     recorder.serializer_factory = lambda: collector.serialize_value
     recorder.frame_id_for = collector.expression_frame_id
@@ -456,6 +477,11 @@ def run_request(
     if not condition.available:
         decision_recorder.status = "unavailable"
         decision_recorder.reason = condition.reason
+
+    def call_frame_result(reason):
+        call_frame_recorder.finalize_active(reason, collector.last_visible_step_by_frame)
+        return call_frame_recorder.result_dict()
+
     return_value = None
 
     if instrumentation.available:
@@ -464,6 +490,8 @@ def run_request(
         _emit_condition_plan(emit_condition_plan, session_id, condition_plan)
     if control.available:
         _emit_control_flow_plan(emit_control_flow_plan, session_id, control_plan)
+    if function_planning.available:
+        _emit_function_plan(emit_function_plan, session_id, function_plan)
 
     collector.start()
     try:
@@ -497,6 +525,7 @@ def run_request(
             return_value = method(*converted_arguments)
     except TraceLimitExceeded as error:
         control_recorder.finalize_trace_ended()
+        frame_result = call_frame_result(error.reason)
         recorder.flush_all()
         decision_recorder.flush_all()
         return _empty_result(
@@ -512,9 +541,11 @@ def run_request(
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
             **control_recorder.result_dict(),
+            **frame_result,
         )
     except UnsupportedTestcaseFormat as error:
         control_recorder.finalize_exception()
+        frame_result = call_frame_result("unsupported_testcase_format")
         recorder.flush_all()
         decision_recorder.flush_all()
         return _empty_result(
@@ -531,9 +562,11 @@ def run_request(
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
             **control_recorder.result_dict(),
+            **frame_result,
         )
     except Exception as error:
         control_recorder.finalize_exception()
+        frame_result = call_frame_result("runtime_exception")
         recorder.flush_all()
         decision_recorder.flush_all()
         exception = collector.last_exception or _exception_info(error)
@@ -551,6 +584,7 @@ def run_request(
             **recorder.result_dict(),
             **decision_recorder.result_dict(),
             **control_recorder.result_dict(),
+            **frame_result,
         )
     finally:
         collector.stop()
@@ -558,6 +592,7 @@ def run_request(
         recorder.flush_all()
         decision_recorder.flush_all()
 
+    frame_result = call_frame_result("normal_return")
     return _empty_result(
         "completed",
         "normal_return",
@@ -571,6 +606,7 @@ def run_request(
         **recorder.result_dict(),
         **decision_recorder.result_dict(),
         **control_recorder.result_dict(),
+        **frame_result,
         return_value=collector.serialize_value(return_value),
         duration_ms=(time.monotonic() - started_at) * 1000,
     )

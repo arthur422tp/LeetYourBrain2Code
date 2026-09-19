@@ -1025,7 +1025,7 @@ keyboard/data semantics exist
 
 Do not create an empty commit.
 
-- [ ] **Step 8: Push and confirm GitHub Actions is green**
+- [x] **Step 8: Push and confirm GitHub Actions is green**
 
 Required CI steps:
 
@@ -1058,4 +1058,4 @@ Implemented inline on `codex/execution-story-ui`. Each functional increment used
 - Bare-return display adds optional presentation-only `bareReturn` metadata to a committed frame-exit item. Missing source text never implies `None`; worker/wire types are unchanged.
 - Final local Vitest: 654 passing across 64 files. Python fixtures: 59 passing. Typecheck and all three production builds pass. Build emits Pyodide browser-externalization warnings.
 - Independent review reproduced nested and zero-iteration inner exits being attached to the still-active parent. A real Pyodide RED→GREEN regression now protects both cases; exact exit anchors select the exited activation, extending the original no-active-context-only fallback to preserve factual scope.
-- GitHub Actions validation is pending the push step above.
+- GitHub Actions validated implementation commit `31ba8a2276730190b8e06fdbeab3e4ac78e3929a`: [CI run 35418501134](https://github.com/arthur422tp/LeetYourBrain2Code/actions/runs/35418501134). Python tests, Test, Typecheck, and Build all passed. The final documentation commit is also checked on the branch before handoff.

@@ -202,6 +202,41 @@ button.is-primary:hover:not(:disabled) {
   color: #92400e;
 }
 
+.recovery-notice {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #f1c7a6;
+  border-radius: 10px;
+  background: #fffaf5;
+  padding: 11px 13px;
+}
+
+.recovery-notice__title,
+.recovery-notice__detail {
+  margin: 0;
+}
+
+.recovery-notice__title {
+  color: #9a3412;
+  font-size: 13px;
+}
+
+.recovery-notice__detail {
+  color: #7c2d12;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.recovery-notice[data-state="connection"] {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.recovery-notice[data-state="connection"] .recovery-notice__title,
+.recovery-notice[data-state="connection"] .recovery-notice__detail {
+  color: #334155;
+}
+
 .input-panel,
 .trace-viewer__panel,
 .trace-placeholder,

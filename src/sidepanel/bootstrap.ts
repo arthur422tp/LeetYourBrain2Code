@@ -40,6 +40,10 @@ import {
   createReleaseOnboarding,
   type ReleaseOnboardingState
 } from "./components/ReleaseOnboarding";
+import {
+  createRecoveryNotice,
+  type RecoveryNoticeState
+} from "./components/RecoveryNotice";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -139,6 +143,13 @@ function toSupportedRunnableSnapshot(
     : null;
 }
 
+function recoveryStateForSession(session: TraceSession): RecoveryNoticeState | null {
+  if (session.status === "internal_error") return "execution";
+  if (session.status === "timeout") return "timeout";
+  if (session.status === "trace_limit") return "trace_limit";
+  return null;
+}
+
 export function renderSidePanel(
   root: HTMLElement,
   dependencies: SidePanelDependencies = {}
@@ -229,6 +240,7 @@ export function renderSidePanel(
   const releaseOnboarding = createReleaseOnboarding();
   const placeholder = releaseOnboarding.element;
   result.append(placeholder);
+  const recoveryNotice = createRecoveryNotice();
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
   const comparisonState = createRunComparisonState();
@@ -251,6 +263,7 @@ export function renderSidePanel(
   let disposed = false;
   let collapsedInitialMirrors = false;
   let behavioralDiffPanelOpen = false;
+  let sessionReportedForLatestRun = false;
   let renderedPageIdentity: {
     slug: string | null;
     sourceCode: string;
@@ -296,6 +309,19 @@ export function renderSidePanel(
     if (!result.contains(releaseOnboarding.element)) {
       result.replaceChildren(releaseOnboarding.element);
     }
+  };
+
+  const showRecoveryNotice = (state: RecoveryNoticeState): void => {
+    recoveryNotice.update(state);
+    runButton.textContent = "Retry";
+    if (!result.contains(recoveryNotice.element)) {
+      result.prepend(recoveryNotice.element);
+    }
+  };
+
+  const clearRecoveryNotice = (): void => {
+    recoveryNotice.element.remove();
+    runButton.textContent = "Run now";
   };
 
   const renderLiveStatus = (): void => {
@@ -366,6 +392,7 @@ export function renderSidePanel(
     activeVisualizer = null;
     behavioralDiffPanelOpen = false;
     renderedPageIdentity = null;
+    clearRecoveryNotice();
     result.replaceChildren(placeholder);
   };
 
@@ -472,10 +499,18 @@ export function renderSidePanel(
     createSessionId,
     debounceMs: dependencies.liveDebounceMs,
     onStatusChange: (liveStatus: LiveStatus) => {
+      if (liveStatus === "updating") {
+        sessionReportedForLatestRun = false;
+      } else if (liveStatus === "runtime_error" && !sessionReportedForLatestRun) {
+        showRecoveryNotice("execution");
+      }
       schedulerStatus = liveStatus;
       renderLiveStatus();
     },
     onSession: (session, accepted: AcceptedLiveSession) => {
+      sessionReportedForLatestRun = true;
+      const sessionRecovery = recoveryStateForSession(session);
+      clearRecoveryNotice();
       if (!collapsedInitialMirrors) {
         inputPanel.open = false;
         collapsedInitialMirrors = true;
@@ -506,6 +541,9 @@ export function renderSidePanel(
       );
       if (nextBehavioralDiffPanel) {
         nextBehavioralDiffPanel.open = behavioralDiffPanelOpen;
+      }
+      if (sessionRecovery !== null) {
+        showRecoveryNotice(sessionRecovery);
       }
     }
   });
@@ -588,6 +626,7 @@ export function renderSidePanel(
     onOwnershipInvalidated: () => {
       if (disposed) return;
       ownershipGeneration += 1;
+      clearRecoveryNotice();
       currentPageState = null;
       ownershipState = null;
       currentComparison = null;
@@ -617,6 +656,7 @@ export function renderSidePanel(
       if (disposed) return;
       status.removeAttribute("data-live-status");
       status.textContent = `Live: ${errorText(error)}`;
+      showRecoveryNotice("connection");
     }
   });
 
@@ -637,6 +677,7 @@ export function renderSidePanel(
     void activeTabSource.start().catch((error: unknown) => {
       if (!disposed) {
         status.textContent = `Live: ${errorText(error)}`;
+        showRecoveryNotice("connection");
       }
     });
   }
@@ -644,6 +685,7 @@ export function renderSidePanel(
   runButton.addEventListener("click", () => {
     const runLatest = async (): Promise<void> => {
       if (disposed) return;
+      clearRecoveryNotice();
       if (activeTabSource) {
         const refreshOwnershipGeneration = ownershipGeneration;
         try {
@@ -664,6 +706,7 @@ export function renderSidePanel(
             status.dataset.liveStatus !== "paused"
           ) {
             status.textContent = `Live: ${errorText(error)}`;
+            showRecoveryNotice("connection");
           }
           return;
         }

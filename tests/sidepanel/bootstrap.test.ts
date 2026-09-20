@@ -754,6 +754,9 @@ describe("renderSidePanel", () => {
     await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
     expect(root.querySelector(".trace-viewer__code")?.textContent).toContain("twoSum");
 
+    source.callbacks().onError(new Error("Could not establish connection"));
+    expect(root.querySelector(".recovery-notice")).not.toBeNull();
+
     source.callbacks().onPageState({ tabId: 11, state: next });
 
     expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(next.code);
@@ -761,6 +764,7 @@ describe("renderSidePanel", () => {
       .toBe("Live: code synced · waiting for testcase");
     expect(root.querySelector("#trace-viewer")).toBeNull();
     expect(root.querySelector(".trace-placeholder")).not.toBeNull();
+    expect(root.querySelector(".recovery-notice")).toBeNull();
     expect(execute).toHaveBeenCalledTimes(1);
     handle.dispose();
   });
@@ -1082,6 +1086,82 @@ describe("renderSidePanel", () => {
     source.callbacks().onPageState({ tabId: 11, state: current });
     await vi.waitFor(() =>
       expect(root.querySelector("#runtime-status")?.textContent).toBe(expectedText)
+    );
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    handle.dispose();
+  });
+
+  it("shows connection recovery guidance without replacing a stable trace", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.callbacks().onError(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    );
+
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    expect(root.querySelector(".recovery-notice")?.textContent).toContain(
+      "Unable to connect to this LeetCode tab."
+    );
+    expect(root.querySelector(".recovery-notice")?.textContent).toContain(
+      "Refresh the LeetCode page, then reopen the Side Panel."
+    );
+    handle.dispose();
+  });
+
+  it("uses the existing Run path as Retry after a worker rejection", async () => {
+    const root = document.createElement("main");
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      requests.push(request);
+      return requests.length === 1
+        ? Promise.reject(new Error("worker stopped"))
+        : Promise.resolve(completedSession(request));
+    });
+    const handle = renderSidePanel(root, { controller: { execute }, liveDebounceMs: 0 });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(root.querySelector(".recovery-notice")).not.toBeNull());
+    expect(root.querySelector(".recovery-notice")?.textContent).toContain(
+      "Local visualization failed."
+    );
+    expect(root.querySelector<HTMLButtonElement>("#run")?.textContent).toBe("Retry");
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+    expect(root.querySelector(".recovery-notice")).toBeNull();
+    expect(root.querySelector<HTMLButtonElement>("#run")?.textContent).toBe("Run now");
+    handle.dispose();
+  });
+
+  it("keeps timeout recovery factual while retaining the trace viewer", async () => {
+    const root = document.createElement("main");
+    const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({
+      ...completedSession(request),
+      status: "timeout",
+      terminationReason: "hard_timeout"
+    }));
+    const handle = renderSidePanel(root, { controller: { execute }, liveDebounceMs: 0 });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    expect(root.querySelector(".recovery-notice")?.textContent).toContain(
+      "The captured prefix remains available."
+    );
+    expect(root.querySelector(".recovery-notice")?.textContent).toContain(
+      "This is not a LeetCode TLE result."
     );
     expect(root.querySelector("#trace-viewer")).not.toBeNull();
     handle.dispose();

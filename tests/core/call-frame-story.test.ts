@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCallFrameStory } from "../../src/core/call-frame-story";
+import {
+  buildCallFrameStory,
+  CALL_TREE_VISIBLE_ROW_LIMIT
+} from "../../src/core/call-frame-story";
 import type {
   CallFrameModel,
   FrameOccurrence,
@@ -250,5 +253,25 @@ describe("call-frame-story", () => {
     });
 
     expect(model.byFrameId.get(8)).toHaveProperty("depth", 3);
+  });
+
+  it("keeps all recorded frame evidence available for a large chain", () => {
+    const frames = Array.from({ length: 300 }, (_, index) => frame(
+      index + 1,
+      "recurse",
+      index === 0 ? null : index,
+      index + 1,
+      index < 299 ? [index + 2] : [],
+      { depth: index + 1 }
+    ));
+    const model = buildCallFrameStory({
+      callFrames: callFrames(frames),
+      frameEvidenceIndex: evidence(frames.map((item) => item.frameId)),
+      events: [],
+      currentRawIndex: -1
+    });
+
+    expect(CALL_TREE_VISIBLE_ROW_LIMIT).toBe(120);
+    expect(model.byFrameId.size).toBe(300);
   });
 });

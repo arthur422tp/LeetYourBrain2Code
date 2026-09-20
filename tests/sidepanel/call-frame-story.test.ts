@@ -246,4 +246,34 @@ describe("CallFrameStory", () => {
     expect(handle.element.querySelector(".call-frame-story__current")?.textContent).toContain("Observed later: returned 2");
     handle.dispose();
   });
+
+  it("bounds large-tree DOM rows while retaining root, current context, and evidence", () => {
+    const nodes = Array.from({ length: 300 }, (_, index) => node(
+      index + 1,
+      "recurse",
+      index + 1,
+      index + 1,
+      { childFrameIds: index < 299 ? [index + 2] : [] }
+    ));
+    const largeModel: CallFrameStoryModel = {
+      roots: [1],
+      byFrameId: new Map(nodes.map((item) => [item.frameId, item])),
+      currentFrameId: 250,
+      currentPath: Array.from({ length: 250 }, (_, index) => index + 1),
+      tracingState: { status: "complete" }
+    };
+    const handle = createCallFrameStory({ model: largeModel, onNavigateStep: () => { } });
+    const rows = () => [...handle.element.querySelectorAll<HTMLElement>(".call-frame-story__tree-row")];
+
+    expect(largeModel.byFrameId.size).toBe(300);
+    expect(rows().length).toBeLessThanOrEqual(120);
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="1"]')).not.toBeNull();
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="250"]')).not.toBeNull();
+    expect(handle.element.querySelector('[data-tree-summary]')?.textContent).toContain("additional recorded frames");
+    const before = rows().length;
+    handle.element.querySelector<HTMLButtonElement>('[data-action="show-more"]')!.click();
+    expect(rows().length).toBeGreaterThan(before);
+    expect(rows().length).toBeLessThanOrEqual(220);
+    handle.dispose();
+  });
 });

@@ -1,4 +1,9 @@
-import type { CallFrameStoryModel, CallFrameStoryNode } from "../../core/call-frame-story";
+import {
+  CALL_TREE_VISIBLE_ROW_LIMIT,
+  CALL_TREE_CONTEXT_SIBLING_LIMIT,
+  type CallFrameStoryModel,
+  type CallFrameStoryNode
+} from "../../core/call-frame-story";
 import {
   compactFrameExitSuffix,
   frameExitSummary,
@@ -10,6 +15,7 @@ const PATH_COMPACTION_THRESHOLD = 7;
 interface TreeRenderState {
   userExpanded: Set<number>;
   userCollapsed: Set<number>;
+  visibleRowBudget: number;
 }
 
 export interface CallFrameStoryViewModel {
@@ -150,7 +156,8 @@ function renderTreeNode(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
-  onToggle: (frameId: number) => void
+  onToggle: (frameId: number) => void,
+  renderChildren = true
 ): HTMLLIElement {
   const item = element("li", "call-frame-story__tree-item");
   const row = element("div", "call-frame-story__tree-row");
@@ -223,6 +230,7 @@ function renderTreeNode(
   const childNodes = node.childFrameIds
     .map((frameId) => model.byFrameId.get(frameId))
     .filter((child): child is CallFrameStoryNode => child !== undefined);
+  if (!renderChildren) return item;
   if (childNodes.length > 0 && expanded) {
     const list = element("ul", "call-frame-story__tree-list");
     for (const child of childNodes) {
@@ -235,12 +243,94 @@ function renderTreeNode(
   return item;
 }
 
+function runtimeOrder(model: CallFrameStoryModel): number[] {
+  const order: number[] = [];
+  const visited = new Set<number>();
+  const visit = (frameId: number): void => {
+    if (visited.has(frameId) || !model.byFrameId.has(frameId)) return;
+    visited.add(frameId);
+    order.push(frameId);
+    for (const childFrameId of model.byFrameId.get(frameId)!.childFrameIds) visit(childFrameId);
+  };
+  for (const root of model.roots) visit(root);
+  for (const frameId of model.byFrameId.keys()) visit(frameId);
+  return order;
+}
+
+function boundedFrameIds(model: CallFrameStoryModel, budget: number): number[] {
+  const order = runtimeOrder(model);
+  if (order.length <= budget) return order;
+  const rowBudget = Math.max(1, budget - 1);
+  const selected = new Set<number>();
+  const add = (frameId: number): void => {
+    if (selected.size < rowBudget && model.byFrameId.has(frameId)) selected.add(frameId);
+  };
+  for (const root of model.roots) add(root);
+
+  const currentPath = model.currentPath.filter((frameId) => model.byFrameId.has(frameId));
+  if (currentPath.length > rowBudget) {
+    const headCount = Math.max(1, Math.floor(rowBudget / 2));
+    for (const frameId of currentPath.slice(0, headCount)) add(frameId);
+    for (const frameId of currentPath.slice(-(rowBudget - headCount))) add(frameId);
+  } else {
+    for (const frameId of currentPath) add(frameId);
+  }
+
+  let siblingCount = 0;
+  for (let index = 0; index < currentPath.length && siblingCount < CALL_TREE_CONTEXT_SIBLING_LIMIT; index += 1) {
+    const current = model.byFrameId.get(currentPath[index]!);
+    const next = currentPath[index + 1];
+    for (const childFrameId of current?.childFrameIds ?? []) {
+      if (childFrameId === next || siblingCount >= CALL_TREE_CONTEXT_SIBLING_LIMIT) continue;
+      add(childFrameId);
+      siblingCount += 1;
+    }
+  }
+  for (const frameId of order) add(frameId);
+  return order.filter((frameId) => selected.has(frameId));
+}
+
+function renderBoundedTree(
+  model: CallFrameStoryModel,
+  state: TreeRenderState,
+  onNavigateStep: (step: number) => void,
+  onToggle: (frameId: number) => void,
+  onShowMore: () => void
+): HTMLElement {
+  const section = element("section", "call-frame-story__tree");
+  section.append(element("h3", "call-frame-story__heading", "Call Tree"));
+  const list = element("ul", "call-frame-story__tree-list");
+  const visibleIds = boundedFrameIds(model, state.visibleRowBudget);
+  for (const frameId of visibleIds) {
+    const frame = model.byFrameId.get(frameId);
+    if (frame) list.append(renderTreeNode(frame, model, state, onNavigateStep, onToggle, false));
+  }
+  section.append(list);
+  const omitted = model.byFrameId.size - visibleIds.length;
+  if (omitted > 0) {
+    const summary = element("div", "call-frame-story__tree-summary", `+ ${omitted} additional recorded frames`);
+    summary.dataset.treeSummary = "true";
+    section.append(summary);
+    const showMore = element("button", "call-frame-story__tree-show-more", "+100 visible row budget");
+    showMore.type = "button";
+    showMore.dataset.action = "show-more";
+    showMore.setAttribute("aria-label", "Show more recorded call frames");
+    showMore.addEventListener("click", onShowMore);
+    section.append(showMore);
+  }
+  return section;
+}
+
 function renderTree(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
-  onToggle: (frameId: number) => void
+  onToggle: (frameId: number) => void,
+  onShowMore: () => void
 ): HTMLElement {
+  if (model.byFrameId.size > state.visibleRowBudget) {
+    return renderBoundedTree(model, state, onNavigateStep, onToggle, onShowMore);
+  }
   const section = element("section", "call-frame-story__tree");
   section.append(element("h3", "call-frame-story__heading", "Call Tree"));
   const list = element("ul", "call-frame-story__tree-list");
@@ -256,7 +346,8 @@ function render(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
-  onToggle: (frameId: number) => void
+  onToggle: (frameId: number) => void,
+  onShowMore: () => void
 ): HTMLElement[] {
   const children: HTMLElement[] = [];
   if (model.tracingState.status !== "complete") {
@@ -268,7 +359,7 @@ function render(
   }
   children.push(renderCurrentFrame(model));
   children.push(renderPath(model, onNavigateStep));
-  if (shouldShowTree(model)) children.push(renderTree(model, state, onNavigateStep, onToggle));
+  if (shouldShowTree(model)) children.push(renderTree(model, state, onNavigateStep, onToggle, onShowMore));
   return children;
 }
 
@@ -276,7 +367,8 @@ export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameS
   const root = element("section", "call-frame-story");
   const state: TreeRenderState = {
     userExpanded: new Set(),
-    userCollapsed: new Set()
+    userCollapsed: new Set(),
+    visibleRowBudget: CALL_TREE_VISIBLE_ROW_LIMIT
   };
   let currentModel = options.model;
   let disposed = false;
@@ -291,6 +383,9 @@ export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameS
         state.userCollapsed.delete(frameId);
         state.userExpanded.add(frameId);
       }
+      renderIntoRoot();
+    }, () => {
+      state.visibleRowBudget += 100;
       renderIntoRoot();
     }));
   };

@@ -12,6 +12,9 @@ import type {
 } from "../shared/call-frame-types";
 import type { TraceEvent } from "../shared/trace-types";
 
+export const CALL_TREE_VISIBLE_ROW_LIMIT = 120;
+export const CALL_TREE_CONTEXT_SIBLING_LIMIT = 8;
+
 export type FrameAtCursorStatus =
   | "not_started"
   | "active"

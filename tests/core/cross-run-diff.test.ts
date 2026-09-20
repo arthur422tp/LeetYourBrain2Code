@@ -659,6 +659,28 @@ describe("compareCrossRuns", () => {
     expect(result.firstDivergence?.current?.factualText).toContain("validate");
   });
 
+  it("keeps an observed child-call change before later call-frame truncation", () => {
+    const baseline = prepared([
+      frame(1, "solve", [childCall(1, "child-call|fallback:helper|1", 2, 2)], {
+        childFrameIds: [2]
+      }),
+      frame(2, "helper", [], { callStep: 2 })
+    ]);
+    const current = prepared([
+      frame(11, "solve", [childCall(11, "child-call|fallback:validate|1", 20, 12, "validate")], {
+        childFrameIds: [12]
+      }),
+      frame(12, "validate", [], { callStep: 20 })
+    ], [11], {
+      sessionId: "current",
+      coverage: { callFrames: "partial" }
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(kind(result)).toBe("child_call_changed");
+  });
+
   it("stops instead of guessing when lookahead has repeated candidates", () => {
     const baseline = prepared([frame(1, "solve", [
       mutation(1, "mutation|local:a|1", 1, int(1)),

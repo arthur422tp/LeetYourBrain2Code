@@ -845,8 +845,13 @@ function compareCheckpointStream(
           path
         );
       }
+      // A mutation target mismatch implies that one side may be missing
+      // mutation evidence, so partial mutation coverage cannot prove it.
+      // Observed decision, expression, control-flow, and child-call changes
+      // remain factual even when a later checkpoint channel is truncated.
       if (
-        baselineCheckpoint.kind === currentCheckpoint.kind
+        baselineCheckpoint.kind === "mutation"
+        && currentCheckpoint.kind === "mutation"
         && (
           checkpointCoverage(state.baseline.coverage, baselineCheckpoint) !== "complete"
           || checkpointCoverage(state.current.coverage, currentCheckpoint) !== "complete"

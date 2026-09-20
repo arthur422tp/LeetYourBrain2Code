@@ -36,6 +36,10 @@ import {
   type BehavioralDiffViewModel
 } from "./behavioral-diff-view";
 import { createAboutPrivacy } from "./components/AboutPrivacy";
+import {
+  createReleaseOnboarding,
+  type ReleaseOnboardingState
+} from "./components/ReleaseOnboarding";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -61,6 +65,7 @@ type SourceReadiness =
   | "waiting_for_editor"
   | "waiting_for_language"
   | "waiting_for_testcase"
+  | "unsupported_language"
   | "candidate";
 
 const SAMPLE_SOURCE = `class Solution:
@@ -114,8 +119,24 @@ function hasChromeTabSource(): boolean {
 function sourceReadiness(state: LeetCodePageState): SourceReadiness {
   if (state.code === null || state.code.length === 0) return "waiting_for_editor";
   if (state.language === null || state.language.length === 0) return "waiting_for_language";
+  const normalizedLanguage = state.language.trim().toLowerCase().replace(/\s+/g, "");
+  if (!new Set(["python", "python3", "py"]).has(normalizedLanguage)) {
+    return "unsupported_language";
+  }
   if (state.testcase === null) return "waiting_for_testcase";
   return "candidate";
+}
+
+function toSupportedRunnableSnapshot(
+  state: LeetCodePageState
+): LeetCodeSnapshot | null {
+  const snapshot = toRunnableSnapshot(state);
+  if (snapshot === null) return null;
+
+  const normalizedLanguage = snapshot.language.trim().toLowerCase().replace(/\s+/g, "");
+  return new Set(["python", "python3", "py"]).has(normalizedLanguage)
+    ? snapshot
+    : null;
 }
 
 export function renderSidePanel(
@@ -205,9 +226,8 @@ export function renderSidePanel(
   const result = document.createElement("section");
   result.id = "visualization-output";
   result.className = "visualization-output";
-  const placeholder = document.createElement("div");
-  placeholder.className = "trace-placeholder";
-  placeholder.textContent = "Waiting for a runnable Python draft…";
+  const releaseOnboarding = createReleaseOnboarding();
+  const placeholder = releaseOnboarding.element;
   result.append(placeholder);
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
@@ -234,22 +254,62 @@ export function renderSidePanel(
   let renderedPageIdentity: {
     slug: string | null;
     sourceCode: string;
+    rawTestcase: string;
   } | null = null;
 
   const updateActiveComparison = (): void => {
     activeVisualizer?.setBehavioralDiff(currentComparison);
   };
 
+  const onboardingState = (): ReleaseOnboardingState => {
+    if (ownershipState?.kind === "paused" || currentPageState === null) {
+      return "no_active_leetcode";
+    }
+
+    const readiness = sourceReadiness(currentPageState);
+    return readiness === "candidate" ? "ready" : readiness;
+  };
+
+  const traceMatchesCurrentPage = (): boolean => {
+    if (!activeVisualizer || !renderedPageIdentity || !currentPageState) return false;
+    return (
+      renderedPageIdentity.sourceCode === currentPageState.code &&
+      renderedPageIdentity.rawTestcase === currentPageState.testcase
+    );
+  };
+
+  const renderReleaseOnboarding = (): void => {
+    const state = onboardingState();
+    if (activeVisualizer && traceMatchesCurrentPage()) {
+      releaseOnboarding.element.remove();
+      return;
+    }
+
+    releaseOnboarding.update(state, { stale: activeVisualizer !== null });
+    if (activeVisualizer) {
+      if (!result.contains(releaseOnboarding.element)) {
+        result.prepend(releaseOnboarding.element);
+      }
+      return;
+    }
+
+    if (!result.contains(releaseOnboarding.element)) {
+      result.replaceChildren(releaseOnboarding.element);
+    }
+  };
+
   const renderLiveStatus = (): void => {
     if (ownershipState?.kind === "paused") {
       status.dataset.liveStatus = "paused";
       status.textContent = "Live: paused · No active LeetCode tab";
+      renderReleaseOnboarding();
       return;
     }
 
     if (!currentPageState || currentPageState.code === null) {
       status.dataset.liveStatus = "syncing";
       status.textContent = "Live: syncing";
+      renderReleaseOnboarding();
       return;
     }
 
@@ -257,18 +317,28 @@ export function renderSidePanel(
     if (readiness === "waiting_for_editor" || readiness === "waiting_for_language") {
       status.dataset.liveStatus = "editing";
       status.textContent = "Live: editing";
+      renderReleaseOnboarding();
+      return;
+    }
+
+    if (readiness === "unsupported_language") {
+      status.dataset.liveStatus = "unsupported_language";
+      status.textContent = "Live: Python required";
+      renderReleaseOnboarding();
       return;
     }
 
     if (readiness === "waiting_for_testcase") {
       status.dataset.liveStatus = "waiting_for_testcase";
       status.textContent = "Live: code synced · waiting for testcase";
+      renderReleaseOnboarding();
       return;
     }
 
     const next = schedulerStatus ?? "updating";
     status.dataset.liveStatus = next;
     status.textContent = `Live: ${next}`;
+    renderReleaseOnboarding();
   };
 
   const refreshCaseSelector = (sourceCode: string, rawTestcase: string): void => {
@@ -427,7 +497,8 @@ export function renderSidePanel(
       });
       renderedPageIdentity = {
         slug: accepted.input.problemSlug,
-        sourceCode: accepted.input.sourceCode
+        sourceCode: accepted.input.sourceCode,
+        rawTestcase: accepted.input.rawTestcase
       };
       result.replaceChildren(activeVisualizer.element);
       const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
@@ -457,7 +528,7 @@ export function renderSidePanel(
     options: { immediate?: boolean; force?: boolean } = {}
   ): void => {
     if (!currentPageState || disposed) return;
-    const snapshot = toRunnableSnapshot(currentPageState);
+    const snapshot = toSupportedRunnableSnapshot(currentPageState);
     if (snapshot === null) {
       scheduler.invalidate();
       renderLiveStatus();
@@ -498,7 +569,7 @@ export function renderSidePanel(
     testcase.value = state.testcase;
     refreshCaseSelector(state.code ?? "", state.testcase);
 
-    const snapshot = toRunnableSnapshot(state);
+    const snapshot = toSupportedRunnableSnapshot(state);
     if (snapshot === null) {
       scheduler.invalidate();
       renderLiveStatus();
@@ -559,6 +630,7 @@ export function renderSidePanel(
     result
   );
   root.replaceChildren(app);
+  renderReleaseOnboarding();
 
   if (activeTabSource) {
     renderLiveStatus();
@@ -578,7 +650,7 @@ export function renderSidePanel(
           const latest = await activeTabSource.refresh();
           if (!latest || disposed) return;
           applyPageState(latest.state, { schedule: false });
-          const snapshot = toRunnableSnapshot(latest.state);
+          const snapshot = toSupportedRunnableSnapshot(latest.state);
           if (snapshot === null) {
             scheduler.invalidate();
             renderLiveStatus();

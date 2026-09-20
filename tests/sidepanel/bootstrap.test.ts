@@ -101,6 +101,185 @@ describe("renderSidePanel", () => {
     expect(root.textContent).toContain("Live: not started");
   });
 
+  it("shows actionable onboarding when there is no active LeetCode tab", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const handle = renderSidePanel(root, {
+      controller: { execute: vi.fn() },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 1_000
+    });
+
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+      "Open a LeetCode problem to start visualizing Python execution."
+    );
+    handle.dispose();
+  });
+
+  it("shows an explicit editor-loading state without executing", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ code: null, language: "python", testcase: "7" })
+    });
+
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+      "Waiting for the LeetCode editor to load…"
+    );
+    expect(execute).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it("shows a distinct missing-language state without executing", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ language: null })
+    });
+
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+      "Waiting for LeetCode to identify the editor language…"
+    );
+    expect(execute).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it.each(["java", "cpp"])(
+    "explains that %s is unsupported instead of executing it",
+    (language) => {
+      const root = document.createElement("main");
+      const source = fakeActiveTabSourceFactory();
+      const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+      const handle = renderSidePanel(root, {
+        controller: { execute },
+        activeTabSourceFactory: source.factory,
+        liveDebounceMs: 0
+      });
+
+      source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+      source.callbacks().onPageState({
+        tabId: 11,
+        state: pageState({ language })
+      });
+
+      expect(root.querySelector(".release-onboarding")?.textContent).toContain("Python required");
+      expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+        "Switch the LeetCode editor language to Python to continue."
+      );
+      expect(execute).not.toHaveBeenCalled();
+      handle.dispose();
+    }
+  );
+
+  it("shows a testcase recovery state when code is synced without a testcase", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: null })
+    });
+
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain("Code synced");
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+      "Open or enter a testcase on LeetCode to start visualization."
+    );
+    expect(execute).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it("gives first-run steps for a fresh runnable Python state", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 1_000
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
+
+    expect(root.querySelector<HTMLElement>(".release-onboarding")?.dataset.state).toBe("ready");
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+      "The visualization updates automatically."
+    );
+    expect(execute).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it("removes onboarding after an accepted trace is rendered", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    expect(root.querySelector(".release-onboarding")).toBeNull();
+    handle.dispose();
+  });
+
+  it("keeps the same-problem trace while making a waiting state explicit", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: null, code: "class Solution:\n    def one(self, value):\n        return value + 1\n" })
+    });
+
+    expect(root.querySelector("#trace-viewer")).not.toBeNull();
+    expect(root.querySelector<HTMLElement>(".release-onboarding")?.dataset.stale).toBe("true");
+    expect(root.querySelector(".release-onboarding")?.textContent).toContain(
+      "Showing the last captured visualization while this page state is waiting."
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
   it("mounts the collapsed About & privacy disclosure", () => {
     const root = document.createElement("main");
     const controller: SidePanelController = { execute: vi.fn() };

@@ -1,10 +1,22 @@
+import type { CallFrameStoryModel } from "../../core/call-frame-story";
 import type { ControlFlowUiModel, ExecutionStoryItem } from "../../core/execution-story";
 import type { IterationStatus, LoopExitReason } from "../../shared/control-flow-types";
+import { createCallFrameStory, type CallFrameStoryHandle } from "./CallFrameStory";
 import { formatValue } from "./value-format";
 
+export interface ExecutionStoryModel {
+  callFrame?: CallFrameStoryModel;
+  controlFlow?: ControlFlowUiModel;
+}
 export interface ExecutionStoryOptions {
-  model: ControlFlowUiModel;
+  model: ExecutionStoryModel;
   onNavigateStep(step: number): void;
+}
+
+export interface ExecutionStoryHandle {
+  element: HTMLElement;
+  update(model: ExecutionStoryModel): void;
+  dispose(): void;
 }
 
 const outcomes: Record<IterationStatus, string> = {
@@ -35,8 +47,8 @@ function itemText(item: ExecutionStoryItem): string {
   }
 }
 
-export function createExecutionStory({ model, onNavigateStep }: ExecutionStoryOptions): HTMLElement {
-  const root = element("section", "execution-story");
+function renderControlFlowStory(model: ControlFlowUiModel, onNavigateStep: (step: number) => void): HTMLElement {
+  const root = element("section", "execution-story__control-flow");
   const tracing = model.tracingState;
   if (tracing && tracing.status !== "complete") {
     const banner = element("div", "execution-story__tracing", `Control-flow tracing ${tracing.status}${tracing.reason ? ` · ${tracing.reason}` : ""}`);
@@ -85,4 +97,52 @@ export function createExecutionStory({ model, onNavigateStep }: ExecutionStoryOp
     root.append(history);
   }
   return root;
+}
+
+export function createExecutionStory(options: ExecutionStoryOptions): ExecutionStoryHandle {
+  const root = element("section", "execution-story");
+  let currentModel = options.model;
+  let callFrameHandle: CallFrameStoryHandle | null = null;
+  let disposed = false;
+
+  const render = (): void => {
+    if (disposed) return;
+    root.replaceChildren();
+    if (currentModel.callFrame) {
+      if (!callFrameHandle) {
+        callFrameHandle = createCallFrameStory({ model: currentModel.callFrame, onNavigateStep: options.onNavigateStep });
+      } else {
+        callFrameHandle.update(currentModel.callFrame);
+      }
+      root.append(callFrameHandle.element);
+    } else if (callFrameHandle) {
+      callFrameHandle.dispose();
+      callFrameHandle = null;
+    }
+    if (currentModel.controlFlow) {
+      const controlFlowRoot = renderControlFlowStory(currentModel.controlFlow, options.onNavigateStep);
+      const insideCurrentFrame = currentModel.callFrame?.currentFrameId !== undefined &&
+        currentModel.controlFlow.currentActivation?.frameId === currentModel.callFrame.currentFrameId;
+      if (insideCurrentFrame) root.append(element("h3", "execution-story__frame-boundary", "Inside this frame"));
+      root.append(controlFlowRoot);
+    }
+  };
+
+  const update = (model: ExecutionStoryModel): void => {
+    if (disposed) return;
+    currentModel = model;
+    render();
+  };
+
+  render();
+  return {
+    element: root,
+    update,
+    dispose: () => {
+      disposed = true;
+      callFrameHandle?.dispose();
+      callFrameHandle = null;
+      root.replaceChildren();
+    }
+  };
 }

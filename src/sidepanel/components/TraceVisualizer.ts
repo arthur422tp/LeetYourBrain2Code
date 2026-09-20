@@ -1,5 +1,5 @@
 import { buildControlFlowOutlineGroups, buildControlFlowUiModel } from "../../core/execution-story";
-import { createExecutionStory } from "./ExecutionStory";
+import { createExecutionStory, type ExecutionStoryHandle } from "./ExecutionStory";
 import { interpretTrace } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
@@ -404,6 +404,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   let navigateDirect: (index: number) => void;
   let outlineHandle: TraceOutlineHandle | null = null;
   let timelineHandle: BehavioralTimelineHandle | null = null;
+  let executionStoryHandle: ExecutionStoryHandle | null = null;
 
   const stopPlaying = (): void => {
     if (timer !== null) {
@@ -423,6 +424,18 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     controlFlow: interpretation.controlFlow, decisionEvidence: interpretation.decisionEvidence,
     decisionChains: interpretation.decisionChains, tracingState: session.controlFlowTracing
   });
+  const updateExecutionStory = (controlFlow: ReturnType<typeof storyModelAt>): void => {
+    if (!storyPanel) return;
+    if (!executionStoryHandle) {
+      executionStoryHandle = createExecutionStory({ model: { controlFlow }, onNavigateStep });
+      storyPanel.body.append(executionStoryHandle.element);
+      return;
+    }
+    executionStoryHandle.update({ controlFlow });
+    if (!storyPanel.body.contains(executionStoryHandle.element)) {
+      storyPanel.body.append(executionStoryHandle.element);
+    }
+  };
   const updateEvidencePanel = (
     target: ReturnType<typeof createPanel> | null,
     title: string,
@@ -443,7 +456,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       updateEvidencePanel(expressionPanel, "Expression Evidence", false, session.expressionTracing);
       changesPanel.panel.hidden = true;
       localsPanel.panel.hidden = true;
-      storyPanel?.body.replaceChildren(createExecutionStory({model: storyModelAt(-1, -1), onNavigateStep}));
+      updateExecutionStory(storyModelAt(-1, -1));
       currentIndex = 0;
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
@@ -500,7 +513,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     codePanel.setCurrentLine(state?.currentLine);
 
     const controlFlowUiModel = storyModelAt(event?.step ?? -1, event?.frameId ?? -1);
-    storyPanel?.body.replaceChildren(createExecutionStory({model: controlFlowUiModel, onNavigateStep}));
+    updateExecutionStory(controlFlowUiModel);
     const decisionEvidence = event
       ? interpretation.decisionEvidence.get(event.step)
       : undefined;
@@ -659,6 +672,7 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     setStep,
     dispose: () => {
       stopPlaying();
+      executionStoryHandle?.dispose();
       visualStateRenderer.dispose();
     }
   };

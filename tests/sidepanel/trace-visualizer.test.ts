@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SubscriptRelation } from "../../src/core/ast-relations";
 import type { MatrixSubscriptRelation, TraceSession } from "../../src/shared/trace-types";
-import { createTraceVisualizer } from "../../src/sidepanel/components/TraceVisualizer";
+import {
+  createTraceVisualizer,
+  interpretTraceSession
+} from "../../src/sidepanel/components/TraceVisualizer";
 
 const int = (value: number) => ({ type: "int" as const, value: String(value) });
 
@@ -109,6 +112,41 @@ function session(): TraceSession {
     subscriptRelations: relations,
     returnValue: null
   };
+}
+
+function callFrameSession(): TraceSession {
+  const fixture = session();
+  fixture.functionPlan = {
+    version: 1,
+    functions: [{
+      functionId: "method:Solution.solve",
+      kind: "method",
+      name: "solve",
+      qualifiedName: "Solution.solve",
+      span: { line: 2, column: 4, endLine: 4, endColumn: 16 },
+      firstBodyLine: 3,
+      parameterNames: ["self", "n"],
+      parameterKinds: ["positional_or_keyword", "positional_or_keyword"]
+    }]
+  };
+  fixture.callFrameBatches = [{
+    batchId: 1,
+    updates: [{
+      updateId: 1,
+      kind: "frame_enter",
+      frameId: 1,
+      parentFrameId: null,
+      functionName: "solve",
+      functionId: "method:Solution.solve",
+      callStep: fixture.events[0]!.step,
+      depth: 1,
+      arguments: [
+        { name: "n", kind: "positional_or_keyword", value: int(3) }
+      ]
+    }]
+  }];
+  fixture.callFrameTracing = { status: "complete" };
+  return fixture;
 }
 
 function expressionSession(): TraceSession {
@@ -721,6 +759,15 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("passes session call-frame evidence into core interpretation", () => {
+    const interpretation = interpretTraceSession(callFrameSession());
+
+    expect(interpretation.callFrames.byFrameId.get(1)?.functionId)
+      .toBe("method:Solution.solve");
+    expect(interpretation.callFrames.byFrameId.get(1)?.arguments[0]?.value)
+      .toEqual(int(3));
+  });
+
   it("keeps visual state and a single raw scrubber outside collapsed analysis", () => {
     const view = createTraceVisualizer(controlFlowSession());
     const advanced = view.element.querySelector<HTMLDetailsElement>(".trace-viewer__advanced")!;

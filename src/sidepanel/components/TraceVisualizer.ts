@@ -302,8 +302,8 @@ function renderOutput(state: VisualState | undefined, session: TraceSession): HT
   return body;
 }
 
-export function createTraceVisualizer(session: TraceSession): TraceVisualizerHandle {
-  const interpretation = interpretTrace(
+export function interpretTraceSession(session: TraceSession): ReturnType<typeof interpretTrace> {
+  return interpretTrace(
     session.events,
     session.subscriptRelations ?? [],
     session.expressionPlan,
@@ -312,8 +312,15 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     session.decisionBatches ?? [],
     session.controlFlowPlan,
     session.controlFlowBatches ?? [],
-    { status: session.status, terminationReason: session.terminationReason }
+    { status: session.status, terminationReason: session.terminationReason },
+    session.functionPlan,
+    session.callFrameBatches ?? [],
+    session.callFrameTracing
   );
+}
+
+export function createTraceVisualizer(session: TraceSession): TraceVisualizerHandle {
+  const interpretation = interpretTraceSession(session);
   const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
   const evidenceByPatternId = resolveBehavioralEvidenceMap(
     interpretation.behavioralAnalysis.patterns,

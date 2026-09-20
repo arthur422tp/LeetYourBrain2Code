@@ -31,6 +31,7 @@ export interface CallFrameStoryNode {
   functionName: string;
   qualifiedName?: string;
   displayName: string;
+  depth: number;
   arguments: BoundArgumentSnapshot[];
   callStep: number;
   firstUserLineStep?: number;
@@ -136,6 +137,7 @@ export function buildCallFrameStory(input: BuildCallFrameStoryInput): CallFrameS
       functionName: frame.functionName,
       ...(descriptor?.qualifiedName !== undefined ? { qualifiedName: descriptor.qualifiedName } : {}),
       displayName,
+      depth: frame.depth,
       arguments: frame.arguments.map((argument) => ({
         ...argument,
         value: argument.value
@@ -163,4 +165,3 @@ export function buildCallFrameStory(input: BuildCallFrameStoryInput): CallFrameS
     tracingState: { ...input.callFrames.tracingState }
   };
 }
-

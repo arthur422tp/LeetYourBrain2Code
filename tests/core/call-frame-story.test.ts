@@ -240,4 +240,15 @@ describe("call-frame-story", () => {
     expect(model.byFrameId.get(5)?.qualifiedName).toBe("other.visit");
     expect(model.byFrameId.get(4)?.functionId).not.toBe(model.byFrameId.get(5)?.functionId);
   });
+
+  it("preserves factual general call-stack depth for presentation", () => {
+    const model = buildCallFrameStory({
+      callFrames: callFrames([frame(8, "helper", null, 8, [], { depth: 3 })]),
+      frameEvidenceIndex: evidence([8]),
+      events: [],
+      currentRawIndex: -1
+    });
+
+    expect(model.byFrameId.get(8)).toHaveProperty("depth", 3);
+  });
 });

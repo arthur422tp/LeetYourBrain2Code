@@ -23,6 +23,7 @@ function node(args: BoundArgumentSnapshot[]): CallFrameStoryNode {
     functionName: "maxDepth",
     qualifiedName: "Solution.maxDepth",
     displayName: "Solution.maxDepth",
+    depth: 2,
     arguments: args,
     callStep: 18,
     exit: { status: "active" },

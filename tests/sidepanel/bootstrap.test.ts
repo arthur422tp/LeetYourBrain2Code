@@ -522,6 +522,28 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("reschedules an otherwise identical snapshot when the problem slug changes", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    const code = pageState({ metadata: { slug: "one", title: "One" } });
+    const otherProblem = pageState({ metadata: { slug: "two", title: "Two" } });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: code });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    source.callbacks().onPageState({ tabId: 11, state: otherProblem });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    handle.dispose();
+  });
+
   it("keeps the previous visualization while the latest code is incomplete", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

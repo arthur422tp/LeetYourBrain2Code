@@ -17,6 +17,15 @@ export interface LiveExecutionInput {
   sourceCode: string;
   rawTestcase: string;
   selectedCaseIndex: number;
+  problemSlug: string | null;
+  problemTitle: string | null;
+}
+
+export interface AcceptedLiveSession {
+  revision: number;
+  input: LiveExecutionInput;
+  selectedTestcase: string;
+  request: ExecutionRequest;
 }
 
 export interface LiveExecutionRunner {
@@ -28,7 +37,7 @@ export interface LiveExecutionSchedulerOptions {
   createSessionId: () => string;
   debounceMs?: number;
   onStatusChange?: (status: LiveStatus) => void;
-  onSession?: (session: TraceSession) => void;
+  onSession?: (session: TraceSession, accepted: AcceptedLiveSession) => void;
 }
 
 export interface LiveScheduleOptions {
@@ -38,6 +47,8 @@ export interface LiveScheduleOptions {
 
 interface AcceptedRun {
   revision: number;
+  input: LiveExecutionInput;
+  selectedTestcase: string;
   request: ExecutionRequest;
 }
 
@@ -46,7 +57,8 @@ function inputKey(input: LiveExecutionInput): string {
     input.language,
     input.sourceCode,
     input.rawTestcase,
-    input.selectedCaseIndex
+    input.selectedCaseIndex,
+    input.problemSlug
   ]);
 }
 
@@ -61,7 +73,7 @@ export class LiveExecutionScheduler {
   private readonly createSessionId: () => string;
   private readonly debounceMs: number;
   private readonly onStatusChange?: (status: LiveStatus) => void;
-  private readonly onSession?: (session: TraceSession) => void;
+  private readonly onSession?: (session: TraceSession, accepted: AcceptedLiveSession) => void;
 
   private revision = 0;
   private latestRevision = 0;
@@ -87,7 +99,8 @@ export class LiveExecutionScheduler {
   ): number {
     if (this.disposed) return this.latestRevision;
 
-    const key = inputKey(input);
+    const inputSnapshot = { ...input };
+    const key = inputKey(inputSnapshot);
     if (!options.force && key === this.latestInputKey) {
       return this.latestRevision;
     }
@@ -99,11 +112,11 @@ export class LiveExecutionScheduler {
     this.emitStatus("updating");
 
     if (options.immediate) {
-      this.accept(revision, input);
+      this.accept(revision, inputSnapshot);
     } else {
       this.timer = setTimeout(() => {
         this.timer = undefined;
-        this.accept(revision, input);
+        this.accept(revision, inputSnapshot);
       }, this.debounceMs);
     }
     return revision;
@@ -174,7 +187,12 @@ export class LiveExecutionScheduler {
     }
 
     this.latestRunnableRevision = revision;
-    this.pending = { revision, request: built.request };
+    this.pending = {
+      revision,
+      input: { ...input },
+      selectedTestcase,
+      request: built.request
+    };
     this.emitStatus("updating");
     void this.drain();
   }
@@ -191,7 +209,12 @@ export class LiveExecutionScheduler {
       if (this.disposed) return;
 
       if (run.revision === this.latestRunnableRevision) {
-        this.onSession?.(session);
+        this.onSession?.(session, {
+          revision: run.revision,
+          input: { ...run.input },
+          selectedTestcase: run.selectedTestcase,
+          request: run.request
+        });
       }
       if (run.revision === this.latestRevision) {
         this.emitStatus(liveStatusFor(session));

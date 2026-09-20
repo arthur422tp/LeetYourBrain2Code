@@ -292,7 +292,7 @@ export function renderSidePanel(
       schedulerStatus = liveStatus;
       renderLiveStatus();
     },
-    onSession: (session) => {
+    onSession: (session, accepted) => {
       if (!collapsedInitialMirrors) {
         inputPanel.open = false;
         collapsedInitialMirrors = true;
@@ -300,10 +300,8 @@ export function renderSidePanel(
       activeVisualizer?.dispose();
       activeVisualizer = createTraceVisualizer(session);
       renderedPageIdentity = {
-        slug: currentPageState?.code === session.sourceCode
-          ? currentPageState.metadata.slug
-          : null,
-        sourceCode: session.sourceCode
+        slug: accepted.input.problemSlug,
+        sourceCode: accepted.input.sourceCode
       };
       result.replaceChildren(activeVisualizer.element);
     }
@@ -317,7 +315,9 @@ export function renderSidePanel(
       language: snapshot.language,
       sourceCode: snapshot.code,
       rawTestcase: snapshot.testcase,
-      selectedCaseIndex
+      selectedCaseIndex,
+      problemSlug: snapshot.metadata.slug,
+      problemTitle: snapshot.metadata.title
     }, options);
   };
 

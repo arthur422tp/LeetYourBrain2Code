@@ -63,12 +63,16 @@ function input(overrides: Partial<{
   sourceCode: string;
   rawTestcase: string;
   selectedCaseIndex: number;
+  problemSlug: string | null;
+  problemTitle: string | null;
 }> = {}) {
   return {
     language: "python",
     sourceCode: source,
     rawTestcase: "7",
     selectedCaseIndex: 0,
+    problemSlug: "one",
+    problemTitle: "One",
     ...overrides
   };
 }
@@ -268,6 +272,105 @@ describe("LiveExecutionScheduler", () => {
     scheduler.schedule(input(), { immediate: true, force: true });
     await Promise.resolve();
     expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not suppress an otherwise identical input from a different problem", async () => {
+    const execute = vi.fn(async (request: ExecutionRequest) => makeSession(request));
+    const scheduler = new LiveExecutionScheduler({
+      runner: { execute },
+      createSessionId: (() => {
+        let id = 0;
+        return () => `problem-run-${++id}`;
+      })(),
+      debounceMs: 0
+    });
+
+    scheduler.schedule(input({ problemSlug: "one" }));
+    await vi.runAllTimersAsync();
+    scheduler.schedule(input({ problemSlug: "two", problemTitle: "Two" }));
+    await vi.runAllTimersAsync();
+
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits immutable accepted input provenance for the run that actually finished", async () => {
+    const running = deferred<TraceSession>();
+    let captured!: ExecutionRequest;
+    const provenance: unknown[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      captured = request;
+      return running.promise;
+    });
+    const scheduler = new LiveExecutionScheduler({
+      runner: { execute },
+      createSessionId: () => "provenance-run",
+      debounceMs: 0,
+      onSession: (...args: unknown[]) => provenance.push(args[1])
+    });
+    const original = input({
+      rawTestcase: "7\n8",
+      selectedCaseIndex: 1,
+      problemSlug: "one",
+      problemTitle: "One"
+    });
+
+    scheduler.schedule(original, { immediate: true });
+    original.rawTestcase = "9";
+    original.selectedCaseIndex = 0;
+    original.problemSlug = "mutated";
+    original.problemTitle = "Mutated";
+
+    running.resolve(makeSession(captured));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(provenance[0]).toMatchObject({
+      revision: 1,
+      input: {
+        rawTestcase: "7\n8",
+        selectedCaseIndex: 1,
+        problemSlug: "one",
+        problemTitle: "One"
+      },
+      selectedTestcase: "8",
+      request: { rawTestcase: "8" }
+    });
+  });
+
+  it("reports the latest accepted case provenance when an older case finishes later", async () => {
+    const first = deferred<TraceSession>();
+    const requests: ExecutionRequest[] = [];
+    const provenance: unknown[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      requests.push(request);
+      return requests.length === 1
+        ? first.promise
+        : Promise.resolve(makeSession(request));
+    });
+    const scheduler = new LiveExecutionScheduler({
+      runner: { execute },
+      createSessionId: (() => {
+        let id = 0;
+        return () => `case-provenance-${++id}`;
+      })(),
+      debounceMs: 0,
+      onSession: (...args: unknown[]) => provenance.push(args[1])
+    });
+
+    scheduler.schedule(input({ rawTestcase: "1\n2", selectedCaseIndex: 0 }), { immediate: true });
+    scheduler.schedule(input({ rawTestcase: "3\n4", selectedCaseIndex: 1 }), { immediate: true });
+
+    first.resolve(makeSession(requests[0]!));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(provenance).toHaveLength(1);
+    expect(provenance[0]).toMatchObject({
+      input: { rawTestcase: "3\n4", selectedCaseIndex: 1 },
+      selectedTestcase: "4",
+      request: { rawTestcase: "4" }
+    });
   });
 
   it("does not execute a non-Python snapshot", async () => {

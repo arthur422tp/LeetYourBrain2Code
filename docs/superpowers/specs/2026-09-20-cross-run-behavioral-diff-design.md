@@ -2909,3 +2909,29 @@ why this implementation behaves differently on the failing testcase
 without requiring expected output or an AI solver.
 
 Do not combine Case-to-Case Diff into this first implementation.
+
+---
+
+# Implementation Status
+
+Implemented:
+- explicit pinned baseline lifecycle;
+- exact accepted-run provenance;
+- shared TraceSession interpretation;
+- stable hierarchical call-frame alignment;
+- tri-state cross-run value comparison;
+- decision/expression/control-flow/stable-mutation checkpoints;
+- bounded first-divergence comparison;
+- coverage/ambiguity handling;
+- Behavioral Diff panel;
+- current-side raw cursor navigation;
+- same-problem/same-testcase compatibility policy.
+
+Deferred:
+- Case 1 vs Case 2 mode;
+- arbitrary history;
+- persistent baselines;
+- baseline raw-cursor inspection;
+- synchronized dual visualizers;
+- judge/expected-output comparison;
+- cross-run object identity alignment.

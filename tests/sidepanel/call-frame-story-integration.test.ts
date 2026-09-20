@@ -296,4 +296,28 @@ describe("Call-Frame story product scenarios", () => {
     expect(handle.element.textContent).toContain("Call-frame tracing truncated");
     handle.dispose();
   });
+
+  it("keeps every frame interaction keyboard-accessible with explicit ARIA state", () => {
+    const nodes = Array.from({ length: 121 }, (_, index) => node(
+      index + 1,
+      "helper",
+      index + 1,
+      index + 1,
+      { childFrameIds: index < 120 ? [index + 2] : [] }
+    ));
+    const handle = createCallFrameStory({
+      model: model(nodes, 1, [1]),
+      onNavigateStep: () => { }
+    });
+    const buttons = [...handle.element.querySelectorAll<HTMLButtonElement>("button")];
+
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.every((button) => button.tagName === "BUTTON")).toBe(true);
+    expect(buttons.every((button) => !!button.getAttribute("aria-label"))).toBe(true);
+    expect(handle.element.querySelector('.call-frame-story__path-segment[aria-current="step"]')).not.toBeNull();
+    expect(handle.element.querySelector('.call-frame-story__tree-entry[aria-current="step"]')).not.toBeNull();
+    expect(handle.element.querySelector('[data-frame-toggle="1"][aria-expanded]')).not.toBeNull();
+    expect(handle.element.querySelector('[data-action="show-more"][aria-label]')).not.toBeNull();
+    handle.dispose();
+  });
 });

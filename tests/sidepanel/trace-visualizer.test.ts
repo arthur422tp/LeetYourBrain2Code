@@ -1909,3 +1909,62 @@ it("keeps Failure-First and timeline behavioral selection unchanged with control
   expect(after.element.querySelector('.execution-story')?.textContent).toContain('Incomplete evidence');
   before.dispose(); after.dispose();
 });
+
+it("keeps the active Call Stack separate from the all-occurrence Call Tree", () => {
+  const view = createTraceVisualizer(recursiveCallFrameSession());
+  view.setStep(2);
+
+  expect(view.element.querySelectorAll(".trace-viewer__call-frame")).toHaveLength(3);
+  expect(view.element.querySelector(".trace-viewer__call-frame.is-active code")?.textContent)
+    .toBe("maxDepth");
+  expect(view.element.querySelectorAll(".call-frame-story__tree-row")).toHaveLength(4);
+  view.dispose();
+});
+
+it("keeps Failure-First selection and timeline lanes unchanged with Call-Frame evidence", () => {
+  const base = failureFirstSession("timeout");
+  const withCallFrames: TraceSession = {
+    ...base,
+    functionPlan: {
+      version: 1,
+      functions: [{
+        functionId: "method:Solution.solve",
+        kind: "method",
+        name: "solve",
+        qualifiedName: "Solution.solve",
+        span: { line: 2, column: 4, endLine: 3, endColumn: 20 },
+        firstBodyLine: 3,
+        parameterNames: [],
+        parameterKinds: []
+      }]
+    },
+    callFrameBatches: [{
+      batchId: 1,
+      updates: [{
+        updateId: 1,
+        kind: "frame_enter",
+        frameId: 1,
+        parentFrameId: null,
+        functionName: "solve",
+        functionId: "method:Solution.solve",
+        callStep: base.events[0]!.step,
+        depth: 1,
+        arguments: []
+      }]
+    }],
+    callFrameTracing: { status: "complete" }
+  };
+  const before = createTraceVisualizer(base);
+  const after = createTraceVisualizer(withCallFrames);
+  const lanes = (root: HTMLElement) => [...root.querySelectorAll("[data-timeline-kind]")]
+    .map((node) => node.getAttribute("data-timeline-kind"));
+
+  expect(after.element.querySelector(".trace-viewer__failure-first")?.textContent)
+    .toBe(before.element.querySelector(".trace-viewer__failure-first")?.textContent);
+  expect(lanes(after.element)).toEqual(lanes(before.element));
+  after.element.querySelector<HTMLButtonElement>(".trace-viewer__failure-first-inspect")!.click();
+  before.element.querySelector<HTMLButtonElement>(".trace-viewer__failure-first-inspect")!.click();
+  expect(after.element.dataset.stepIndex).toBe(before.element.dataset.stepIndex);
+  before.dispose();
+  after.dispose();
+});

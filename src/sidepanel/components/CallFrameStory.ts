@@ -12,6 +12,11 @@ import {
 
 const PATH_COMPACTION_THRESHOLD = 7;
 
+function isExpanded(model: CallFrameStoryModel, state: TreeRenderState, frameId: number): boolean {
+  return model.currentPath.includes(frameId) || (!state.userCollapsed.has(frameId) &&
+    (state.userExpanded.has(frameId) || model.byFrameId.size > CALL_TREE_VISIBLE_ROW_LIMIT));
+}
+
 interface TreeRenderState {
   userExpanded: Set<number>;
   userCollapsed: Set<number>;
@@ -171,9 +176,7 @@ function renderTreeNode(
   const currentPath = new Set(model.currentPath);
   const isCurrent = node.frameId === model.currentFrameId;
   const inCurrentPath = currentPath.has(node.frameId);
-  const expanded = node.childFrameIds.length > 0 && (inCurrentPath || (
-    state.userExpanded.has(node.frameId) && !state.userCollapsed.has(node.frameId)
-  ));
+  const expanded = node.childFrameIds.length > 0 && isExpanded(model, state, node.frameId);
   setFrameAttributes(row, node, isCurrent);
   if (inCurrentPath) row.dataset.currentPath = "true";
   const exitStep = node.exit.status === "returned" || node.exit.status === "exception" || node.exit.status === "trace_ended"
@@ -190,6 +193,7 @@ function renderTreeNode(
   entry.textContent = `${frameSignature(node, { preferShortName: true })} ${compactFrameExitSuffix(node.exit)}`;
   entry.setAttribute("aria-label", `Inspect frame ${node.frameId}, ${node.displayName}, call step ${node.callStep}`);
   entry.disabled = !canNavigateStep(node.callStep);
+  if (entry.disabled) entry.title = 'Call step is outside the captured raw trace.';
   if (isCurrent) {
     entry.setAttribute("aria-current", "step");
     entry.dataset.currentFrame = "true";
@@ -201,7 +205,7 @@ function renderTreeNode(
     row.append(element("span", "call-frame-story__tree-recursion", `recursive · depth ${node.recursion.recursionDepth}`));
   }
   if (exitStep !== undefined) {
-    const exit = element("button", "call-frame-story__tree-exit", compactFrameExitSuffix(node.exit));
+    const exit = element("button", "call-frame-story__tree-exit", "Inspect exit");
     exit.type = "button";
     exit.dataset.frameAction = "exit";
     exit.dataset.frameId = String(node.frameId);
@@ -227,7 +231,12 @@ function renderTreeNode(
     toggle.type = "button";
     toggle.dataset.frameToggle = String(node.frameId);
     toggle.setAttribute("aria-expanded", String(expanded));
-    toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} frame ${node.frameId} children`);
+    toggle.disabled = inCurrentPath;
+    const toggleLabel = inCurrentPath
+      ? `Keep frame ${node.frameId} expanded to show the current call path`
+      : `${expanded ? "Collapse" : "Expand"} frame ${node.frameId} children`;
+    toggle.setAttribute("aria-label", toggleLabel);
+    toggle.title = toggleLabel;
     toggle.addEventListener("click", (event) => {
       event.stopPropagation();
       onToggle(node.frameId);
@@ -252,29 +261,29 @@ function renderTreeNode(
   return item;
 }
 
-function runtimeOrder(model: CallFrameStoryModel): number[] {
+function runtimeOrder(model: CallFrameStoryModel, state: TreeRenderState): number[] {
   const order: number[] = [];
   const visited = new Set<number>();
   const visit = (frameId: number): void => {
     if (visited.has(frameId) || !model.byFrameId.has(frameId)) return;
     visited.add(frameId);
     order.push(frameId);
-    for (const childFrameId of model.byFrameId.get(frameId)!.childFrameIds) visit(childFrameId);
+    if (isExpanded(model, state, frameId)) {
+      for (const childFrameId of model.byFrameId.get(frameId)!.childFrameIds) visit(childFrameId);
+    }
   };
   for (const root of model.roots) visit(root);
-  for (const frameId of model.byFrameId.keys()) visit(frameId);
   return order;
 }
 
-function boundedFrameIds(model: CallFrameStoryModel, budget: number): number[] {
-  const order = runtimeOrder(model);
+function boundedFrameIds(model: CallFrameStoryModel, budget: number, order: number[]): number[] {
   if (order.length <= budget) return order;
   const rowBudget = Math.max(1, budget - 1);
   const selected = new Set<number>();
   const add = (frameId: number): void => {
     if (selected.size < rowBudget && model.byFrameId.has(frameId)) selected.add(frameId);
   };
-  for (const root of model.roots) add(root);
+  if (model.currentFrameId !== undefined) add(model.currentFrameId);
 
   const currentPath = model.currentPath.filter((frameId) => model.byFrameId.has(frameId));
   if (currentPath.length > rowBudget) {
@@ -284,6 +293,7 @@ function boundedFrameIds(model: CallFrameStoryModel, budget: number): number[] {
   } else {
     for (const frameId of currentPath) add(frameId);
   }
+  for (const root of model.roots) add(root);
 
   let siblingCount = 0;
   for (let index = 0; index < currentPath.length && siblingCount < CALL_TREE_CONTEXT_SIBLING_LIMIT; index += 1) {
@@ -310,18 +320,32 @@ function renderBoundedTree(
   const section = element("section", "call-frame-story__tree");
   section.append(element("h3", "call-frame-story__heading", "Call Tree"));
   const list = element("ul", "call-frame-story__tree-list");
-  const visibleIds = boundedFrameIds(model, state.visibleRowBudget);
+  const order = runtimeOrder(model, state);
+  const visibleIds = boundedFrameIds(model, state.visibleRowBudget, order);
+  const parents = new Map<number, number>();
+  for (const node of model.byFrameId.values()) {
+    for (const child of node.childFrameIds) parents.set(child, node.frameId);
+  }
+  section.append(element('p', 'call-frame-story__tree-summary', 'Compact call tree · frame and parent IDs preserve the recorded hierarchy.'));
   for (const frameId of visibleIds) {
     const frame = model.byFrameId.get(frameId);
-    if (frame) list.append(renderTreeNode(frame, model, state, onNavigateStep, canNavigateStep, onToggle, false));
+    if (frame) {
+      const item = renderTreeNode(frame, model, state, onNavigateStep, canNavigateStep, onToggle, false);
+      const parent = parents.get(frameId);
+      item.querySelector('.call-frame-story__tree-row')!.append(element('span', 'call-frame-story__tree-context',
+        `Frame ${frameId} · depth ${frame.depth}${parent === undefined ? ' · root' : ` · parent ${parent}`}`));
+      list.append(item);
+    }
   }
   section.append(list);
-  const omitted = model.byFrameId.size - visibleIds.length;
+  const folded = model.byFrameId.size - order.length;
+  if (folded > 0) section.append(element('div', 'call-frame-story__tree-summary', `${folded} recorded frames in collapsed branches`));
+  const omitted = order.length - visibleIds.length;
   if (omitted > 0) {
     const summary = element("div", "call-frame-story__tree-summary", `+ ${omitted} additional recorded frames`);
     summary.dataset.treeSummary = "true";
     section.append(summary);
-    const showMore = element("button", "call-frame-story__tree-show-more", "+100 visible row budget");
+    const showMore = element("button", "call-frame-story__tree-show-more", "Show more calls");
     showMore.type = "button";
     showMore.dataset.action = "show-more";
     showMore.setAttribute("aria-label", "Show more recorded call frames");
@@ -339,7 +363,8 @@ function renderTree(
   onToggle: (frameId: number) => void,
   onShowMore: () => void
 ): HTMLElement {
-  if (model.byFrameId.size > state.visibleRowBudget) {
+  if (model.byFrameId.size > CALL_TREE_VISIBLE_ROW_LIMIT ||
+      [...model.byFrameId.values()].some(node => node.depth > PATH_COMPACTION_THRESHOLD)) {
     return renderBoundedTree(model, state, onNavigateStep, canNavigateStep, onToggle, onShowMore);
   }
   const section = element("section", "call-frame-story__tree");
@@ -388,8 +413,11 @@ export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameS
 
   const renderIntoRoot = (): void => {
     if (disposed) return;
+    const focused = document.activeElement;
+    const focusLabel = focused && root.contains(focused) ? focused.getAttribute('aria-label') : null;
+    const focusToggle = focused instanceof HTMLElement && root.contains(focused) ? focused.dataset.frameToggle : undefined;
     root.replaceChildren(...render(currentModel, state, options.onNavigateStep, canNavigateStep, (frameId) => {
-      if (state.userExpanded.has(frameId) && !state.userCollapsed.has(frameId)) {
+      if (isExpanded(currentModel, state, frameId)) {
         state.userExpanded.delete(frameId);
         state.userCollapsed.add(frameId);
       } else {
@@ -401,6 +429,12 @@ export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameS
       state.visibleRowBudget += 100;
       renderIntoRoot();
     }));
+    if (focusLabel) {
+      const replacement = [...root.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+        focusToggle !== undefined ? button.dataset.frameToggle === focusToggle :
+          button.className === focused?.className && button.getAttribute('aria-label') === focusLabel);
+      (replacement ?? root.querySelector<HTMLButtonElement>('.call-frame-story__tree-entry[aria-current="step"]'))?.focus({ preventScroll: true });
+    }
   };
 
   const update = (model: CallFrameStoryModel): void => {

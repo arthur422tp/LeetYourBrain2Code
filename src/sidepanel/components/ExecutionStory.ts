@@ -108,7 +108,10 @@ export function createExecutionStory(options: ExecutionStoryOptions): ExecutionS
 
   const render = (): void => {
     if (disposed) return;
-    root.replaceChildren();
+    // Keep the frame subtree attached so its update can preserve keyboard focus.
+    for (const child of [...root.children]) {
+      if (child !== callFrameHandle?.element) child.remove();
+    }
     if (currentModel.callFrame) {
       if (!callFrameHandle) {
         callFrameHandle = createCallFrameStory({
@@ -119,8 +122,9 @@ export function createExecutionStory(options: ExecutionStoryOptions): ExecutionS
       } else {
         callFrameHandle.update(currentModel.callFrame);
       }
-      root.append(callFrameHandle.element);
+      if (callFrameHandle.element.parentElement !== root) root.append(callFrameHandle.element);
     } else if (callFrameHandle) {
+      callFrameHandle.element.remove();
       callFrameHandle.dispose();
       callFrameHandle = null;
     }

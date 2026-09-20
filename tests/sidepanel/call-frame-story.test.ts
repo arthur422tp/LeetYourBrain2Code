@@ -73,6 +73,78 @@ function treeModel(currentPath: number[] = [1, 2, 3]): CallFrameStoryModel {
 }
 
 describe("CallFrameStory", () => {
+  it("keeps tree-entry focus in the tree rather than jumping to the matching breadcrumb", () => {
+    const current = treeModel();
+    const handle = createCallFrameStory({ model: current, onNavigateStep: () => {} });
+    document.body.append(handle.element);
+    const selector = '.call-frame-story__tree-entry[data-frame-id="3"]';
+    handle.element.querySelector<HTMLButtonElement>(selector)!.focus();
+    handle.update(current);
+    expect(document.activeElement).toBe(handle.element.querySelector(selector));
+    handle.dispose();
+    handle.element.remove();
+  });
+  it("uses parent-labelled compact rows for deep recursion instead of unbounded nesting", () => {
+    const nodes = Array.from({ length: 24 }, (_, i) => node(i + 1, "recur", i + 1, i + 1, {
+      childFrameIds: i < 23 ? [i + 2] : []
+    }));
+    const handle = createCallFrameStory({ model: model({
+      byFrameId: new Map(nodes.map(item => [item.frameId, item])),
+      currentFrameId: 24, currentPath: nodes.map(item => item.frameId)
+    }), onNavigateStep: () => {} });
+    expect(handle.element.querySelectorAll('.call-frame-story__tree-list')).toHaveLength(1);
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="24"]')?.textContent).toContain('parent 23');
+    handle.dispose();
+  });
+  it("preserves keyboard focus when a subtree is expanded", () => {
+    const handle = createCallFrameStory({ model: treeModel(), onNavigateStep: () => {} });
+    document.body.append(handle.element);
+    const toggle = handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="4"]')!;
+    toggle.focus();
+    toggle.click();
+    expect(document.activeElement).toBe(handle.element.querySelector('[data-frame-toggle="4"]'));
+    expect(document.activeElement?.getAttribute('aria-expanded')).toBe('true');
+    handle.dispose();
+    handle.element.remove();
+  });
+
+  it("explains why current ancestry stays expanded instead of offering a dead collapse control", () => {
+    const handle = createCallFrameStory({ model: treeModel(), onNavigateStep: () => {} });
+    const toggle = handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="2"]')!;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute('aria-label')).toContain('current call path');
+    handle.dispose();
+  });
+
+  it("lets large-tree branches collapse, keeps context, and reveals more without switching layouts", () => {
+    const nodes = Array.from({ length: 130 }, (_, index) => node(index + 1, 'helper', index ? 2 : 1, index + 1));
+    nodes[0]!.childFrameIds = [2, ...nodes.slice(3).map(item => item.frameId)];
+    nodes[1]!.childFrameIds = [3];
+    nodes[2]!.depth = 3;
+    const handle = createCallFrameStory({ model: model({ byFrameId: new Map(nodes.map(item => [item.frameId, item])), currentFrameId: 1, currentPath: [1] }), onNavigateStep: () => {} });
+    const row = (id: number) => handle.element.querySelector(`.call-frame-story__tree-row[data-frame-id="${id}"]`);
+    expect(row(3)).not.toBeNull();
+    handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="2"]')!.click();
+    expect(row(3)).toBeNull();
+    expect(row(2)?.textContent).toContain('Frame 2');
+    expect(row(2)?.textContent).toContain('parent 1');
+    const more = handle.element.querySelector<HTMLButtonElement>('[data-action="show-more"]')!;
+    expect(more.textContent).toBe('Show more calls');
+    more.click();
+    expect(row(130)).not.toBeNull();
+    expect(row(3)).toBeNull();
+    handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="2"]')!.click();
+    expect(row(3)).not.toBeNull();
+    handle.dispose();
+  });
+
+  it("keeps the current frame visible even when root count exceeds the row limit", () => {
+    const nodes = Array.from({ length: 150 }, (_, index) => node(index + 1, 'helper', 1, index + 1));
+    const handle = createCallFrameStory({ model: model({ roots: nodes.map(item => item.frameId), byFrameId: new Map(nodes.map(item => [item.frameId, item])), currentFrameId: 150, currentPath: [150] }), onNavigateStep: () => {} });
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="150"]')).not.toBeNull();
+    handle.dispose();
+  });
+
   it("renders Current Frame with factual temporal and depth context", () => {
     const handle = createCallFrameStory({ model: model(), onNavigateStep: () => { } });
 

@@ -2572,7 +2572,7 @@ button.is-primary:hover:not(:disabled) {
   white-space: nowrap;
 }
 
-.execution-story { display: grid; gap: 10px; }
+.execution-story { display: grid; gap: 10px; min-width: 0; }
 .execution-story__context, .execution-story__heading { margin: 0; font-size: 12px; }
 .execution-story__ancestry, .execution-story__tracing { font-size: 11px; color: #64748b; overflow-wrap: anywhere; }
 .execution-story__items { margin: 0; padding-left: 22px; }
@@ -2581,7 +2581,8 @@ button.is-primary:hover:not(:disabled) {
 .execution-story__history { display: grid; gap: 6px; }
 .execution-story button[aria-current="step"] { font-weight: 700; border-color: currentColor; }
 .execution-story button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.call-frame-story { display: grid; gap: 10px; }
+.call-frame-story { display: grid; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
+.call-frame-story > section { min-width: 0; }
 .call-frame-story__current { display: grid; gap: 5px; border: 1px solid #dbe3ee; border-radius: 8px; background: #f8fafc; padding: 9px; }
 .call-frame-story__heading { margin: 0; color: #334155; font-size: 12px; }
 .call-frame-story__signature { overflow-wrap: anywhere; color: #172033; font: 700 12px/1.4 "SFMono-Regular", Consolas, monospace; }
@@ -2590,23 +2591,25 @@ button.is-primary:hover:not(:disabled) {
 .call-frame-story__tracing { border: 1px dashed #f59e0b; border-radius: 7px; background: #fffbeb; padding: 7px 8px; color: #92400e; }
 .call-frame-story__path { display: grid; gap: 5px; }
 .call-frame-story__path-content { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: #64748b; font-size: 11px; }
-.call-frame-story__path-segment { min-width: 0; padding: 4px 6px; text-align: left; font-size: 11px; overflow-wrap: anywhere; }
+.call-frame-story__path-segment { min-width: 0; max-width: 100%; white-space: normal; padding: 4px 6px; text-align: left; font-size: 11px; overflow-wrap: anywhere; }
 .call-frame-story__path-segment[aria-current="step"] { border-color: currentColor; font-weight: 750; }
 .call-frame-story__path-ellipsis { white-space: nowrap; }
 .call-frame-story__path-empty { color: #64748b; font-size: 11px; }
 .call-frame-story__tree { display: grid; gap: 5px; }
-.call-frame-story__tree-list { display: grid; gap: 4px; margin: 0; padding-left: 18px; }
+.call-frame-story__tree-list { display: grid; gap: 4px; margin: 0; padding-left: 12px; list-style: none; }
+.call-frame-story__tree > .call-frame-story__tree-list { padding-left: 0; }
 .call-frame-story__tree-item { min-width: 0; }
 .call-frame-story__tree-row { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 5px; border-left: 2px solid #e2e8f0; padding: 3px 0 3px 6px; }
 .call-frame-story__tree-row[data-current-path="true"] { border-left-color: #94a3b8; }
 .call-frame-story__tree-row[data-current-frame="true"] { border-left-color: #1d67ed; background: #eff6ff; }
-.call-frame-story__tree-entry { min-width: 0; flex: 1 1 150px; padding: 5px 7px; text-align: left; font: 11px/1.35 "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.call-frame-story__tree-entry { min-width: 0; max-width: 100%; white-space: normal; flex: 1 1 150px; padding: 5px 7px; text-align: left; font: 11px/1.35 "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
 .call-frame-story__tree-entry[aria-current="step"] { border-color: currentColor; font-weight: 750; }
 .call-frame-story__tree-toggle { flex: 0 0 26px; padding: 3px 5px; font-size: 12px; }
 .call-frame-story__tree-exit { flex: 0 0 auto; padding: 4px 6px; font-size: 10px; }
 .call-frame-story__tree-recursion, .call-frame-story__tree-evidence, .call-frame-story__tree-folded { color: #64748b; font-size: 10px; line-height: 1.35; }
 .call-frame-story__tree-folded { padding: 2px 0 2px 27px; }
-.call-frame-story__tree-summary { color: #64748b; font-size: 11px; line-height: 1.4; }
+.call-frame-story__tree-summary { margin: 0; color: #64748b; font-size: 11px; line-height: 1.4; }
+.call-frame-story__tree-context { flex-basis: 100%; color: #64748b; font-size: 10px; line-height: 1.4; }
 .call-frame-story__tree-show-more { justify-self: start; padding: 5px 8px; font-size: 11px; }
 .call-frame-story button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .trace-viewer__outline-loops, .trace-viewer__outline-loop { margin: 8px 0; }

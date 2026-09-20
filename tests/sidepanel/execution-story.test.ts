@@ -28,6 +28,16 @@ function callFrameStoryModel(): CallFrameStoryModel {
 }
 
 describe("Execution Story", () => {
+  it("retains keyboard focus in the frame story when the composed model updates", () => {
+    const callFrame = callFrameStoryModel();
+    const handle = createExecutionStory({ model: { callFrame }, onNavigateStep: () => {} });
+    document.body.append(handle.element);
+    handle.element.querySelector<HTMLButtonElement>('.call-frame-story__path-segment')!.focus();
+    handle.update({ callFrame });
+    expect(document.activeElement).toBe(handle.element.querySelector('.call-frame-story__path-segment'));
+    handle.dispose();
+    handle.element.remove();
+  });
   it("renders factual stages, captured bindings and activation-local navigation", () => {
     const steps: number[] = [];
     const handle = createExecutionStory({ model: { controlFlow: buildControlFlowUiModel(storyInput()) }, onNavigateStep: step => steps.push(step) });

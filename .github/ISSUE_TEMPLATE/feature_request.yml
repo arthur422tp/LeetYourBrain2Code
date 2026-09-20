@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a focused improvement to the local visualizer.
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user need and keep the request within the extension's local, Python-focused scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to understand or inspect while debugging a LeetCode Python solution?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful change and what evidence the UI should show.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Visualization or evidence
+        - LeetCode integration
+        - Recovery or accessibility
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy_scope
+    attributes:
+      label: Privacy and scope check
+      options:
+        - label: This request does not require sending user code or testcase content to a backend.
+          required: true
+        - label: I understand the extension is Python-only and is not a replacement for the LeetCode judge.
+          required: true
+

@@ -162,6 +162,15 @@ Not yet supported:
 
 The extension reads the active LeetCode Python editor, visible testcase, and problem metadata to build the visualization. Pyodide is bundled and runs locally in a Web Worker. Code, testcases, traces, and comparison state are not sent to a backend, and v0.1 does not intentionally persist a user-code history. See the [privacy policy](PRIVACY.md) and [Chrome Web Store privacy draft](docs/store/privacy-dashboard.md).
 
+## Support
+
+Use the [bug report form](.github/ISSUE_TEMPLATE/bug_report.yml) for a
+reproducible visualizer problem, the [integration issue form](.github/ISSUE_TEMPLATE/integration_issue.yml)
+for LeetCode page or tab-state problems, and the [feature request form](.github/ISSUE_TEMPLATE/feature_request.yml)
+for scoped improvements. The [store support draft](docs/store/support.md)
+explains the fields to include. Before sharing code or testcase content in a
+public issue, remove anything you do not want to disclose publicly.
+
 ## Development
 
 Current status: preparing v0.1.0 release candidate.

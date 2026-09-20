@@ -1,0 +1,66 @@
+name: LeetCode integration issue
+description: Report a page-state, tab-ownership, or LeetCode UI integration problem.
+title: "[Integration] "
+labels:
+  - integration
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before attaching code or testcase content to a public issue, remove anything you do not want to share publicly.
+  - type: input
+    id: problem_url
+    attributes:
+      label: LeetCode problem slug or URL
+      placeholder: "e.g. https://leetcode.com/problems/binary-search/"
+    validations:
+      required: true
+  - type: input
+    id: chrome_version
+    attributes:
+      label: Chrome version
+      placeholder: "e.g. Chrome 140.0.7339.80"
+    validations:
+      required: true
+  - type: input
+    id: extension_version
+    attributes:
+      label: Extension version
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: integration_category
+    attributes:
+      label: Integration category
+      options:
+        - Side Panel cannot connect
+        - Active tab or window ownership
+        - Editor source not synchronized
+        - Testcase not synchronized
+        - Page navigation or reload
+        - LeetCode UI change
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Describe the tab, navigation, editor, and testcase state in order.
+    validations:
+      required: true
+  - type: textarea
+    id: observed_page_state
+    attributes:
+      label: Observed page state
+      description: Include visible status text or a redacted screenshot. Do not paste private code or tokens.
+    validations:
+      required: true
+  - type: checkboxes
+    id: refreshed_page
+    attributes:
+      label: Refreshed-page reproduction
+      options:
+        - label: I refreshed the LeetCode page, reopened the Side Panel, and reproduced the issue again.
+          required: true
+

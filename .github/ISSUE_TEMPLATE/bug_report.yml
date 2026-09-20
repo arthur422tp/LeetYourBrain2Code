@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible problem in the visualizer.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before attaching code or testcase content to a public issue, remove anything you do not want to share publicly.
+  - type: input
+    id: problem_url
+    attributes:
+      label: LeetCode problem slug or URL
+      placeholder: "e.g. https://leetcode.com/problems/binary-search/"
+    validations:
+      required: true
+  - type: input
+    id: chrome_version
+    attributes:
+      label: Chrome version
+      placeholder: "e.g. Chrome 140.0.7339.80"
+    validations:
+      required: true
+  - type: input
+    id: extension_version
+    attributes:
+      label: Extension version
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Page integration or connection
+        - Source/testcase synchronization
+        - Local execution
+        - Visualization or evidence
+        - Recovery or performance
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest sequence that reproduces the issue and what you expected versus what you saw.
+      placeholder: |
+        1. Open ...
+        2. Choose ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: code_testcase
+    attributes:
+      label: Optional code or testcase
+      description: Include only redacted content that you are comfortable sharing publicly.
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Optional screenshot
+      description: Drag in a screenshot after removing personal data and private code.
+  - type: checkboxes
+    id: refreshed_page
+    attributes:
+      label: Refreshed-page reproduction
+      options:
+        - label: I refreshed the LeetCode page, reopened the Side Panel, and reproduced the issue again.
+          required: true
+

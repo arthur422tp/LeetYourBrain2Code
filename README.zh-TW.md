@@ -140,6 +140,14 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 
 擴充功能會讀取目前 active LeetCode 頁面的 Python editor、可見 testcase 與 problem metadata，來建立 visualization。Pyodide 會隨擴充功能 bundle，並在本機 Web Worker 中執行。程式碼、testcase、trace 與 comparison state 不會送到 backend；v0.1 也不會刻意保存 user-code history。請參考[隱私政策](PRIVACY.md)與 [Chrome Web Store 隱私草稿](docs/store/privacy-dashboard.md)。
 
+## 支援
+
+可使用[錯誤回報表單](.github/ISSUE_TEMPLATE/bug_report.yml)回報可重現的
+visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integration_issue.yml)
+回報 LeetCode page 或 tab state 問題，或使用[功能請求表單](.github/ISSUE_TEMPLATE/feature_request.yml)
+提出範圍明確的改善建議。[商店支援草稿](docs/store/support.md)說明應提供的
+資訊。將程式碼或 testcase 貼到公開 issue 前，請先移除任何不想公開的內容。
+
 ## 開發
 
 目前狀態：正在準備 v0.1.0 release candidate。

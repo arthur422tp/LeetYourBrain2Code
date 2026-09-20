@@ -2606,6 +2606,8 @@ button.is-primary:hover:not(:disabled) {
 .call-frame-story__tree-exit { flex: 0 0 auto; padding: 4px 6px; font-size: 10px; }
 .call-frame-story__tree-recursion, .call-frame-story__tree-evidence, .call-frame-story__tree-folded { color: #64748b; font-size: 10px; line-height: 1.35; }
 .call-frame-story__tree-folded { padding: 2px 0 2px 27px; }
+.call-frame-story__tree-summary { color: #64748b; font-size: 11px; line-height: 1.4; }
+.call-frame-story__tree-show-more { justify-self: start; padding: 5px 8px; font-size: 11px; }
 .call-frame-story button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .trace-viewer__outline-loops, .trace-viewer__outline-loop { margin: 8px 0; }
 .trace-viewer__outline-loop { padding-left: 12px; }

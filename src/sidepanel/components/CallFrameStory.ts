@@ -1,10 +1,16 @@
 import type { CallFrameStoryModel, CallFrameStoryNode } from "../../core/call-frame-story";
 import {
+  compactFrameExitSuffix,
   frameExitSummary,
   frameSignature
 } from "../call-frame-format";
 
 const PATH_COMPACTION_THRESHOLD = 7;
+
+interface TreeRenderState {
+  userExpanded: Set<number>;
+  userCollapsed: Set<number>;
+}
 
 export interface CallFrameStoryViewModel {
   model: CallFrameStoryModel;
@@ -134,7 +140,124 @@ function renderPath(model: CallFrameStoryModel, onNavigateStep: (step: number) =
   return section;
 }
 
-function render(model: CallFrameStoryModel, onNavigateStep: (step: number) => void): HTMLElement[] {
+function shouldShowTree(model: CallFrameStoryModel): boolean {
+  return model.byFrameId.size > 1 ||
+    [...model.byFrameId.values()].some((node) => node.childFrameIds.length > 0 || node.recursion.isRecursive);
+}
+
+function renderTreeNode(
+  node: CallFrameStoryNode,
+  model: CallFrameStoryModel,
+  state: TreeRenderState,
+  onNavigateStep: (step: number) => void,
+  onToggle: (frameId: number) => void
+): HTMLLIElement {
+  const item = element("li", "call-frame-story__tree-item");
+  const row = element("div", "call-frame-story__tree-row");
+  const currentPath = new Set(model.currentPath);
+  const isCurrent = node.frameId === model.currentFrameId;
+  const inCurrentPath = currentPath.has(node.frameId);
+  const expanded = node.childFrameIds.length > 0 && (inCurrentPath || (
+    state.userExpanded.has(node.frameId) && !state.userCollapsed.has(node.frameId)
+  ));
+  setFrameAttributes(row, node, isCurrent);
+  if (inCurrentPath) row.dataset.currentPath = "true";
+  const exitStep = node.exit.status === "returned" || node.exit.status === "exception" || node.exit.status === "trace_ended"
+    ? node.exit.step
+    : undefined;
+  if (exitStep !== undefined) row.dataset.exitStep = String(exitStep);
+  if (isCurrent) row.setAttribute("aria-current", "step");
+
+  const entry = element("button", "call-frame-story__tree-entry");
+  entry.type = "button";
+  entry.dataset.frameAction = "entry";
+  entry.dataset.frameId = String(node.frameId);
+  entry.dataset.callStep = String(node.callStep);
+  entry.textContent = `${frameSignature(node, { preferShortName: true })} ${compactFrameExitSuffix(node.exit)}`;
+  entry.setAttribute("aria-label", `Inspect frame ${node.frameId}, ${node.displayName}, call step ${node.callStep}`);
+  if (isCurrent) {
+    entry.setAttribute("aria-current", "step");
+    entry.dataset.currentFrame = "true";
+  }
+  entry.addEventListener("click", () => onNavigateStep(node.callStep));
+  row.append(entry);
+
+  if (node.recursion.isRecursive) {
+    row.append(element("span", "call-frame-story__tree-recursion", `recursive · depth ${node.recursion.recursionDepth}`));
+  }
+  if (exitStep !== undefined) {
+    const exit = element("button", "call-frame-story__tree-exit", compactFrameExitSuffix(node.exit));
+    exit.type = "button";
+    exit.dataset.frameAction = "exit";
+    exit.dataset.frameId = String(node.frameId);
+    exit.dataset.exitStep = String(exitStep);
+    exit.setAttribute("aria-label", `Inspect frame ${node.frameId} exit at step ${exitStep}`);
+    exit.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onNavigateStep(exitStep);
+    });
+    row.append(exit);
+  }
+  const evidenceTotal = Object.values(node.evidenceCounts).reduce((sum, count) => sum + count, 0);
+  if (evidenceTotal > 0 && (isCurrent || expanded)) {
+    row.append(element(
+      "span",
+      "call-frame-story__tree-evidence",
+      `${node.evidenceCounts.decisions} decisions · ${node.evidenceCounts.loopIterations} loop${node.evidenceCounts.loopIterations === 1 ? "" : "s"} · ${node.evidenceCounts.expressions} expressions · ${node.evidenceCounts.mutations} mutations`
+    ));
+  }
+  if (node.childFrameIds.length > 0) {
+    const toggle = element("button", "call-frame-story__tree-toggle", expanded ? "▾" : "▸");
+    toggle.type = "button";
+    toggle.dataset.frameToggle = String(node.frameId);
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} frame ${node.frameId} children`);
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onToggle(node.frameId);
+    });
+    row.prepend(toggle);
+  }
+  item.append(row);
+
+  const childNodes = node.childFrameIds
+    .map((frameId) => model.byFrameId.get(frameId))
+    .filter((child): child is CallFrameStoryNode => child !== undefined);
+  if (childNodes.length > 0 && expanded) {
+    const list = element("ul", "call-frame-story__tree-list");
+    for (const child of childNodes) {
+      list.append(renderTreeNode(child, model, state, onNavigateStep, onToggle));
+    }
+    item.append(list);
+  } else if (childNodes.length > 0) {
+    item.append(element("div", "call-frame-story__tree-folded", `▶ ${childNodes.length} child call${childNodes.length === 1 ? "" : "s"}`));
+  }
+  return item;
+}
+
+function renderTree(
+  model: CallFrameStoryModel,
+  state: TreeRenderState,
+  onNavigateStep: (step: number) => void,
+  onToggle: (frameId: number) => void
+): HTMLElement {
+  const section = element("section", "call-frame-story__tree");
+  section.append(element("h3", "call-frame-story__heading", "Call Tree"));
+  const list = element("ul", "call-frame-story__tree-list");
+  for (const frameId of model.roots) {
+    const root = model.byFrameId.get(frameId);
+    if (root) list.append(renderTreeNode(root, model, state, onNavigateStep, onToggle));
+  }
+  section.append(list);
+  return section;
+}
+
+function render(
+  model: CallFrameStoryModel,
+  state: TreeRenderState,
+  onNavigateStep: (step: number) => void,
+  onToggle: (frameId: number) => void
+): HTMLElement[] {
   const children: HTMLElement[] = [];
   if (model.tracingState.status !== "complete") {
     children.push(element(
@@ -145,19 +268,40 @@ function render(model: CallFrameStoryModel, onNavigateStep: (step: number) => vo
   }
   children.push(renderCurrentFrame(model));
   children.push(renderPath(model, onNavigateStep));
+  if (shouldShowTree(model)) children.push(renderTree(model, state, onNavigateStep, onToggle));
   return children;
 }
 
 export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameStoryHandle {
   const root = element("section", "call-frame-story");
+  const state: TreeRenderState = {
+    userExpanded: new Set(),
+    userCollapsed: new Set()
+  };
+  let currentModel = options.model;
   let disposed = false;
+
+  const renderIntoRoot = (): void => {
+    if (disposed) return;
+    root.replaceChildren(...render(currentModel, state, options.onNavigateStep, (frameId) => {
+      if (state.userExpanded.has(frameId) && !state.userCollapsed.has(frameId)) {
+        state.userExpanded.delete(frameId);
+        state.userCollapsed.add(frameId);
+      } else {
+        state.userCollapsed.delete(frameId);
+        state.userExpanded.add(frameId);
+      }
+      renderIntoRoot();
+    }));
+  };
 
   const update = (model: CallFrameStoryModel): void => {
     if (disposed) return;
-    root.replaceChildren(...render(model, options.onNavigateStep));
+    currentModel = model;
+    renderIntoRoot();
   };
 
-  update(options.model);
+  renderIntoRoot();
   return {
     element: root,
     update,
@@ -167,4 +311,3 @@ export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameS
     }
   };
 }
-

@@ -2594,6 +2594,19 @@ button.is-primary:hover:not(:disabled) {
 .call-frame-story__path-segment[aria-current="step"] { border-color: currentColor; font-weight: 750; }
 .call-frame-story__path-ellipsis { white-space: nowrap; }
 .call-frame-story__path-empty { color: #64748b; font-size: 11px; }
+.call-frame-story__tree { display: grid; gap: 5px; }
+.call-frame-story__tree-list { display: grid; gap: 4px; margin: 0; padding-left: 18px; }
+.call-frame-story__tree-item { min-width: 0; }
+.call-frame-story__tree-row { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 5px; border-left: 2px solid #e2e8f0; padding: 3px 0 3px 6px; }
+.call-frame-story__tree-row[data-current-path="true"] { border-left-color: #94a3b8; }
+.call-frame-story__tree-row[data-current-frame="true"] { border-left-color: #1d67ed; background: #eff6ff; }
+.call-frame-story__tree-entry { min-width: 0; flex: 1 1 150px; padding: 5px 7px; text-align: left; font: 11px/1.35 "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.call-frame-story__tree-entry[aria-current="step"] { border-color: currentColor; font-weight: 750; }
+.call-frame-story__tree-toggle { flex: 0 0 26px; padding: 3px 5px; font-size: 12px; }
+.call-frame-story__tree-exit { flex: 0 0 auto; padding: 4px 6px; font-size: 10px; }
+.call-frame-story__tree-recursion, .call-frame-story__tree-evidence, .call-frame-story__tree-folded { color: #64748b; font-size: 10px; line-height: 1.35; }
+.call-frame-story__tree-folded { padding: 2px 0 2px 27px; }
+.call-frame-story button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .trace-viewer__outline-loops, .trace-viewer__outline-loop { margin: 8px 0; }
 .trace-viewer__outline-loop { padding-left: 12px; }
 .trace-viewer__outline-loop-iteration { display: block; margin: 6px 0; text-align: left; }

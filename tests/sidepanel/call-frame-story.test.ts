@@ -49,6 +49,29 @@ function model(overrides: Partial<CallFrameStoryModel> = {}): CallFrameStoryMode
   };
 }
 
+function treeModel(currentPath: number[] = [1, 2, 3]): CallFrameStoryModel {
+  const root = node(1, "solve", 1, 10, { childFrameIds: [2, 4] });
+  const helper = node(2, "helper", 2, 20, { childFrameIds: [3] });
+  const nested = node(3, "helper", 3, 30, {
+    recursion: { isRecursive: true, recursionDepth: 2, repeatedAncestorFrameId: 2 },
+    exit: { status: "returned", step: 35, value: int(4) },
+    atCursor: currentPath.includes(3) ? "active" : "exited"
+  });
+  const sibling = node(4, "sibling", 2, 40, { childFrameIds: [5] });
+  const siblingChild = node(5, "sibling", 3, 50, {
+    exit: { status: "returned", step: 55, value: int(5) },
+    atCursor: currentPath.includes(5) ? "active" : "exited"
+  });
+  const nodes = [root, helper, nested, sibling, siblingChild].map((item) => [item.frameId, item] as const);
+  return {
+    roots: [1],
+    byFrameId: new Map(nodes),
+    currentFrameId: currentPath.at(-1),
+    currentPath,
+    tracingState: { status: "complete" }
+  };
+}
+
 describe("CallFrameStory", () => {
   it("renders Current Frame with factual temporal and depth context", () => {
     const handle = createCallFrameStory({ model: model(), onNavigateStep: () => { } });
@@ -153,6 +176,74 @@ describe("CallFrameStory", () => {
 
     expect(handle.element).toBe(root);
     expect(handle.element.textContent).toContain("At this step: exited");
+    handle.dispose();
+  });
+
+  it("renders one nested row per concrete frame in runtime child order", () => {
+    const handle = createCallFrameStory({ model: treeModel(), onNavigateStep: () => { } });
+    const rows = [...handle.element.querySelectorAll<HTMLElement>(".call-frame-story__tree-row")];
+
+    expect(rows.map((row) => row.dataset.frameId)).toEqual(["1", "2", "3", "4"]);
+    expect(handle.element.querySelectorAll(".call-frame-story__tree-list").length).toBeGreaterThan(1);
+    expect(handle.element.textContent).toContain("helper() → 4");
+    expect(handle.element.textContent).toContain("recursive · depth 2");
+    handle.dispose();
+  });
+
+  it("navigates frame entry and authoritative exit steps independently", () => {
+    const steps: number[] = [];
+    const handle = createCallFrameStory({ model: treeModel(), onNavigateStep: (step) => steps.push(step) });
+    const row = handle.element.querySelector<HTMLElement>('.call-frame-story__tree-row[data-frame-id="3"]')!;
+    row.querySelector<HTMLButtonElement>("[data-frame-action=entry]")!.click();
+    row.querySelector<HTMLButtonElement>("[data-frame-action=exit]")!.click();
+
+    expect(steps).toEqual([30, 35]);
+    handle.dispose();
+  });
+
+  it("preserves user expansion choices across updates while auto-expanding current ancestry", () => {
+    const handle = createCallFrameStory({ model: treeModel(), onNavigateStep: () => { } });
+    const siblingToggle = handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="4"]')!;
+    expect(siblingToggle.getAttribute("aria-expanded")).toBe("false");
+    siblingToggle.click();
+    expect(handle.element.querySelector('[data-frame-id="5"]')).not.toBeNull();
+
+    handle.update(treeModel([1, 2, 3]));
+    expect(handle.element.querySelector('[data-frame-id="5"]')).not.toBeNull();
+    handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="4"]')!.click();
+    handle.update(treeModel([1, 2, 3]));
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="5"]')).toBeNull();
+
+    handle.update(treeModel([1, 4, 5]));
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="5"]')).not.toBeNull();
+    expect(handle.element.querySelector<HTMLElement>('.call-frame-story__tree-row[data-frame-id="4"]')?.dataset.currentPath).toBe("true");
+    handle.update(treeModel([1, 2, 3]));
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="5"]')).toBeNull();
+    handle.dispose();
+  });
+
+  it("uses semantic nested lists and exposes current-path state", () => {
+    const handle = createCallFrameStory({ model: treeModel(), onNavigateStep: () => { } });
+    const toggle = handle.element.querySelector<HTMLButtonElement>('[data-frame-toggle="2"]')!;
+    const currentRow = handle.element.querySelector<HTMLElement>('.call-frame-story__tree-row[data-frame-id="3"]')!;
+
+    expect(handle.element.querySelector("ul.call-frame-story__tree-list")).not.toBeNull();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toContain("frame 2");
+    expect(currentRow.getAttribute("aria-current")).toBe("step");
+    expect(currentRow.dataset.currentFrame).toBe("true");
+    expect(currentRow.dataset.currentPath).toBe("true");
+    expect(handle.element.querySelector<HTMLElement>('.call-frame-story__tree-row[data-frame-id="2"]')?.dataset.currentPath).toBe("true");
+    expect(handle.element.querySelector<HTMLElement>('.call-frame-story__tree-row[data-frame-id="1"]')?.dataset.currentPath).toBe("true");
+    handle.dispose();
+  });
+
+  it("keeps the whole-run tree suffix separate from current-step temporal copy", () => {
+    const handle = createCallFrameStory({ model: model(), onNavigateStep: () => { } });
+
+    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="5"]')?.textContent).toContain("→ 2");
+    expect(handle.element.querySelector(".call-frame-story__current")?.textContent).toContain("At this step: active");
+    expect(handle.element.querySelector(".call-frame-story__current")?.textContent).toContain("Observed later: returned 2");
     handle.dispose();
   });
 });

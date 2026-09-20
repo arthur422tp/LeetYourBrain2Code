@@ -56,14 +56,17 @@ function applyTerminalUpdate(frame: FrameOccurrence, update: CallFrameRuntimeUpd
   }
   if (update.kind === "frame_return") {
     frame.exit = { status: "returned", step: update.exitStep, value: update.value };
+    frame.exitEvidence = "observed";
   } else if (update.kind === "frame_exception") {
     frame.exit = { status: "exception", step: update.exitStep, exception: update.exception };
+    frame.exitEvidence = "observed";
   } else if (update.kind === "frame_trace_ended") {
     frame.exit = {
       status: "trace_ended",
       ...(update.exitStep !== undefined ? { step: update.exitStep } : {}),
       reason: update.reason
     };
+    frame.exitEvidence = "observed";
   }
 }
 
@@ -151,6 +154,7 @@ function projectUnclosedFrames(model: CallFrameModel, input: CallFrameInterprete
   for (const frame of model.byFrameId.values()) {
     if (frame.exit.status === "active") {
       frame.exit = { status: "trace_ended", reason };
+      frame.exitEvidence = "synthesized";
     }
   }
 }

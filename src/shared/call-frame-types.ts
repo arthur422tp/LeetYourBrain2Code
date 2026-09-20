@@ -80,6 +80,8 @@ export interface CallFrameTracingState {
   reason?: string;
 }
 
+export type FrameExitEvidence = "observed" | "synthesized";
+
 export interface RecursionOccurrenceInfo {
   isRecursive: boolean;
   recursionDepth: number;
@@ -105,6 +107,8 @@ export interface FrameOccurrence {
   childFrameIds: number[];
   recursion: RecursionOccurrenceInfo;
   exit: FrameExit;
+  /** Whether the terminal exit came from a runtime update or interpreter fallback. */
+  exitEvidence?: FrameExitEvidence;
 }
 
 export interface CallFrameModel {

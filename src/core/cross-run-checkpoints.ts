@@ -1,6 +1,7 @@
 import type {
   BoundArgumentSnapshot,
   FrameExit,
+  FrameExitEvidence,
   FrameOccurrence
 } from "../shared/call-frame-types";
 import type {
@@ -144,6 +145,7 @@ export interface FrameExitCheckpoint {
   semanticKey: string;
   runLocalAnchorStep?: number;
   localSequence: number;
+  exitEvidence?: FrameExitEvidence;
   exit: FrameExit;
 }
 
@@ -490,13 +492,18 @@ function sortCheckpoints(checkpoints: BehavioralCheckpoint[]): BehavioralCheckpo
   });
 }
 
-function exitCheckpoint(frameId: number, exit: FrameExit): FrameExitCheckpoint {
+function exitCheckpoint(
+  frameId: number,
+  exit: FrameExit,
+  exitEvidence?: FrameExitEvidence
+): FrameExitCheckpoint {
   return {
     kind: "frame_exit",
     frameId,
     semanticKey: "frame-exit",
     ...(anchorForExit(exit) !== undefined ? { runLocalAnchorStep: anchorForExit(exit) } : {}),
     localSequence: Number.MAX_SAFE_INTEGER,
+    ...(exitEvidence ? { exitEvidence } : {}),
     exit
   };
 }
@@ -545,7 +552,7 @@ export function projectCrossRunFrames(
       },
       checkpoints: sortCheckpoints(checkpoints),
       childFrameIds: [...frame.childFrameIds],
-      exit: exitCheckpoint(frameId, frame.exit)
+      exit: exitCheckpoint(frameId, frame.exit, frame.exitEvidence)
     });
   }
 

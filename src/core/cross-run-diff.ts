@@ -845,6 +845,15 @@ function compareCheckpointStream(
           path
         );
       }
+      if (
+        baselineCheckpoint.kind === currentCheckpoint.kind
+        && (
+          checkpointCoverage(state.baseline.coverage, baselineCheckpoint) !== "complete"
+          || checkpointCoverage(state.current.coverage, currentCheckpoint) !== "complete"
+        )
+      ) {
+        return { stopReason: "coverage_ended", path };
+      }
       const structural = structuralDivergence(
         pair,
         baselineFrame,
@@ -989,6 +998,7 @@ function frameExitComparisonBlocked(
 ): boolean {
   return prepared.coverage.callFrames !== "complete"
     && frame.exit.exit.status === "trace_ended"
+    && frame.exit.exitEvidence !== "observed"
     && !hasIndependentSessionTerminationEvidence(prepared.session);
 }
 

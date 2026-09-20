@@ -135,7 +135,9 @@ describe("call-frame-interpreter", () => {
     expect(model.byFrameId.get(2)?.parentFrameId).toBe(1);
     expect(model.byFrameId.get(3)?.parentFrameId).toBe(1);
     expect(model.byFrameId.get(2)?.exit).toEqual({ status: "returned", step: 6, value: int(2) });
+    expect(model.byFrameId.get(2)?.exitEvidence).toBe("observed");
     expect(model.byFrameId.get(3)?.exit).toEqual({ status: "trace_ended", reason: "normal_return" });
+    expect(model.byFrameId.get(3)?.exitEvidence).toBe("synthesized");
   });
 
   it("derives direct, mutual, and non-recursive repeated-call facts from ancestry", () => {
@@ -179,6 +181,8 @@ describe("call-frame-interpreter", () => {
     expect(model.byFrameId.get(2)?.firstUserLineStep).toBe(12);
     expect(model.byFrameId.get(1)?.exit).toEqual({ status: "trace_ended", reason: "call_frame_event_limit" });
     expect(model.byFrameId.get(2)?.exit).toEqual({ status: "trace_ended", reason: "call_frame_event_limit" });
+    expect(model.byFrameId.get(1)?.exitEvidence).toBe("synthesized");
+    expect(model.byFrameId.get(2)?.exitEvidence).toBe("synthesized");
   });
 
   it("keeps factual terminal exceptions and ignores malformed terminal-only frames", () => {
@@ -195,6 +199,7 @@ describe("call-frame-interpreter", () => {
 
     expect(model.byFrameId.has(99)).toBe(false);
     expect(model.byFrameId.get(1)?.exit).toMatchObject({ status: "exception", step: 3 });
+    expect(model.byFrameId.get(1)?.exitEvidence).toBe("observed");
     expect(model.byFrameId.get(1)?.firstUserLineStep).toBe(3);
   });
 

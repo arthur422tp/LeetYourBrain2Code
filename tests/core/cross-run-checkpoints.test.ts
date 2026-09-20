@@ -304,6 +304,8 @@ describe("projectCrossRunFrames", () => {
     expect(solve.entry.arguments[0]?.name).toBe("values");
     expect(solve.childFrameIds).toEqual([2]);
     expect(solve.exit.exit).toMatchObject({ status: "returned", step: 40 });
+    expect(solve.exit.exitEvidence).toBe("observed");
+    expect(projection.frames.get(2)?.exit.exitEvidence).toBe("observed");
     expect(solve.checkpoints.map((checkpoint) => checkpoint.kind)).toEqual([
       "loop_iteration",
       "mutation",

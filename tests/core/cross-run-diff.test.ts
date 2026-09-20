@@ -255,6 +255,13 @@ function kind(result: ReturnType<typeof compareCrossRuns>): CrossRunDivergenceKi
   return result.firstDivergence?.kind;
 }
 
+function markExitEvidence(
+  frameProjection: CrossRunFrameProjection,
+  exitEvidence: "observed" | "synthesized"
+): void {
+  (frameProjection.exit as CrossRunFrameProjection["exit"] & { exitEvidence: typeof exitEvidence }).exitEvidence = exitEvidence;
+}
+
 type CoverageBoundaryCheckpointKind =
   | "decision"
   | "expression"
@@ -557,6 +564,23 @@ describe("compareCrossRuns", () => {
     expect(result.stopReason).toBe("coverage_ended");
   });
 
+  it("stops instead of reporting a mutation target change when mutation coverage is incomplete", () => {
+    const baseline = prepared([
+      frame(1, "solve", [mutation(1, "mutation|local:left|1", 2, int(1), "local:left")])
+    ]);
+    const current = prepared([
+      frame(11, "solve", [mutation(11, "mutation|local:right|1", 20, int(1), "local:right")])
+    ], [11], {
+      sessionId: "current",
+      coverage: { mutations: { status: "partial", skippedUnstableObjectMutations: 0 } }
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(result.firstDivergence).toBeUndefined();
+    expect(result.stopReason).toBe("coverage_ended");
+  });
+
   it("stops instead of treating a synthetic call-frame limit exit as a changed frame outcome", () => {
     const baseline = prepared([
       frame(1, "solve", [], { exit: { status: "returned", step: 4, value: int(3) } })
@@ -569,11 +593,29 @@ describe("compareCrossRuns", () => {
       sessionId: "current",
       coverage: { callFrames: "partial" }
     });
+    markExitEvidence(current.frames.get(11)!, "synthesized");
 
     const result = compareCrossRuns(baseline, current, compatible);
 
     expect(result.firstDivergence).toBeUndefined();
     expect(result.stopReason).toBe("coverage_ended");
+  });
+
+  it("preserves a factual frame trace end even when later call-frame evidence is incomplete", () => {
+    const baseline = prepared([
+      frame(1, "solve", [], { exit: { status: "trace_ended", step: 4, reason: "baseline_end" } })
+    ]);
+    const current = prepared([
+      frame(11, "solve", [], { exit: { status: "trace_ended", step: 4, reason: "current_end" } })
+    ], [11], {
+      sessionId: "current",
+      coverage: { callFrames: "partial" }
+    });
+    markExitEvidence(current.frames.get(11)!, "observed");
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(kind(result)).toBe("trace_end_reason_changed");
   });
 
   it("allows frame outcome comparison when session termination independently proves the boundary", () => {

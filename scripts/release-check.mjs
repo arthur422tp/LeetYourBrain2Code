@@ -19,7 +19,6 @@ export const REQUIRED_DIST_FILES = Object.freeze([
   "icons/icon128.png",
   "pyodide/pyodide.asm.js",
   "pyodide/pyodide.asm.wasm",
-  "pyodide/pyodide.mjs",
   "pyodide/python_stdlib.zip",
   "pyodide/pyodide-lock.json"
 ]);

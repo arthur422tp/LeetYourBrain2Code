@@ -38,7 +38,6 @@ describe("release package validation", () => {
         "background/service-worker.js",
         "pyodide/pyodide.asm.js",
         "pyodide/pyodide.asm.wasm",
-        "pyodide/pyodide.mjs",
         "pyodide/python_stdlib.zip",
         "pyodide/pyodide-lock.json"
       ])

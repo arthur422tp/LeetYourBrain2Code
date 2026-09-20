@@ -7,7 +7,6 @@ const bundledPyodideFiles = [
   "pyodide.asm.js",
   "pyodide.asm.wasm",
   "pyodide-lock.json",
-  "pyodide.mjs",
   "python_stdlib.zip"
 ];
 

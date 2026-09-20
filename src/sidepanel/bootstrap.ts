@@ -23,6 +23,10 @@ import {
 } from "./active-tab-source";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
 import {
+  createBaselineControls,
+  type BaselineControlsHandle
+} from "./components/BaselineControls";
+import {
   compareRunCompatibility,
   createRunComparisonState,
   runRecordFromAcceptedSession
@@ -204,6 +208,7 @@ export function renderSidePanel(
   let baselinePrepared: PreparedCrossRun | null = null;
   let currentPrepared: PreparedCrossRun | null = null;
   let currentComparison: CrossRunDiffResult | null = null;
+  let baselineControls: BaselineControlsHandle | null = null;
   let currentPageState: LeetCodePageState | null = hasActiveTabSource
     ? null
     : {
@@ -281,17 +286,35 @@ export function renderSidePanel(
     result.replaceChildren(placeholder);
   };
 
+  const renderBaselineControls = (): void => {
+    if (baselineControls === null) return;
+    const state = comparisonState.get();
+    baselineControls.update({
+      hasCurrent: state.current !== null && currentPrepared !== null,
+      hasBaseline: state.baseline !== null && baselinePrepared !== null,
+      caseLabel: state.baseline === null
+        ? undefined
+        : `Case ${state.baseline.context.selectedCaseIndex + 1}`,
+      baselineStatus: state.baseline?.session.status,
+      sourceDiffers: state.baseline !== null
+        && state.current !== null
+        && state.baseline.session.sourceCode !== state.current.session.sourceCode
+    });
+  };
+
   const clearComparisonForProblemChange = (): void => {
     comparisonState.clearForProblemChange();
     baselinePrepared = null;
     currentPrepared = null;
     currentComparison = null;
+    renderBaselineControls();
   };
 
   const recomputeComparison = (): void => {
     const state = comparisonState.get();
     if (baselinePrepared === null || currentPrepared === null) {
       currentComparison = null;
+      renderBaselineControls();
       return;
     }
     currentComparison = compareCrossRuns(
@@ -299,6 +322,26 @@ export function renderSidePanel(
       currentPrepared,
       compareRunCompatibility(state.baseline, state.current)
     );
+    renderBaselineControls();
+  };
+
+  const pinCurrentBaseline = (): void => {
+    if (currentPrepared === null || !comparisonState.pinCurrent()) return;
+    baselinePrepared = currentPrepared;
+    recomputeComparison();
+  };
+
+  const replaceBaseline = (): void => {
+    if (currentPrepared === null || !comparisonState.replaceBaseline()) return;
+    baselinePrepared = currentPrepared;
+    recomputeComparison();
+  };
+
+  const clearBaseline = (): void => {
+    comparisonState.clearBaseline();
+    baselinePrepared = null;
+    currentComparison = null;
+    renderBaselineControls();
   };
 
   const isDifferentProblem = (state: LeetCodePageState): boolean => {
@@ -307,6 +350,17 @@ export function renderSidePanel(
     if (renderedPageIdentity.slug === null || state.metadata.slug === null) return false;
     return renderedPageIdentity.slug !== state.metadata.slug;
   };
+
+  baselineControls = createBaselineControls({
+    model: {
+      hasCurrent: false,
+      hasBaseline: false,
+      sourceDiffers: false
+    },
+    onPin: pinCurrentBaseline,
+    onReplace: replaceBaseline,
+    onClear: clearBaseline
+  });
 
   caseSelector.addEventListener("change", () => {
     const nextIndex = Number.parseInt(caseSelector.value, 10);
@@ -452,7 +506,7 @@ export function renderSidePanel(
     }
   });
 
-  app.append(header, status, inputPanel, inputControls, result);
+  app.append(header, status, inputPanel, inputControls, baselineControls.element, result);
   root.replaceChildren(app);
 
   if (activeTabSource) {
@@ -503,6 +557,7 @@ export function renderSidePanel(
       disposed = true;
       activeTabSource?.dispose();
       scheduler.dispose();
+      baselineControls?.dispose();
       activeVisualizer?.dispose();
       activeVisualizer = null;
       controller.dispose?.();

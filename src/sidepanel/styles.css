@@ -210,6 +210,46 @@ button.is-primary:hover:not(:disabled) {
   gap: 9px;
 }
 
+.baseline-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  background: #fff;
+  padding: 9px 11px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.baseline-controls__summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.baseline-controls__title {
+  color: #334155;
+  font-size: 13px;
+}
+
+.baseline-controls__metadata {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.baseline-controls__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.baseline-controls__actions button {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
 .trace-placeholder,
 .trace-error {
   color: #64748b;

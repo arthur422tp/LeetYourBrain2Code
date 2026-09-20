@@ -155,6 +155,90 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("pins an accepted current run without rerunning and can clear it without replacing the visualizer", async () => {
+    const root = document.createElement("main");
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, { controller: { execute }, liveDebounceMs: 1_000 });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    const pin = root.querySelector<HTMLButtonElement>("#baseline-pin")!;
+    expect(pin.disabled).toBe(false);
+    pin.click();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(root.querySelector(".baseline-controls")?.textContent).toContain("Baseline pinned");
+
+    const viewer = root.querySelector("#trace-viewer");
+    root.querySelector<HTMLButtonElement>("#baseline-clear")?.click();
+    expect(root.querySelector("#trace-viewer")).toBe(viewer);
+    expect(root.querySelector(".baseline-controls")?.textContent).toContain("Pin baseline");
+    handle.dispose();
+  });
+
+  it("retains a pinned baseline across source edits and testcase changes", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+    const first = pageState({ testcase: "7\n8", metadata: { slug: "one", title: "One" } });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: first });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#baseline-pin")?.click();
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({
+        code: "class Solution:\n    def one(self, value):\n        return value + 1\n",
+        testcase: "7\n8",
+        metadata: { slug: "one", title: "One" }
+      })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    expect(root.querySelector(".baseline-controls")?.textContent)
+      .toContain("Baseline pinned · Case 1");
+    expect(root.querySelector(".baseline-controls")?.textContent)
+      .toContain("Source differs from baseline");
+
+    const selector = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    selector.value = "1";
+    selector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(3));
+    expect(root.querySelector(".baseline-controls")?.textContent)
+      .toContain("Baseline pinned · Case 1");
+    handle.dispose();
+  });
+
+  it("clears the pinned baseline only after a confirmed problem change", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState({ metadata: { slug: "one", title: "One" } }) });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#baseline-pin")?.click();
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ metadata: { slug: "two", title: "Two" } })
+    });
+    expect(root.querySelector(".baseline-controls")?.textContent).toContain("Pin baseline");
+    handle.dispose();
+  });
+
   it("forwards a decision-aware session into the trace viewer", async () => {
     const root = document.createElement("main");
     const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({

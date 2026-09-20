@@ -2581,6 +2581,19 @@ button.is-primary:hover:not(:disabled) {
 .execution-story__history { display: grid; gap: 6px; }
 .execution-story button[aria-current="step"] { font-weight: 700; border-color: currentColor; }
 .execution-story button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.call-frame-story { display: grid; gap: 10px; }
+.call-frame-story__current { display: grid; gap: 5px; border: 1px solid #dbe3ee; border-radius: 8px; background: #f8fafc; padding: 9px; }
+.call-frame-story__heading { margin: 0; color: #334155; font-size: 12px; }
+.call-frame-story__signature { overflow-wrap: anywhere; color: #172033; font: 700 12px/1.4 "SFMono-Regular", Consolas, monospace; }
+.call-frame-story__meta, .call-frame-story__temporal, .call-frame-story__outcome, .call-frame-story__tracing { color: #64748b; font-size: 11px; line-height: 1.4; }
+.call-frame-story__recursion { color: #475569; font-size: 11px; font-weight: 700; }
+.call-frame-story__tracing { border: 1px dashed #f59e0b; border-radius: 7px; background: #fffbeb; padding: 7px 8px; color: #92400e; }
+.call-frame-story__path { display: grid; gap: 5px; }
+.call-frame-story__path-content { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: #64748b; font-size: 11px; }
+.call-frame-story__path-segment { min-width: 0; padding: 4px 6px; text-align: left; font-size: 11px; overflow-wrap: anywhere; }
+.call-frame-story__path-segment[aria-current="step"] { border-color: currentColor; font-weight: 750; }
+.call-frame-story__path-ellipsis { white-space: nowrap; }
+.call-frame-story__path-empty { color: #64748b; font-size: 11px; }
 .trace-viewer__outline-loops, .trace-viewer__outline-loop { margin: 8px 0; }
 .trace-viewer__outline-loop { padding-left: 12px; }
 .trace-viewer__outline-loop-iteration { display: block; margin: 6px 0; text-align: left; }

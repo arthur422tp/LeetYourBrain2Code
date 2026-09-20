@@ -1,8 +1,15 @@
 import { defineConfig } from "vite";
-import { cpSync, existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 const projectRoot = resolve(__dirname);
+const bundledPyodideFiles = [
+  "pyodide.asm.js",
+  "pyodide.asm.wasm",
+  "pyodide-lock.json",
+  "pyodide.mjs",
+  "python_stdlib.zip"
+];
 
 function copyBundledPyodide() {
   return {
@@ -14,7 +21,15 @@ function copyBundledPyodide() {
       if (!existsSync(source)) {
         throw new Error("The bundled Pyodide package is missing");
       }
-      cpSync(source, destination, { recursive: true });
+      rmSync(destination, { recursive: true, force: true });
+      mkdirSync(destination, { recursive: true });
+      for (const file of bundledPyodideFiles) {
+        const sourceFile = resolve(source, file);
+        if (!existsSync(sourceFile)) {
+          throw new Error(`The bundled Pyodide runtime file is missing: ${file}`);
+        }
+        cpSync(sourceFile, resolve(destination, file));
+      }
     }
   };
 }

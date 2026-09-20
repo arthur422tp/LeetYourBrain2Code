@@ -10,7 +10,7 @@ import {
   type AcceptedLiveSession,
   type LiveStatus
 } from "../execution/live-execution-scheduler";
-import { compareCrossRuns, type CrossRunDiffResult } from "../core/cross-run-diff";
+import { compareCrossRuns } from "../core/cross-run-diff";
 import { prepareCrossRun, type PreparedCrossRun } from "../core/cross-run-prepare";
 import { interpretTraceSession } from "../core/trace-session-interpreter";
 import { getTestcaseCases } from "../execution/testcase-selection";
@@ -31,6 +31,10 @@ import {
   createRunComparisonState,
   runRecordFromAcceptedSession
 } from "./run-comparison-state";
+import {
+  buildBehavioralDiffViewModel,
+  type BehavioralDiffViewModel
+} from "./behavioral-diff-view";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -207,7 +211,7 @@ export function renderSidePanel(
   const comparisonState = createRunComparisonState();
   let baselinePrepared: PreparedCrossRun | null = null;
   let currentPrepared: PreparedCrossRun | null = null;
-  let currentComparison: CrossRunDiffResult | null = null;
+  let currentComparison: BehavioralDiffViewModel | null = null;
   let baselineControls: BaselineControlsHandle | null = null;
   let currentPageState: LeetCodePageState | null = hasActiveTabSource
     ? null
@@ -227,6 +231,10 @@ export function renderSidePanel(
     slug: string | null;
     sourceCode: string;
   } | null = null;
+
+  const updateActiveComparison = (): void => {
+    activeVisualizer?.setBehavioralDiff(currentComparison);
+  };
 
   const renderLiveStatus = (): void => {
     if (ownershipState?.kind === "paused") {
@@ -314,14 +322,29 @@ export function renderSidePanel(
     const state = comparisonState.get();
     if (baselinePrepared === null || currentPrepared === null) {
       currentComparison = null;
+      updateActiveComparison();
       renderBaselineControls();
       return;
     }
-    currentComparison = compareCrossRuns(
+    const diffResult = compareCrossRuns(
       baselinePrepared,
       currentPrepared,
       compareRunCompatibility(state.baseline, state.current)
     );
+    currentComparison = buildBehavioralDiffViewModel(
+      baselinePrepared,
+      currentPrepared,
+      diffResult,
+      {
+        baselineLabel: state.baseline === null
+          ? undefined
+          : `Baseline · Case ${state.baseline.context.selectedCaseIndex + 1}`,
+        currentLabel: state.current === null
+          ? undefined
+          : `Current · Case ${state.current.context.selectedCaseIndex + 1}`
+      }
+    );
+    updateActiveComparison();
     renderBaselineControls();
   };
 
@@ -341,6 +364,7 @@ export function renderSidePanel(
     comparisonState.clearBaseline();
     baselinePrepared = null;
     currentComparison = null;
+    updateActiveComparison();
     renderBaselineControls();
   };
 
@@ -479,6 +503,7 @@ export function renderSidePanel(
       currentPageState = null;
       ownershipState = null;
       currentComparison = null;
+      updateActiveComparison();
       scheduler.invalidate();
       schedulerStatus = "updating";
       renderLiveStatus();
@@ -490,6 +515,7 @@ export function renderSidePanel(
       if (state.kind === "paused") {
         currentPageState = null;
         currentComparison = null;
+        updateActiveComparison();
         renderLiveStatus();
         return;
       }

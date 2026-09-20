@@ -6,6 +6,7 @@ import {
   createTraceVisualizer,
   interpretTraceSession
 } from "../../src/sidepanel/components/TraceVisualizer";
+import type { BehavioralDiffViewModel } from "../../src/sidepanel/behavioral-diff-view";
 
 const int = (value: number) => ({ type: "int" as const, value: String(value) });
 
@@ -806,6 +807,40 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("keeps a collapsed behavioral diff panel mounted and inspects through the current raw cursor", () => {
+    const comparison: BehavioralDiffViewModel = {
+      summary: "First observed divergence: Decision result changed",
+      compatibility: { status: "compatible" },
+      sourceDiffers: false,
+      baselineLabel: "Baseline · Case 1",
+      currentLabel: "Current · Case 1",
+      divergence: {
+        categoryLabel: "Decision result changed",
+        baseline: { factualText: "false", step: 1 },
+        current: { factualText: "true", step: 2 },
+        currentStep: 2,
+        confidence: "strong"
+      }
+    };
+    const handle = createTraceVisualizer(session(), { comparison });
+    const panel = handle.element.querySelector<HTMLDetailsElement>(".trace-viewer__behavioral-diff-panel")!;
+    expect(panel).not.toBeNull();
+    expect(panel.open).toBe(false);
+    panel.open = true;
+    const title = panel.querySelector(".trace-viewer__panel-title")!;
+
+    handle.setBehavioralDiff({ ...comparison, summary: "No behavioral divergence observed in comparable captured evidence.", divergence: undefined });
+
+    expect(handle.element.querySelector(".trace-viewer__behavioral-diff-panel")).toBe(panel);
+    expect(panel.open).toBe(true);
+    expect(title.textContent).toContain("no divergence observed");
+
+    handle.setBehavioralDiff(comparison);
+    panel.querySelector<HTMLButtonElement>("#behavioral-diff-inspect-current")?.click();
+    expect(handle.element.querySelector(".trace-viewer__step-label")?.textContent).toBe("Step 2 / 2");
+    handle.dispose();
+  });
+
   it("accepts a precomputed interpretation without changing the one-argument API", () => {
     const fixture = callFrameSession();
     const interpretation = interpretTraceSession(fixture);

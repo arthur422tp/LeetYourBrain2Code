@@ -17,6 +17,11 @@ import {
   type BehavioralTimelineHandle
 } from "./BehavioralTimeline";
 import { createFailureFirstEntry } from "./FailureFirstEntry";
+import {
+  createBehavioralDiff,
+  type BehavioralDiffHandle
+} from "./BehavioralDiff";
+import type { BehavioralDiffViewModel } from "../behavioral-diff-view";
 import { createDecisionEvidence, decisionBadgeText } from "./DecisionEvidence";
 import { createExpressionEvidence } from "./ExpressionEvidence";
 import { createMutationList } from "./MutationList";
@@ -37,12 +42,13 @@ const PLAY_INTERVAL_MS = 700;
 export interface TraceVisualizerHandle {
   element: HTMLElement;
   setStep(index: number): void;
+  setBehavioralDiff(model: BehavioralDiffViewModel | null): void;
   dispose(): void;
 }
 
 export interface TraceVisualizerOptions {
   interpretation?: TraceInterpretation;
-  comparison?: unknown | null;
+  comparison?: BehavioralDiffViewModel | null;
   comparisonActions?: unknown;
 }
 
@@ -78,6 +84,24 @@ function createPanel(
   const body = createElement("div", "trace-viewer__panel-body");
   panel.append(summary, body);
   return { panel, body };
+}
+
+function behavioralDiffPanelTitle(model: BehavioralDiffViewModel | null): string {
+  if (model === null) return "Behavioral Diff";
+  if (model?.divergence) {
+    return `Behavioral Diff · ${model.divergence.categoryLabel.toLowerCase()}`;
+  }
+  if (model?.compatibility.status !== "compatible") {
+    if (model?.compatibility.status === "different_testcase") {
+      return "Behavioral Diff · incompatible testcase";
+    }
+    if (model?.compatibility.status === "no_baseline") {
+      return "Behavioral Diff · no baseline";
+    }
+    return "Behavioral Diff · comparison unavailable";
+  }
+  if (model?.coverageMessage) return "Behavioral Diff · comparison incomplete";
+  return "Behavioral Diff · no divergence observed";
 }
 
 function renderCodePanel(sourceCode: string): {
@@ -367,6 +391,11 @@ export function createTraceVisualizer(
   const storyPanel = hasCallFrameSurface || hasControlFlowSurface
     ? createPanel("Execution Story", "trace-viewer__execution-story-panel", false)
     : null;
+  const behavioralDiffPanel = createPanel(
+    "Behavioral Diff",
+    "trace-viewer__behavioral-diff-panel",
+    false
+  );
   const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel", false);
   const changesPanel = createPanel("What Changed", "trace-viewer__changes-panel", false);
   const behavioralPanel = createPanel(
@@ -409,6 +438,7 @@ export function createTraceVisualizer(
   let outlineHandle: TraceOutlineHandle | null = null;
   let timelineHandle: BehavioralTimelineHandle | null = null;
   let executionStoryHandle: ExecutionStoryHandle | null = null;
+  let behavioralDiffHandle: BehavioralDiffHandle | null = null;
 
   const stopPlaying = (): void => {
     if (timer !== null) {
@@ -629,6 +659,19 @@ export function createTraceVisualizer(
     setStep(index);
   };
 
+  behavioralDiffHandle = createBehavioralDiff({
+    model: options.comparison ?? null,
+    onInspectCurrent: onNavigateStep
+  });
+  behavioralDiffPanel.body.append(behavioralDiffHandle.element);
+  const setBehavioralDiff = (model: BehavioralDiffViewModel | null): void => {
+    behavioralDiffHandle?.update(model);
+    behavioralDiffPanel.panel.hidden = model === null;
+    behavioralDiffPanel.panel.querySelector(".trace-viewer__panel-title")!.textContent =
+      behavioralDiffPanelTitle(model);
+  };
+  setBehavioralDiff(options.comparison ?? null);
+
   const failureFirstEntry = failureFirstSelection
     ? createFailureFirstEntry({
         selection: failureFirstSelection,
@@ -689,6 +732,7 @@ export function createTraceVisualizer(
     codePanel.panel,
     visualPanel.panel,
     ...(storyPanel ? [storyPanel.panel] : []),
+    behavioralDiffPanel.panel,
     ...(decisionPanel ? [decisionPanel.panel] : []),
     expressionPanel.panel,
     inspectorGrid,
@@ -704,10 +748,12 @@ export function createTraceVisualizer(
   return {
     element: root,
     setStep,
+    setBehavioralDiff,
     dispose: () => {
       stopPlaying();
       executionStoryHandle?.dispose();
       visualStateRenderer.dispose();
+      behavioralDiffHandle?.dispose();
     }
   };
 }

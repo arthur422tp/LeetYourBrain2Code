@@ -728,6 +728,15 @@ function structuralDivergence(
       "expression semantic key changed"
     );
   }
+  if (baseline.kind === "mutation" && current.kind === "mutation") {
+    return divergence(
+      "mutation_presence_changed",
+      pair,
+      checkpointAnchor(baselineFrame, baseline, `mutation ${baseline.targetKey}`),
+      checkpointAnchor(currentFrame, current, `mutation ${current.targetKey}`),
+      "mutation target changed"
+    );
+  }
   return undefined;
 }
 

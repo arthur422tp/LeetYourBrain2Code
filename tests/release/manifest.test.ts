@@ -8,6 +8,7 @@ type ReleaseManifest = {
   name: string;
   short_name?: string;
   version: string;
+  minimum_chrome_version?: string;
   description?: string;
   permissions?: string[];
   host_permissions?: string[];
@@ -37,6 +38,12 @@ describe("release manifest", () => {
     expect(manifest.description).toBe(
       "Visualize how your Python code actually executes on LeetCode with local step-by-step runtime evidence."
     );
+  });
+
+  it("declares the verified minimum Chrome version for shipping APIs", () => {
+    const manifest = readManifest();
+
+    expect(manifest.minimum_chrome_version).toBe("114");
   });
 
   it("keeps permissions limited to the LeetCode visualizer surface", () => {

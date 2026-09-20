@@ -35,6 +35,7 @@ export type ComparisonCompatibility =
   | { status: "no_baseline" }
   | { status: "no_current" }
   | { status: "same_run" }
+  | { status: "missing_problem" }
   | { status: "different_problem" }
   | { status: "different_testcase" }
   | { status: "different_entrypoint" }
@@ -75,6 +76,9 @@ export function compareRunCompatibility(
   }
   if (!supportedRuntime(baseline.session) || !supportedRuntime(current.session)) {
     return { status: "unsupported_runtime" };
+  }
+  if (baseline.context.problemSlug === null || current.context.problemSlug === null) {
+    return { status: "missing_problem" };
   }
   if (baseline.context.problemSlug !== current.context.problemSlug) {
     return { status: "different_problem" };

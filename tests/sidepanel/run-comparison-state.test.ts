@@ -90,6 +90,13 @@ describe("run comparison compatibility", () => {
     expect(compareRunCompatibility(run(), current)).toEqual({ status });
   });
 
+  it("does not compare runs when either accepted run lacks problem identity", () => {
+    expect(compareRunCompatibility(
+      run({}, { problemSlug: null }),
+      run({ sessionId: "session-2" }, { problemSlug: null })
+    )).toEqual({ status: "missing_problem" });
+  });
+
   it("recognizes the same captured session before comparing its other fields", () => {
     expect(compareRunCompatibility(run(), run({ rawTestcase: "different" })))
       .toEqual({ status: "same_run" });

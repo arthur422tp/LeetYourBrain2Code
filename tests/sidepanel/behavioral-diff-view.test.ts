@@ -126,6 +126,7 @@ describe("buildBehavioralDiffViewModel", () => {
   it.each([
     ["no_baseline", "No baseline pinned."],
     ["no_current", "Current run is not available yet."],
+    ["missing_problem", "Problem identity is unavailable for this comparison."],
     ["different_testcase", "The current testcase differs from the pinned baseline."],
     ["different_problem", "Baseline is for a different problem."],
     ["different_entrypoint", "Baseline uses a different entrypoint."],

@@ -79,6 +79,8 @@ function compatibilitySummary(compatibility: ComparisonCompatibility): string | 
       return "Current run is not available yet.";
     case "same_run":
       return "Baseline is the current captured run.";
+    case "missing_problem":
+      return "Problem identity is unavailable for this comparison.";
     case "different_testcase":
       return "The current testcase differs from the pinned baseline.";
     case "different_problem":

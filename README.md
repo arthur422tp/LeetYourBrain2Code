@@ -171,6 +171,10 @@ for scoped improvements. The [store support draft](docs/store/support.md)
 explains the fields to include. Before sharing code or testcase content in a
 public issue, remove anything you do not want to disclose publicly.
 
+## License
+
+This project is released under the [MIT License](LICENSE).
+
 ## Development
 
 Current status: preparing v0.1.0 release candidate.

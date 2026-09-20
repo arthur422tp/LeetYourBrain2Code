@@ -148,6 +148,10 @@ visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integratio
 提出範圍明確的改善建議。[商店支援草稿](docs/store/support.md)說明應提供的
 資訊。將程式碼或 testcase 貼到公開 issue 前，請先移除任何不想公開的內容。
 
+## 授權
+
+本專案採用 [MIT License](LICENSE) 發布。
+
 ## 開發
 
 目前狀態：正在準備 v0.1.0 release candidate。

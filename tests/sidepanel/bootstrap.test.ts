@@ -101,6 +101,18 @@ describe("renderSidePanel", () => {
     expect(root.textContent).toContain("Live: not started");
   });
 
+  it("mounts the collapsed About & privacy disclosure", () => {
+    const root = document.createElement("main");
+    const controller: SidePanelController = { execute: vi.fn() };
+
+    renderSidePanel(root, { controller, liveDebounceMs: 1_000 });
+
+    const disclosure = root.querySelector<HTMLDetailsElement>(".about-privacy");
+    expect(disclosure).not.toBeNull();
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.textContent).toContain("Runs locally");
+  });
+
   it("runs the temporary developer harness when Run now is pressed", async () => {
     const root = document.createElement("main");
     const execute = vi.fn(async (request: ExecutionRequest): Promise<TraceSession> => ({

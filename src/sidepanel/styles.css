@@ -104,6 +104,62 @@ button.is-primary:hover:not(:disabled) {
   color: #b45309;
 }
 
+.about-privacy {
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.about-privacy summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 9px 11px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.about-privacy summary::-webkit-details-marker {
+  display: none;
+}
+
+.about-privacy summary::before {
+  margin-right: 7px;
+  color: #64748b;
+  content: "›";
+  font-size: 15px;
+}
+
+.about-privacy[open] summary::before {
+  content: "⌄";
+}
+
+.about-privacy__body {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #e2e8f0;
+  padding: 9px 11px 11px;
+}
+
+.about-privacy__heading,
+.about-privacy__copy,
+.about-privacy__policy {
+  margin: 0;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.about-privacy__heading {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.about-privacy a {
+  color: #1d67ed;
+}
+
 .input-panel,
 .trace-viewer__panel,
 .trace-placeholder,

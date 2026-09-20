@@ -35,6 +35,7 @@ import {
   buildBehavioralDiffViewModel,
   type BehavioralDiffViewModel
 } from "./behavioral-diff-view";
+import { createAboutPrivacy } from "./components/AboutPrivacy";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -141,6 +142,8 @@ export function renderSidePanel(
   const status = document.createElement("p");
   status.id = "runtime-status";
   status.textContent = "Live: not started";
+
+  const aboutPrivacy = createAboutPrivacy();
 
   const inputPanel = document.createElement("details");
   inputPanel.className = "input-panel";
@@ -546,7 +549,15 @@ export function renderSidePanel(
     }
   });
 
-  app.append(header, status, inputPanel, inputControls, baselineControls.element, result);
+  app.append(
+    header,
+    status,
+    aboutPrivacy.element,
+    inputPanel,
+    inputControls,
+    baselineControls.element,
+    result
+  );
   root.replaceChildren(app);
 
   if (activeTabSource) {

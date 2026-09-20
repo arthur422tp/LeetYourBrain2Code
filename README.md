@@ -158,6 +158,10 @@ Not yet supported:
 - Dedicated TreeNode visualization supports the standard LeetCode binary-tree shape only. Generic dict/list adjacency inference, weighted graphs, custom graph classes, BFS/DFS/shortest-path semantic interpretation, custom/N-ary tree inference, and algorithm-specific DP recurrence inference remain outside the current scope.
 - Web Worker and Pyodide isolation should not be treated as a hardened sandbox for hostile code.
 
+## Privacy and local processing
+
+The extension reads the active LeetCode Python editor, visible testcase, and problem metadata to build the visualization. Pyodide is bundled and runs locally in a Web Worker. Code, testcases, traces, and comparison state are not sent to a backend, and v0.1 does not intentionally persist a user-code history. See the [privacy policy](PRIVACY.md) and [Chrome Web Store privacy draft](docs/store/privacy-dashboard.md).
+
 ## Development
 
 Current status: preparing v0.1.0 release candidate.

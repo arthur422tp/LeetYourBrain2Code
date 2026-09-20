@@ -136,6 +136,10 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 - 專用 TreeNode 視覺化目前只支援標準 LeetCode binary-tree 結構；generic dict/list adjacency inference、weighted graph、custom graph class、BFS/DFS/shortest-path semantic interpretation、自訂／N-ary tree inference 與演算法特定的 DP recurrence inference 仍不在目前範圍內。
 - Web Worker 與 Pyodide 的隔離不應被視為可執行惡意程式碼的 hardened sandbox。
 
+## 隱私與本機處理
+
+擴充功能會讀取目前 active LeetCode 頁面的 Python editor、可見 testcase 與 problem metadata，來建立 visualization。Pyodide 會隨擴充功能 bundle，並在本機 Web Worker 中執行。程式碼、testcase、trace 與 comparison state 不會送到 backend；v0.1 也不會刻意保存 user-code history。請參考[隱私政策](PRIVACY.md)與 [Chrome Web Store 隱私草稿](docs/store/privacy-dashboard.md)。
+
 ## 開發
 
 目前狀態：正在準備 v0.1.0 release candidate。

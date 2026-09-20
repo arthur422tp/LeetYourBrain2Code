@@ -2,6 +2,7 @@ import { buildCallFrameStory } from "../../core/call-frame-story";
 import { buildControlFlowOutlineGroups, buildControlFlowUiModel } from "../../core/execution-story";
 import { createExecutionStory, type ExecutionStoryHandle } from "./ExecutionStory";
 import { interpretTraceSession } from "../../core/trace-session-interpreter";
+import type { TraceInterpretation } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
 import {
@@ -37,6 +38,12 @@ export interface TraceVisualizerHandle {
   element: HTMLElement;
   setStep(index: number): void;
   dispose(): void;
+}
+
+export interface TraceVisualizerOptions {
+  interpretation?: TraceInterpretation;
+  comparison?: unknown | null;
+  comparisonActions?: unknown;
 }
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
@@ -305,8 +312,11 @@ function renderOutput(state: VisualState | undefined, session: TraceSession): HT
 
 export { interpretTraceSession };
 
-export function createTraceVisualizer(session: TraceSession): TraceVisualizerHandle {
-  const interpretation = interpretTraceSession(session);
+export function createTraceVisualizer(
+  session: TraceSession,
+  options: TraceVisualizerOptions = {}
+): TraceVisualizerHandle {
+  const interpretation = options.interpretation ?? interpretTraceSession(session);
   const traceIndex = buildTraceStepIndex(session.events.map((event) => event.step));
   const evidenceByPatternId = resolveBehavioralEvidenceMap(
     interpretation.behavioralAnalysis.patterns,

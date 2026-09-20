@@ -1,10 +1,11 @@
 import { TRACE_SCHEMA_VERSION } from "../shared/trace-types";
 import type { EntryPoint } from "../shared/execution-types";
 import type { TraceSession } from "../shared/trace-types";
+import type { AcceptedLiveSession } from "../execution/live-execution-scheduler";
 
 export interface RunContext {
-  problemSlug: string;
-  problemTitle?: string;
+  problemSlug: string | null;
+  problemTitle: string | null;
   selectedCaseIndex: number;
   language: string;
 }
@@ -12,6 +13,21 @@ export interface RunContext {
 export interface RunRecord {
   session: TraceSession;
   context: RunContext;
+}
+
+export function runRecordFromAcceptedSession(
+  session: TraceSession,
+  accepted: AcceptedLiveSession
+): RunRecord {
+  return {
+    session,
+    context: {
+      problemSlug: accepted.input.problemSlug,
+      problemTitle: accepted.input.problemTitle,
+      selectedCaseIndex: accepted.input.selectedCaseIndex,
+      language: accepted.input.language
+    }
+  };
 }
 
 export type ComparisonCompatibility =

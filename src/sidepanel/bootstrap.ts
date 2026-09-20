@@ -7,8 +7,12 @@ import {
 } from "../content/leetcode-adapter";
 import {
   LiveExecutionScheduler,
+  type AcceptedLiveSession,
   type LiveStatus
 } from "../execution/live-execution-scheduler";
+import { compareCrossRuns, type CrossRunDiffResult } from "../core/cross-run-diff";
+import { prepareCrossRun, type PreparedCrossRun } from "../core/cross-run-prepare";
+import { interpretTraceSession } from "../core/trace-session-interpreter";
 import { getTestcaseCases } from "../execution/testcase-selection";
 import { ExecutionController } from "../execution/execution-controller";
 import {
@@ -18,6 +22,11 @@ import {
   type ActiveTabSourceOptions
 } from "./active-tab-source";
 import { createTraceVisualizer, type TraceVisualizerHandle } from "./components/TraceVisualizer";
+import {
+  compareRunCompatibility,
+  createRunComparisonState,
+  runRecordFromAcceptedSession
+} from "./run-comparison-state";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -191,6 +200,10 @@ export function renderSidePanel(
   result.append(placeholder);
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
+  const comparisonState = createRunComparisonState();
+  let baselinePrepared: PreparedCrossRun | null = null;
+  let currentPrepared: PreparedCrossRun | null = null;
+  let currentComparison: CrossRunDiffResult | null = null;
   let currentPageState: LeetCodePageState | null = hasActiveTabSource
     ? null
     : {
@@ -268,14 +281,31 @@ export function renderSidePanel(
     result.replaceChildren(placeholder);
   };
 
+  const clearComparisonForProblemChange = (): void => {
+    comparisonState.clearForProblemChange();
+    baselinePrepared = null;
+    currentPrepared = null;
+    currentComparison = null;
+  };
+
+  const recomputeComparison = (): void => {
+    const state = comparisonState.get();
+    if (baselinePrepared === null || currentPrepared === null) {
+      currentComparison = null;
+      return;
+    }
+    currentComparison = compareCrossRuns(
+      baselinePrepared,
+      currentPrepared,
+      compareRunCompatibility(state.baseline, state.current)
+    );
+  };
+
   const isDifferentProblem = (state: LeetCodePageState): boolean => {
     if (!activeVisualizer || !renderedPageIdentity) return false;
 
-    if (renderedPageIdentity.slug !== null && state.metadata.slug !== null) {
-      return renderedPageIdentity.slug !== state.metadata.slug;
-    }
-
-    return state.code !== null && state.code !== renderedPageIdentity.sourceCode;
+    if (renderedPageIdentity.slug === null || state.metadata.slug === null) return false;
+    return renderedPageIdentity.slug !== state.metadata.slug;
   };
 
   caseSelector.addEventListener("change", () => {
@@ -292,13 +322,20 @@ export function renderSidePanel(
       schedulerStatus = liveStatus;
       renderLiveStatus();
     },
-    onSession: (session, accepted) => {
+    onSession: (session, accepted: AcceptedLiveSession) => {
       if (!collapsedInitialMirrors) {
         inputPanel.open = false;
         collapsedInitialMirrors = true;
       }
+      const interpretation = interpretTraceSession(session);
+      currentPrepared = prepareCrossRun(session, interpretation);
+      comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
+      recomputeComparison();
       activeVisualizer?.dispose();
-      activeVisualizer = createTraceVisualizer(session);
+      activeVisualizer = createTraceVisualizer(session, {
+        interpretation,
+        comparison: currentComparison
+      });
       renderedPageIdentity = {
         slug: accepted.input.problemSlug,
         sourceCode: accepted.input.sourceCode
@@ -342,6 +379,7 @@ export function renderSidePanel(
 
     if (isDifferentProblem(state)) {
       clearVisualization();
+      clearComparisonForProblemChange();
     }
 
     currentPageState = state;
@@ -386,6 +424,7 @@ export function renderSidePanel(
       ownershipGeneration += 1;
       currentPageState = null;
       ownershipState = null;
+      currentComparison = null;
       scheduler.invalidate();
       schedulerStatus = "updating";
       renderLiveStatus();
@@ -396,6 +435,7 @@ export function renderSidePanel(
       ownershipState = state;
       if (state.kind === "paused") {
         currentPageState = null;
+        currentComparison = null;
         renderLiveStatus();
         return;
       }

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { TraceSession } from "../../src/shared/trace-types";
+import type { AcceptedLiveSession } from "../../src/execution/live-execution-scheduler";
 import {
   compareRunCompatibility,
   createRunComparisonState,
   normalizeExecutedTestcase,
+  runRecordFromAcceptedSession,
   type RunRecord
 } from "../../src/sidepanel/run-comparison-state";
 
@@ -109,6 +111,43 @@ describe("run comparison compatibility", () => {
 });
 
 describe("run comparison state", () => {
+  it("builds an immutable run context from accepted scheduler provenance", () => {
+    const captured = session({ sessionId: "captured" });
+    const accepted: AcceptedLiveSession = {
+      revision: 7,
+      input: {
+        language: "python",
+        sourceCode: "edited source",
+        rawTestcase: "1\n2",
+        selectedCaseIndex: 1,
+        problemSlug: null,
+        problemTitle: null
+      },
+      selectedTestcase: "2",
+      request: {
+        sessionId: "captured",
+        sourceCode: "edited source",
+        rawTestcase: "2",
+        entrypoint: captured.entrypoint,
+        limits: captured.limits
+      }
+    };
+
+    const record = runRecordFromAcceptedSession(captured, accepted);
+    accepted.input.selectedCaseIndex = 0;
+    accepted.input.problemSlug = "mutated";
+
+    expect(record).toEqual({
+      session: captured,
+      context: {
+        problemSlug: null,
+        problemTitle: null,
+        selectedCaseIndex: 1,
+        language: "python"
+      }
+    });
+  });
+
   it("pins the current reference, preserves it across newer current runs, and replaces or clears explicitly", () => {
     const state = createRunComparisonState();
     const first = run();

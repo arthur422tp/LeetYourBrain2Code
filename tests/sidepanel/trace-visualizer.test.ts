@@ -806,6 +806,15 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("accepts a precomputed interpretation without changing the one-argument API", () => {
+    const fixture = callFrameSession();
+    const interpretation = interpretTraceSession(fixture);
+    const view = createTraceVisualizer(fixture, { interpretation });
+
+    expect(view.element.id).toBe("trace-viewer");
+    view.dispose();
+  });
+
   it("passes session call-frame evidence into core interpretation", () => {
     const interpretation = interpretTraceSession(callFrameSession());
 

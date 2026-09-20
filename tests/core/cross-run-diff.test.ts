@@ -535,6 +535,28 @@ describe("compareCrossRuns", () => {
     expect(result.stopReason).toBe("coverage_ended");
   });
 
+  it("stops instead of reporting a child-call change when the child frame pair is truncated", () => {
+    const baseline = prepared([
+      frame(1, "solve", [childCall(1, "child-call|fallback:helper|1", 2, 2)], {
+        childFrameIds: [2]
+      }),
+      frame(2, "helper", [], { callStep: 2 })
+    ]);
+    const current = prepared([
+      frame(11, "solve", [childCall(11, "child-call|fallback:helper|1", 20, 12)], {
+        childFrameIds: [12]
+      })
+    ], [11], {
+      sessionId: "current",
+      coverage: { callFrames: "partial" }
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(result.firstDivergence).toBeUndefined();
+    expect(result.stopReason).toBe("coverage_ended");
+  });
+
   it("stops instead of treating a synthetic call-frame limit exit as a changed frame outcome", () => {
     const baseline = prepared([
       frame(1, "solve", [], { exit: { status: "returned", step: 4, value: int(3) } })

@@ -873,6 +873,9 @@ function compareCheckpointStream(
       const currentChildId = (currentCheckpoint as ChildCallCheckpoint).childFrameId;
       const childPair = state.pairsByBaselineFrameId.get(baselineChildId);
       if (!childPair || childPair.currentFrameId !== currentChildId) {
+        if (state.baseline.coverage.callFrames !== "complete" || state.current.coverage.callFrames !== "complete") {
+          return { stopReason: "coverage_ended", path };
+        }
         return {
           divergence: divergence(
             "child_call_changed",

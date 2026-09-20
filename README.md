@@ -160,6 +160,11 @@ Not yet supported:
 
 ## Development
 
+Current status: preparing v0.1.0 release candidate.
+
+Release freeze: no new major visualization/debugging capability before v0.1.0.
+Only release blockers, correctness fixes, integration fixes, and release hardening are allowed.
+
 Requirements: Node.js and npm.
 
 ```bash

@@ -138,6 +138,10 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 
 ## 開發
 
+目前狀態：正在準備 v0.1.0 release candidate。
+
+Release freeze：v0.1.0 前不新增主要視覺化／除錯能力；只允許修復 release blocker、正確性問題、整合問題與 release hardening。
+
 需要 Node.js 與 npm。
 
 ```bash

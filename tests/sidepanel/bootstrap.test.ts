@@ -216,6 +216,164 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("does not analyze without a baseline and keeps the last accepted diff during an unaccepted edit", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const pending = deferred<TraceSession>();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: "7\n8", metadata: { slug: "one", title: "One" } })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    const diffPanel = root.querySelector<HTMLDetailsElement>(
+      ".trace-viewer__behavioral-diff-panel"
+    );
+    expect(diffPanel?.hidden).toBe(true);
+
+    root.querySelector<HTMLButtonElement>("#baseline-pin")?.click();
+    const baselineText = diffPanel?.textContent;
+    expect(baselineText).toContain("Baseline is the current captured run.");
+
+    execute.mockImplementationOnce(async () => pending.promise);
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({
+        code: "class Solution:\n    def one(self, value):\n        return value + 1\n",
+        testcase: "7\n8",
+        metadata: { slug: "one", title: "One" }
+      })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    expect(diffPanel?.textContent).toBe(baselineText);
+    pending.resolve(completedSession(execute.mock.calls[1]![0]));
+    await vi.waitFor(() => expect(root.querySelector(".baseline-controls")?.textContent)
+      .toContain("Source differs from baseline"));
+    handle.dispose();
+  });
+
+  it("marks a changed testcase incompatible and recomputes when the pinned testcase returns", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: "7\n8", metadata: { slug: "one", title: "One" } })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#baseline-pin")?.click();
+
+    const selector = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    selector.value = "1";
+    selector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(root.querySelector(".behavioral-diff__summary")?.textContent)
+      .toBe("The current testcase differs from the pinned baseline.");
+    expect(root.querySelector(".baseline-controls")?.textContent)
+      .toContain("Baseline pinned · Case 1");
+
+    selector.value = "0";
+    selector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(3));
+    expect(root.querySelector(".behavioral-diff__summary")?.textContent)
+      .not.toBe("The current testcase differs from the pinned baseline.");
+    expect(root.querySelector(".baseline-controls")?.textContent)
+      .toContain("Baseline pinned · Case 1");
+    handle.dispose();
+  });
+
+  it("replaces the cached baseline with the latest accepted current run", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ metadata: { slug: "one", title: "One" } })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#baseline-pin")?.click();
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({
+        code: "class Solution:\n    def one(self, value):\n        return value + 1\n",
+        metadata: { slug: "one", title: "One" }
+      })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(root.querySelector(".behavioral-diff__source-note")?.textContent)
+      .toBe("Source differs from baseline.");
+
+    root.querySelector<HTMLButtonElement>("#baseline-replace")?.click();
+    expect(root.querySelector(".behavioral-diff__source-note")).toBeNull();
+    expect(root.querySelector(".behavioral-diff__summary")?.textContent)
+      .toBe("Baseline is the current captured run.");
+    expect(root.querySelector(".baseline-controls")?.textContent)
+      .not.toContain("Source differs from baseline");
+    handle.dispose();
+  });
+
+  it("preserves the behavioral diff disclosure when a newer accepted run refreshes the visualizer", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ metadata: { slug: "one", title: "One" } })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#baseline-pin")?.click();
+
+    const firstPanel = root.querySelector<HTMLDetailsElement>(
+      ".trace-viewer__behavioral-diff-panel"
+    );
+    expect(firstPanel).not.toBeNull();
+    firstPanel!.open = true;
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({
+        code: "class Solution:\n    def one(self, value):\n        return value + 1\n",
+        metadata: { slug: "one", title: "One" }
+      })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    expect(root.querySelector<HTMLDetailsElement>(
+      ".trace-viewer__behavioral-diff-panel"
+    )?.open).toBe(true);
+    handle.dispose();
+  });
+
   it("clears the pinned baseline only after a confirmed problem change", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

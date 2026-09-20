@@ -227,6 +227,7 @@ export function renderSidePanel(
   let ownershipGeneration = 0;
   let disposed = false;
   let collapsedInitialMirrors = false;
+  let behavioralDiffPanelOpen = false;
   let renderedPageIdentity: {
     slug: string | null;
     sourceCode: string;
@@ -290,6 +291,7 @@ export function renderSidePanel(
   const clearVisualization = (): void => {
     activeVisualizer?.dispose();
     activeVisualizer = null;
+    behavioralDiffPanelOpen = false;
     renderedPageIdentity = null;
     result.replaceChildren(placeholder);
   };
@@ -405,6 +407,12 @@ export function renderSidePanel(
         inputPanel.open = false;
         collapsedInitialMirrors = true;
       }
+      const previousBehavioralDiffPanel = activeVisualizer?.element.querySelector<HTMLDetailsElement>(
+        ".trace-viewer__behavioral-diff-panel"
+      );
+      if (previousBehavioralDiffPanel) {
+        behavioralDiffPanelOpen = previousBehavioralDiffPanel.open;
+      }
       const interpretation = interpretTraceSession(session);
       currentPrepared = prepareCrossRun(session, interpretation);
       comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
@@ -419,6 +427,12 @@ export function renderSidePanel(
         sourceCode: accepted.input.sourceCode
       };
       result.replaceChildren(activeVisualizer.element);
+      const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
+        ".trace-viewer__behavioral-diff-panel"
+      );
+      if (nextBehavioralDiffPanel) {
+        nextBehavioralDiffPanel.open = behavioralDiffPanelOpen;
+      }
     }
   });
 

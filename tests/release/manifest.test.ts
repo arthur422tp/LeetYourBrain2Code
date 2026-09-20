@@ -12,6 +12,7 @@ type ReleaseManifest = {
   permissions?: string[];
   host_permissions?: string[];
   side_panel?: { default_path?: string };
+  background?: { service_worker?: string; type?: string };
   icons?: Record<string, string>;
   action?: {
     default_title?: string;
@@ -49,6 +50,10 @@ describe("release manifest", () => {
     const manifest = readManifest();
 
     expect(manifest.side_panel).toEqual({ default_path: "sidepanel/index.html" });
+    expect(manifest.background).toEqual({
+      service_worker: "background/service-worker.js",
+      type: "module"
+    });
     expect(manifest.icons).toEqual({
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

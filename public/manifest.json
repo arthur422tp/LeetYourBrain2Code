@@ -17,6 +17,10 @@
       "32": "icons/icon32.png"
     }
   },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
   "permissions": [
     "sidePanel",
     "scripting"

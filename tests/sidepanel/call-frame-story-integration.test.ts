@@ -213,7 +213,7 @@ describe("Call-Frame story product scenarios", () => {
     expect(handle.element.textContent).toContain("odd()");
     expect(handle.element.textContent).toContain("recursive · depth 2");
     expect(handle.element.textContent).not.toMatch(/warning|root cause|infinite recursion/i);
-    expect(handle.element.querySelector('.call-frame-story__tree-row[data-frame-id="3"]')?.dataset.currentPath).toBe("true");
+    expect(handle.element.querySelector<HTMLElement>('.call-frame-story__tree-row[data-frame-id="3"]')?.dataset.currentPath).toBe("true");
     handle.dispose();
   });
 
@@ -234,7 +234,7 @@ describe("Call-Frame story product scenarios", () => {
   });
 
   it("keeps handled and propagated exceptions factual at each frame", () => {
-    const exception = { type: "ValueError", message: "bad input", line: 7 };
+    const exception = { type: "ValueError", message: "bad input", line: 7, stack: [], frameId: 2 };
     const handled = createCallFrameStory({
       model: model([
         node(1, "parent", 1, 10, { childFrameIds: [2], exit: { status: "returned", step: 70, value: int(7) } }),

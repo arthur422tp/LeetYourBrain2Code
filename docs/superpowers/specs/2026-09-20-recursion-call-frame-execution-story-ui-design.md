@@ -1880,3 +1880,26 @@ same call prefix
 ```
 
 without turning the product into a solver.
+
+# Implementation Status
+
+Implemented:
+
+- frame-aware Execution Story composition;
+- Current Frame summary and cursor-relative temporal status;
+- factual Call Path;
+- runtime Call Tree with persistent expansion state;
+- bounded large-tree presentation;
+- call/exit navigation through the raw trace cursor;
+- recursion / mutual-recursion factual metadata;
+- frame evidence-count summaries;
+- Control-Flow story composition inside the selected frame context;
+- exception, timeout, and tracing-truncation presentation.
+
+Deferred:
+
+- semantic backtracking labels;
+- expected-vs-actual recursion comparison;
+- recursion-aware Failure-First;
+- algorithm classification;
+- cross-run call-tree diff.

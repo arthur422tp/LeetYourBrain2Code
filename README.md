@@ -76,6 +76,7 @@ The MVP is designed to expose:
 - raw Previous / Next / Play navigation remains authoritative even when folded presentation is available;
 - the trace prefix captured before a runtime error, trace limit, or hard timeout.
 - a Failure-First Entry Point for local `exception`, `trace_limit`, or `timeout` captures: it deterministically surfaces one validated behavioral evidence location near termination as an optional `Start Here` inspection point. It does not move the raw cursor automatically, and `Start Here` is an inspection priority—not a diagnosis.
+- **Call Tree / recursion execution story:** visualizes concrete user-function invocations, arguments, parent/child call structure, recursion depth, returns, exceptions, and incomplete timeout/trace prefixes while staying synchronized with the raw trace cursor.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
 

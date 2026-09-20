@@ -73,6 +73,7 @@ MVP 的目標是呈現：
 - 即使有 folded presentation，原本的 raw Previous／Next／Play 仍維持 authoritative raw-step navigation；
 - Runtime Error、trace limit 或 hard timeout 發生前已取得的 trace prefix；
 - Failure-First entry point：針對本機的 `exception`、`trace_limit` 或 `timeout` capture，以 deterministic 方式呈現一個靠近 termination、且 evidence 已完整驗證的 behavioral evidence location，作為可選的 `Start Here` 檢視起點；不會自動移動 raw cursor，也不是診斷。
+- **Call Tree／recursion execution story：** 視覺化具體的 user-function invocation、arguments、parent／child call structure、recursion depth、return、exception 與不完整的 timeout／trace prefix，並與 raw trace cursor 保持同步。
 
 Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功能一起 bundle，並在本機 Web Worker 中運作；MVP 不需要 backend。
 

@@ -10,7 +10,11 @@ import type {
   BehavioralCheckpoint,
   ChildCallCheckpoint,
   DecisionCheckpoint,
-  MutationCheckpoint
+  ExpressionCheckpoint,
+  LoopExitCheckpoint,
+  LoopIterationCheckpoint,
+  MutationCheckpoint,
+  TransferCheckpoint
 } from "../../src/core/cross-run-checkpoints";
 import type {
   CrossRunCoverage,
@@ -251,6 +255,87 @@ function kind(result: ReturnType<typeof compareCrossRuns>): CrossRunDivergenceKi
   return result.firstDivergence?.kind;
 }
 
+type CoverageBoundaryCheckpointKind =
+  | "decision"
+  | "expression"
+  | "loop_iteration"
+  | "transfer"
+  | "loop_exit"
+  | "mutation";
+
+function coverageBoundaryCheckpoint(
+  kind: CoverageBoundaryCheckpointKind,
+  frameId: number
+): BehavioralCheckpoint {
+  const base = {
+    frameId,
+    runLocalAnchorStep: 2,
+    localSequence: 2
+  };
+  switch (kind) {
+    case "decision":
+      return {
+        ...base,
+        kind: "decision",
+        semanticKey: "decision|if|value < target|1",
+        siteKind: "if",
+        source: "value < target",
+        occurrenceOrdinal: 1,
+        status: "completed",
+        truth: false,
+        operands: []
+      } satisfies DecisionCheckpoint;
+    case "expression":
+      return {
+        ...base,
+        kind: "expression",
+        semanticKey: "expression|return|value|1",
+        rootKind: "return",
+        source: "value",
+        occurrenceOrdinal: 1,
+        status: "completed",
+        result: int(1),
+        selections: [],
+        rootId: "return-value"
+      } satisfies ExpressionCheckpoint;
+    case "loop_iteration":
+      return {
+        ...base,
+        kind: "loop_iteration",
+        semanticKey: "loop-iteration|for|for value in values|1",
+        loopKind: "for",
+        source: "for value in values",
+        iteration: 1,
+        status: "completed",
+        bindings: [],
+        terminalAnchorStep: 3
+      } satisfies LoopIterationCheckpoint;
+    case "transfer":
+      return {
+        ...base,
+        kind: "transfer",
+        semanticKey: "transfer|break|break|1",
+        transferKind: "break",
+        source: "break",
+        status: "committed",
+        actionId: "action-1",
+        transferId: "transfer-1"
+      } satisfies TransferCheckpoint;
+    case "loop_exit":
+      return {
+        ...base,
+        kind: "loop_exit",
+        semanticKey: "loop-exit|for|for value in values|1",
+        loopKind: "for",
+        source: "for value in values",
+        reason: "exhausted",
+        occurrenceOrdinal: 1
+      } satisfies LoopExitCheckpoint;
+    case "mutation":
+      return mutation(frameId, "mutation|local:result|1", 2, int(1));
+  }
+}
+
 describe("compareCrossRuns", () => {
   it("exports the bounded lookahead and finds a later mutation difference after a matching decision", () => {
     expect(CROSS_RUN_ALIGNMENT_LOOKAHEAD).toBe(8);
@@ -405,6 +490,109 @@ describe("compareCrossRuns", () => {
     const result = compareCrossRuns(baseline, current, compatible);
     expect(result.firstDivergence).toBeUndefined();
     expect(result.stopReason).toBe("coverage_ended");
+  });
+
+  it.each([
+    { kind: "decision" as const, coverage: { decisions: "partial" as const } },
+    { kind: "expression" as const, coverage: { expressions: "partial" as const } },
+    { kind: "loop_iteration" as const, coverage: { controlFlow: "partial" as const } },
+    { kind: "transfer" as const, coverage: { controlFlow: "partial" as const } },
+    { kind: "loop_exit" as const, coverage: { controlFlow: "partial" as const } },
+    {
+      kind: "mutation" as const,
+      coverage: { mutations: { status: "partial" as const, skippedUnstableObjectMutations: 0 } }
+    }
+  ])("stops instead of reporting missing $kind evidence when its channel is incomplete", ({ kind: checkpointKind, coverage }) => {
+    const baseline = prepared([
+      frame(1, "solve", [coverageBoundaryCheckpoint(checkpointKind, 1)])
+    ]);
+    const current = prepared([frame(11, "solve", [])], [11], {
+      sessionId: "current",
+      coverage
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(result.firstDivergence).toBeUndefined();
+    expect(result.stopReason).toBe("coverage_ended");
+  });
+
+  it("stops instead of reporting a missing child call when call-frame evidence is incomplete", () => {
+    const baseline = prepared([
+      frame(1, "solve", [childCall(1, "child-call|fallback:helper|1", 2, 2)], {
+        childFrameIds: [2]
+      }),
+      frame(2, "helper", [], { callStep: 2 })
+    ]);
+    const current = prepared([frame(11, "solve", [])], [11], {
+      sessionId: "current",
+      coverage: { callFrames: "partial" }
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(result.firstDivergence).toBeUndefined();
+    expect(result.stopReason).toBe("coverage_ended");
+  });
+
+  it("stops instead of treating a synthetic call-frame limit exit as a changed frame outcome", () => {
+    const baseline = prepared([
+      frame(1, "solve", [], { exit: { status: "returned", step: 4, value: int(3) } })
+    ]);
+    const current = prepared([
+      frame(11, "solve", [], {
+        exit: { status: "trace_ended", step: 4, reason: "call_frame_event_limit" }
+      })
+    ], [11], {
+      sessionId: "current",
+      coverage: { callFrames: "partial" }
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(result.firstDivergence).toBeUndefined();
+    expect(result.stopReason).toBe("coverage_ended");
+  });
+
+  it("allows frame outcome comparison when session termination independently proves the boundary", () => {
+    const baseline = prepared([
+      frame(1, "solve", [], { exit: { status: "returned", step: 4, value: int(3) } })
+    ]);
+    const current = prepared([
+      frame(11, "solve", [], {
+        exit: { status: "trace_ended", step: 4, reason: "call_frame_event_limit" }
+      })
+    ], [11], {
+      sessionId: "timeout",
+      status: "timeout",
+      terminationReason: "hard_timeout",
+      coverage: { callFrames: "partial" }
+    });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(kind(result)).toBe("frame_exit_status_changed");
+  });
+
+  it("reports a different observed child function as child_call_changed", () => {
+    const baseline = prepared([
+      frame(1, "solve", [childCall(1, "child-call|fallback:helper|1", 2, 2)], {
+        childFrameIds: [2]
+      }),
+      frame(2, "helper", [], { callStep: 2 })
+    ]);
+    const current = prepared([
+      frame(11, "solve", [childCall(11, "child-call|fallback:validate|1", 20, 12, "validate")], {
+        childFrameIds: [12]
+      }),
+      frame(12, "validate", [], { callStep: 20 })
+    ], [11], { sessionId: "current" });
+
+    const result = compareCrossRuns(baseline, current, compatible);
+
+    expect(kind(result)).toBe("child_call_changed");
+    expect(result.firstDivergence?.baseline?.factualText).toContain("helper");
+    expect(result.firstDivergence?.current?.factualText).toContain("validate");
   });
 
   it("stops instead of guessing when lookahead has repeated candidates", () => {

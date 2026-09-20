@@ -146,6 +146,26 @@ function noteIncomparable(state: ComparisonState): void {
   state.coverage.values.incomparableCount += 1;
 }
 
+function checkpointCoverage(
+  coverage: CrossRunCoverage,
+  checkpoint: BehavioralCheckpoint
+): "complete" | "partial" | "unavailable" {
+  switch (checkpoint.kind) {
+    case "decision":
+      return coverage.decisions;
+    case "expression":
+      return coverage.expressions;
+    case "loop_iteration":
+    case "transfer":
+    case "loop_exit":
+      return coverage.controlFlow;
+    case "mutation":
+      return coverage.mutations.status;
+    case "child_call":
+      return coverage.callFrames;
+  }
+}
+
 function valueText(value: ValueSnapshot | undefined): string {
   if (!value) return "unavailable";
   switch (value.type) {
@@ -703,6 +723,31 @@ function presenceDivergence(
   );
 }
 
+function presenceResult(
+  state: ComparisonState,
+  pair: AlignedFramePair,
+  baselineFrame: NonNullable<ReturnType<PreparedCrossRun["frames"]["get"]>>,
+  currentFrame: NonNullable<ReturnType<PreparedCrossRun["frames"]["get"]>>,
+  checkpoint: BehavioralCheckpoint,
+  observedSide: "baseline" | "current",
+  path: string[]
+): WalkResult {
+  const missingSide = observedSide === "baseline" ? state.current : state.baseline;
+  if (checkpointCoverage(missingSide.coverage, checkpoint) !== "complete") {
+    return { stopReason: "coverage_ended", path };
+  }
+  return {
+    divergence: presenceDivergence(
+      pair,
+      baselineFrame,
+      currentFrame,
+      checkpoint,
+      observedSide
+    ),
+    path
+  };
+}
+
 function structuralDivergence(
   pair: AlignedFramePair,
   baselineFrame: NonNullable<ReturnType<PreparedCrossRun["frames"]["get"]>>,
@@ -735,6 +780,15 @@ function structuralDivergence(
       checkpointAnchor(baselineFrame, baseline, `mutation ${baseline.targetKey}`),
       checkpointAnchor(currentFrame, current, `mutation ${current.targetKey}`),
       "mutation target changed"
+    );
+  }
+  if (baseline.kind === "child_call" && current.kind === "child_call") {
+    return divergence(
+      "child_call_changed",
+      pair,
+      checkpointAnchor(baselineFrame, baseline, `child call ${baseline.callee.displayName}`),
+      checkpointAnchor(currentFrame, current, `child call ${current.callee.displayName}`),
+      "child call target changed"
     );
   }
   return undefined;
@@ -770,16 +824,26 @@ function compareCheckpointStream(
         return { stopReason: "ambiguous_alignment", path };
       }
       if (baselineFuture.length === 1 && currentFuture.length === 0) {
-        return {
-          divergence: presenceDivergence(pair, baselineFrame, currentFrame, baselineCheckpoint, "baseline"),
+        return presenceResult(
+          state,
+          pair,
+          baselineFrame,
+          currentFrame,
+          baselineCheckpoint,
+          "baseline",
           path
-        };
+        );
       }
       if (baselineFuture.length === 0 && currentFuture.length === 1) {
-        return {
-          divergence: presenceDivergence(pair, baselineFrame, currentFrame, currentCheckpoint, "current"),
+        return presenceResult(
+          state,
+          pair,
+          baselineFrame,
+          currentFrame,
+          currentCheckpoint,
+          "current",
           path
-        };
+        );
       }
       const structural = structuralDivergence(
         pair,
@@ -830,28 +894,26 @@ function compareCheckpointStream(
   }
 
   if (baselineIndex < baselineCheckpoints.length) {
-    return {
-      divergence: presenceDivergence(
-        pair,
-        baselineFrame,
-        currentFrame,
-        baselineCheckpoints[baselineIndex]!,
-        "baseline"
-      ),
+    return presenceResult(
+      state,
+      pair,
+      baselineFrame,
+      currentFrame,
+      baselineCheckpoints[baselineIndex]!,
+      "baseline",
       path
-    };
+    );
   }
   if (currentIndex < currentCheckpoints.length) {
-    return {
-      divergence: presenceDivergence(
-        pair,
-        baselineFrame,
-        currentFrame,
-        currentCheckpoints[currentIndex]!,
-        "current"
-      ),
+    return presenceResult(
+      state,
+      pair,
+      baselineFrame,
+      currentFrame,
+      currentCheckpoints[currentIndex]!,
+      "current",
       path
-    };
+    );
   }
   return { path };
 }
@@ -914,6 +976,19 @@ function compareFrameExit(
   return undefined;
 }
 
+function hasIndependentSessionTerminationEvidence(session: PreparedCrossRun["session"]): boolean {
+  return session.status !== "completed" || session.terminationReason !== "normal_return";
+}
+
+function frameExitComparisonBlocked(
+  prepared: PreparedCrossRun,
+  frame: NonNullable<ReturnType<PreparedCrossRun["frames"]["get"]>>
+): boolean {
+  return prepared.coverage.callFrames !== "complete"
+    && frame.exit.exit.status === "trace_ended"
+    && !hasIndependentSessionTerminationEvidence(prepared.session);
+}
+
 function compareFrame(
   state: ComparisonState,
   pair: AlignedFramePair,
@@ -932,6 +1007,13 @@ function compareFrame(
 
   const checkpointResult = compareCheckpointStream(state, pair, baselineFrame, currentFrame, path);
   if (checkpointResult.divergence || checkpointResult.stopReason) return checkpointResult;
+
+  if (
+    frameExitComparisonBlocked(state.baseline, baselineFrame)
+    || frameExitComparisonBlocked(state.current, currentFrame)
+  ) {
+    return { stopReason: "coverage_ended", path };
+  }
 
   const exitDivergence = compareFrameExit(state, pair, baselineFrame, currentFrame);
   if (exitDivergence) return { divergence: exitDivergence, path };

@@ -13,9 +13,11 @@ import {
   type BehavioralDiffViewModel
 } from "../../src/sidepanel/behavioral-diff-view";
 import { createBehavioralDiff } from "../../src/sidepanel/components/BehavioralDiff";
+import { createBaselineControls } from "../../src/sidepanel/components/BaselineControls";
 import { createTraceVisualizer } from "../../src/sidepanel/components/TraceVisualizer";
 import {
   compareRunCompatibility,
+  createRunComparisonState,
   type RunRecord
 } from "../../src/sidepanel/run-comparison-state";
 
@@ -194,5 +196,59 @@ describe("behavioral diff Side Panel integration", () => {
     expect(result.alignedPrefix).toEqual({ frameCount: 0, checkpointCount: 0, callPath: [] });
     expect(model.summary).toBe("The current testcase differs from the pinned baseline.");
     expect(model.divergence).toBeUndefined();
+  });
+
+  it("uses real buttons, semantic headings, and text evidence for accessibility", () => {
+    const controls = createBaselineControls({
+      model: {
+        hasCurrent: true,
+        hasBaseline: true,
+        caseLabel: "Case 1",
+        baselineStatus: "completed",
+        sourceDiffers: true
+      },
+      onPin: vi.fn(),
+      onReplace: vi.fn(),
+      onClear: vi.fn()
+    });
+    for (const id of ["baseline-pin", "baseline-replace", "baseline-clear"]) {
+      expect(controls.element.querySelector<HTMLButtonElement>(`#${id}`)?.type).toBe("button");
+    }
+
+    const diff = createBehavioralDiff({
+      model: {
+        ...divergentModel(),
+        summary: "Comparison stopped because the next evidence could not be aligned safely.",
+        coverageMessage: "Decision evidence is partial.",
+        divergence: undefined
+      },
+      onInspectCurrent: vi.fn()
+    });
+    expect(diff.element.querySelector("h2")?.textContent).toBe("Behavioral Diff");
+    expect(diff.element.querySelectorAll("h3").length).toBeGreaterThanOrEqual(2);
+    expect(diff.element.textContent).toContain("Decision evidence is partial.");
+    expect(diff.element.className).not.toMatch(/green|red/);
+    controls.dispose();
+    diff.dispose();
+  });
+
+  it("releases replaced, cleared, and problem-switched baseline references", () => {
+    const state = createRunComparisonState();
+    const first = runRecord(session("first"));
+    const second = runRecord(session("second"));
+
+    state.setCurrent(first);
+    expect(state.pinCurrent()).toBe(true);
+    expect(state.get().baseline).toBe(first);
+    state.setCurrent(second);
+    expect(state.replaceBaseline()).toBe(true);
+    expect(state.get().baseline).toBe(second);
+    expect(state.get().baseline).not.toBe(first);
+
+    state.clearBaseline();
+    expect(state.get().baseline).toBeNull();
+    state.setCurrent(first);
+    state.clearForProblemChange();
+    expect(state.get()).toEqual({ baseline: null, current: null });
   });
 });

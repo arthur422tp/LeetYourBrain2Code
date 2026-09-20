@@ -507,4 +507,71 @@ describe("cross-run behavioral acceptance scenarios", () => {
     expect(result.stopReason).toBe("ambiguous_alignment");
     expect(result.alignedPrefix.frameCount).toBe(0);
   });
+
+  it("compares hundreds of frames and thousands of checkpoints without all-pairs checkpoint matching", () => {
+    const frameCount = 256;
+    const checkpointsPerFrame = 8;
+    const baselineFrames = Array.from({ length: frameCount }, (_, frameIndex) => {
+      const frameId = frameIndex + 1;
+      return frame(
+        frameId,
+        `method:Solution.synthetic${frameIndex}`,
+        Array.from({ length: checkpointsPerFrame }, (_, checkpointIndex) =>
+          decision(
+            frameId,
+            checkpointIndex + 1,
+            false,
+            `decision|if|synthetic-${checkpointIndex}|1`
+          )
+        )
+      );
+    });
+    const currentFrames = Array.from({ length: frameCount }, (_, frameIndex) => {
+      const frameId = 10_000 + frameIndex;
+      return frame(
+        frameId,
+        `method:Solution.synthetic${frameIndex}`,
+        Array.from({ length: checkpointsPerFrame }, (_, checkpointIndex) =>
+          decision(
+            frameId,
+            checkpointIndex + 101,
+            false,
+            `decision|if|synthetic-${checkpointIndex}|1`
+          )
+        )
+      );
+    });
+
+    const result = compareCrossRuns(
+      prepared(baselineFrames, { roots: baselineFrames.map((item) => item.frameId) }),
+      prepared(currentFrames, {
+        sessionId: "dense-current",
+        roots: currentFrames.map((item) => item.frameId)
+      }),
+      compatible
+    );
+
+    expect(result.firstDivergence).toBeUndefined();
+    expect(result.alignedPrefix.frameCount).toBe(frameCount);
+    expect(result.alignedPrefix.checkpointCount).toBe(frameCount * checkpointsPerFrame);
+
+    const boundedBaseline = prepared([
+      frame(1, "method:Solution.bounded", [
+        mutation(1, 1, "variable:left", int(1), "mutation|variable:left|1"),
+        ...Array.from({ length: 8 }, (_, index) =>
+          mutation(1, index + 2, `variable:filler-${index}`, int(index), `mutation|filler-${index}|1`)
+        ),
+        mutation(1, 10, "variable:right", int(1), "mutation|variable:right|1")
+      ])
+    ]);
+    const boundedCurrent = prepared([
+      frame(11, "method:Solution.bounded", [
+        mutation(11, 101, "variable:right", int(1), "mutation|variable:right|1")
+      ])
+    ], { sessionId: "bounded-current" });
+    const bounded = compareCrossRuns(boundedBaseline, boundedCurrent, compatible);
+
+    expect(bounded.firstDivergence?.detail).toBe("mutation target changed");
+    expect(bounded.alignedPrefix.checkpointCount).toBe(0);
+  });
 });

@@ -1,7 +1,7 @@
 import { buildCallFrameStory } from "../../core/call-frame-story";
 import { buildControlFlowOutlineGroups, buildControlFlowUiModel } from "../../core/execution-story";
 import { createExecutionStory, type ExecutionStoryHandle } from "./ExecutionStory";
-import { interpretTrace } from "../../core/trace-interpreter";
+import { interpretTraceSession } from "../../core/trace-session-interpreter";
 import type { VisualState } from "../../core/visual-model";
 import type { TraceSession } from "../../shared/trace-types";
 import {
@@ -303,22 +303,7 @@ function renderOutput(state: VisualState | undefined, session: TraceSession): HT
   return body;
 }
 
-export function interpretTraceSession(session: TraceSession): ReturnType<typeof interpretTrace> {
-  return interpretTrace(
-    session.events,
-    session.subscriptRelations ?? [],
-    session.expressionPlan,
-    session.expressionBatches ?? [],
-    session.conditionPlan,
-    session.decisionBatches ?? [],
-    session.controlFlowPlan,
-    session.controlFlowBatches ?? [],
-    { status: session.status, terminationReason: session.terminationReason },
-    session.functionPlan,
-    session.callFrameBatches ?? [],
-    session.callFrameTracing
-  );
-}
+export { interpretTraceSession };
 
 export function createTraceVisualizer(session: TraceSession): TraceVisualizerHandle {
   const interpretation = interpretTraceSession(session);

@@ -1869,7 +1869,10 @@ describe("Execution Story trace integration",()=>{
   it("shows tracing failure even when no raw steps exist",()=>{
     const fixture=session(); fixture.events=[]; fixture.controlFlowTracing={status:"unavailable",reason:"instrumentation_failed"};
     const handle=createTraceVisualizer(fixture);
-    expect(handle.element.querySelector('.execution-story')?.textContent).toContain("Control-flow tracing unavailable · instrumentation_failed"); handle.dispose();
+    expect(handle.element.querySelector('.execution-story')?.textContent).toContain("Control-flow tracing unavailable · instrumentation_failed");
+    expect(handle.element.querySelector<HTMLDetailsElement>(".trace-viewer__execution-story-panel summary")?.textContent)
+      .toContain("Execution Story · unavailable");
+    handle.dispose();
   });
   it("omits the panel when no control-flow evidence exists",()=>{
     const handle=createTraceVisualizer(session());

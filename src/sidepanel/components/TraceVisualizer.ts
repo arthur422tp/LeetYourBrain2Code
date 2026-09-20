@@ -366,6 +366,9 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const hasControlFlowSurface = !!session.controlFlowPlan ||
     (session.controlFlowBatches?.length ?? 0) > 0 ||
     (session.controlFlowTracing !== undefined && session.controlFlowTracing.status !== "complete");
+  const storyTracing = session.callFrameTracing !== undefined && session.callFrameTracing.status !== "complete"
+    ? session.callFrameTracing
+    : session.controlFlowTracing;
   const storyPanel = hasCallFrameSurface || hasControlFlowSurface
     ? createPanel("Execution Story", "trace-viewer__execution-story-panel", false)
     : null;
@@ -476,9 +479,6 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const setStep = (requestedIndex: number): void => {
     if (interpretation.visualStates.length === 0) {
       codePanel.setCurrentLine(undefined);
-      const storyTracing = session.callFrameTracing?.status !== "complete"
-        ? session.callFrameTracing
-        : session.controlFlowTracing;
       updateEvidencePanel(storyPanel, "Execution Story", hasCallFrameSurface, storyTracing);
       updateEvidencePanel(decisionPanel, "Decision Evidence", false, session.decisionTracing);
       updateEvidencePanel(expressionPanel, "Expression Evidence", false, session.expressionTracing);
@@ -563,9 +563,6 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       : activation && controlFlowUiModel.currentIteration
       ? `Execution Story · ${activation.loopKind.toUpperCase()} · #${controlFlowUiModel.currentIteration.ordinal}`
       : "Execution Story";
-    const storyTracing = session.callFrameTracing?.status !== "complete"
-      ? session.callFrameTracing
-      : session.controlFlowTracing;
     updateEvidencePanel(
       storyPanel,
       storyTitle,

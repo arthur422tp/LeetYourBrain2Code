@@ -26,6 +26,7 @@ export interface CallFrameStoryViewModel {
 export interface CallFrameStoryOptions {
   model: CallFrameStoryModel;
   onNavigateStep(step: number): void;
+  canNavigateStep?(step: number): boolean;
 }
 
 export interface CallFrameStoryHandle {
@@ -107,7 +108,11 @@ function renderCurrentFrame(model: CallFrameStoryModel): HTMLElement {
   return section;
 }
 
-function renderPath(model: CallFrameStoryModel, onNavigateStep: (step: number) => void): HTMLElement {
+function renderPath(
+  model: CallFrameStoryModel,
+  onNavigateStep: (step: number) => void,
+  canNavigateStep: (step: number) => boolean
+): HTMLElement {
   const section = element("section", "call-frame-story__path");
   section.append(element("h3", "call-frame-story__heading", "Call path"));
   const path = model.currentPath
@@ -135,6 +140,7 @@ function renderPath(model: CallFrameStoryModel, onNavigateStep: (step: number) =
     button.dataset.frameId = String(node.frameId);
     button.dataset.callStep = String(node.callStep);
     button.setAttribute("aria-label", `Inspect frame ${node.frameId}, ${node.displayName}, call step ${node.callStep}`);
+    button.disabled = !canNavigateStep(node.callStep);
     if (node.frameId === model.currentFrameId) {
       button.setAttribute("aria-current", "step");
       button.dataset.currentFrame = "true";
@@ -156,6 +162,7 @@ function renderTreeNode(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
+  canNavigateStep: (step: number) => boolean,
   onToggle: (frameId: number) => void,
   renderChildren = true
 ): HTMLLIElement {
@@ -182,6 +189,7 @@ function renderTreeNode(
   entry.dataset.callStep = String(node.callStep);
   entry.textContent = `${frameSignature(node, { preferShortName: true })} ${compactFrameExitSuffix(node.exit)}`;
   entry.setAttribute("aria-label", `Inspect frame ${node.frameId}, ${node.displayName}, call step ${node.callStep}`);
+  entry.disabled = !canNavigateStep(node.callStep);
   if (isCurrent) {
     entry.setAttribute("aria-current", "step");
     entry.dataset.currentFrame = "true";
@@ -199,6 +207,7 @@ function renderTreeNode(
     exit.dataset.frameId = String(node.frameId);
     exit.dataset.exitStep = String(exitStep);
     exit.setAttribute("aria-label", `Inspect frame ${node.frameId} exit at step ${exitStep}`);
+    exit.disabled = !canNavigateStep(exitStep);
     exit.addEventListener("click", (event) => {
       event.stopPropagation();
       onNavigateStep(exitStep);
@@ -234,7 +243,7 @@ function renderTreeNode(
   if (childNodes.length > 0 && expanded) {
     const list = element("ul", "call-frame-story__tree-list");
     for (const child of childNodes) {
-      list.append(renderTreeNode(child, model, state, onNavigateStep, onToggle));
+      list.append(renderTreeNode(child, model, state, onNavigateStep, canNavigateStep, onToggle));
     }
     item.append(list);
   } else if (childNodes.length > 0) {
@@ -294,6 +303,7 @@ function renderBoundedTree(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
+  canNavigateStep: (step: number) => boolean,
   onToggle: (frameId: number) => void,
   onShowMore: () => void
 ): HTMLElement {
@@ -303,7 +313,7 @@ function renderBoundedTree(
   const visibleIds = boundedFrameIds(model, state.visibleRowBudget);
   for (const frameId of visibleIds) {
     const frame = model.byFrameId.get(frameId);
-    if (frame) list.append(renderTreeNode(frame, model, state, onNavigateStep, onToggle, false));
+    if (frame) list.append(renderTreeNode(frame, model, state, onNavigateStep, canNavigateStep, onToggle, false));
   }
   section.append(list);
   const omitted = model.byFrameId.size - visibleIds.length;
@@ -325,18 +335,19 @@ function renderTree(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
+  canNavigateStep: (step: number) => boolean,
   onToggle: (frameId: number) => void,
   onShowMore: () => void
 ): HTMLElement {
   if (model.byFrameId.size > state.visibleRowBudget) {
-    return renderBoundedTree(model, state, onNavigateStep, onToggle, onShowMore);
+    return renderBoundedTree(model, state, onNavigateStep, canNavigateStep, onToggle, onShowMore);
   }
   const section = element("section", "call-frame-story__tree");
   section.append(element("h3", "call-frame-story__heading", "Call Tree"));
   const list = element("ul", "call-frame-story__tree-list");
   for (const frameId of model.roots) {
     const root = model.byFrameId.get(frameId);
-    if (root) list.append(renderTreeNode(root, model, state, onNavigateStep, onToggle));
+    if (root) list.append(renderTreeNode(root, model, state, onNavigateStep, canNavigateStep, onToggle));
   }
   section.append(list);
   return section;
@@ -346,6 +357,7 @@ function render(
   model: CallFrameStoryModel,
   state: TreeRenderState,
   onNavigateStep: (step: number) => void,
+  canNavigateStep: (step: number) => boolean,
   onToggle: (frameId: number) => void,
   onShowMore: () => void
 ): HTMLElement[] {
@@ -358,8 +370,8 @@ function render(
     ));
   }
   children.push(renderCurrentFrame(model));
-  children.push(renderPath(model, onNavigateStep));
-  if (shouldShowTree(model)) children.push(renderTree(model, state, onNavigateStep, onToggle, onShowMore));
+  children.push(renderPath(model, onNavigateStep, canNavigateStep));
+  if (shouldShowTree(model)) children.push(renderTree(model, state, onNavigateStep, canNavigateStep, onToggle, onShowMore));
   return children;
 }
 
@@ -372,10 +384,11 @@ export function createCallFrameStory(options: CallFrameStoryOptions): CallFrameS
   };
   let currentModel = options.model;
   let disposed = false;
+  const canNavigateStep = options.canNavigateStep ?? (() => true);
 
   const renderIntoRoot = (): void => {
     if (disposed) return;
-    root.replaceChildren(...render(currentModel, state, options.onNavigateStep, (frameId) => {
+    root.replaceChildren(...render(currentModel, state, options.onNavigateStep, canNavigateStep, (frameId) => {
       if (state.userExpanded.has(frameId) && !state.userCollapsed.has(frameId)) {
         state.userExpanded.delete(frameId);
         state.userCollapsed.add(frameId);

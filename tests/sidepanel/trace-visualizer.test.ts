@@ -149,6 +149,53 @@ function callFrameSession(): TraceSession {
   return fixture;
 }
 
+function recursiveCallFrameSession(): TraceSession {
+  const fixture = session();
+  const sourceCode = "class Solution:\n    def maxDepth(self, n):\n        if n <= 0:\n            return 0\n        return self.maxDepth(n - 1) + 1\n";
+  const baseEvent = fixture.events[0]!;
+  fixture.sourceCode = sourceCode;
+  fixture.entrypoint = {
+    className: "Solution",
+    methodName: "maxDepth",
+    parameterCount: 1,
+    parameterKinds: ["value"]
+  };
+  fixture.events = [
+    { ...baseEvent, step: 10, function: "maxDepth", frameId: 1, parentFrameId: null, callDepth: 1, line: 2, locals: { n: int(3) } },
+    { ...baseEvent, step: 20, function: "maxDepth", frameId: 2, parentFrameId: 1, callDepth: 2, line: 3, locals: { n: int(2) } },
+    { ...baseEvent, step: 40, function: "maxDepth", frameId: 3, parentFrameId: 2, callDepth: 3, line: 4, locals: { n: int(1) } },
+    { ...baseEvent, step: 80, function: "maxDepth", frameId: 3, parentFrameId: 2, callDepth: 3, line: 5, locals: { n: int(1) } }
+  ];
+  fixture.functionPlan = {
+    version: 1,
+    functions: [{
+      functionId: "method:Solution.maxDepth",
+      kind: "method",
+      name: "maxDepth",
+      qualifiedName: "Solution.maxDepth",
+      span: { line: 2, column: 4, endLine: 5, endColumn: 48 },
+      firstBodyLine: 3,
+      parameterNames: ["self", "n"],
+      parameterKinds: ["positional_or_keyword", "positional_or_keyword"]
+    }]
+  };
+  fixture.callFrameBatches = [{
+    batchId: 1,
+    updates: [
+      { updateId: 1, kind: "frame_enter", frameId: 1, parentFrameId: null, functionName: "maxDepth", functionId: "method:Solution.maxDepth", callStep: 10, depth: 1, arguments: [{ name: "n", kind: "positional_or_keyword", value: int(3) }] },
+      { updateId: 2, kind: "frame_enter", frameId: 2, parentFrameId: 1, functionName: "maxDepth", functionId: "method:Solution.maxDepth", callStep: 20, depth: 2, arguments: [{ name: "n", kind: "positional_or_keyword", value: int(2) }] },
+      { updateId: 3, kind: "frame_enter", frameId: 3, parentFrameId: 2, functionName: "maxDepth", functionId: "method:Solution.maxDepth", callStep: 40, depth: 3, arguments: [{ name: "n", kind: "positional_or_keyword", value: int(1) }] },
+      { updateId: 4, kind: "frame_enter", frameId: 4, parentFrameId: 1, functionName: "maxDepth", functionId: "method:Solution.maxDepth", callStep: 25, depth: 2, arguments: [{ name: "n", kind: "positional_or_keyword", value: int(0) }] },
+      { updateId: 5, kind: "frame_return", frameId: 3, exitStep: 80, value: int(1) },
+      { updateId: 6, kind: "frame_return", frameId: 4, exitStep: 90, value: int(0) },
+      { updateId: 7, kind: "frame_return", frameId: 2, exitStep: 100, value: int(2) },
+      { updateId: 8, kind: "frame_return", frameId: 1, exitStep: 110, value: int(3) }
+    ]
+  }];
+  fixture.callFrameTracing = { status: "complete" };
+  return fixture;
+}
+
 function expressionSession(): TraceSession {
   const base = session();
   return {
@@ -1741,6 +1788,72 @@ function controlFlowSession(): TraceSession {
 }
 
 describe("Execution Story trace integration",()=>{
+  it("renders a useful compact story for Call-Frame-only evidence", () => {
+    const handle = createTraceVisualizer(callFrameSession());
+    const panel = handle.element.querySelector<HTMLDetailsElement>("details.trace-viewer__execution-story-panel");
+
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).toContain("Current frame");
+    expect(panel?.querySelector(".call-frame-story__tree")).toBeNull();
+    handle.dispose();
+  });
+
+  it("keeps incomplete Call-Frame tracing discoverable without raw evidence", () => {
+    const fixture = session();
+    fixture.events = [];
+    fixture.callFrameTracing = { status: "unavailable", reason: "instrumentation_failed" };
+    const handle = createTraceVisualizer(fixture);
+
+    expect(handle.element.querySelector(".execution-story")?.textContent)
+      .toContain("Call-frame tracing unavailable · instrumentation_failed");
+    handle.dispose();
+  });
+
+  it("integrates current-frame temporal status with a factual final return", () => {
+    const handle = createTraceVisualizer(recursiveCallFrameSession());
+    const panel = handle.element.querySelector<HTMLDetailsElement>("details.trace-viewer__execution-story-panel")!;
+
+    handle.setStep(2);
+    expect(panel.querySelector(".trace-viewer__panel-title")?.textContent)
+      .toBe("Execution Story · maxDepth");
+    expect(panel.querySelector(".call-frame-story__temporal")?.textContent)
+      .toBe("At this step: active");
+    expect(panel.querySelector('.call-frame-story__tree-row[data-frame-id="3"]')?.textContent).toContain("→ 1");
+
+    handle.setStep(3);
+    expect(panel.querySelector(".call-frame-story__temporal")?.textContent)
+      .toBe("At this step: exited");
+    expect(panel.querySelector(".call-frame-story__outcome")?.textContent)
+      .toBe("Session outcome: Returned 1");
+    handle.dispose();
+  });
+
+  it("navigates call-tree entries through sparse raw step indexes", () => {
+    const handle = createTraceVisualizer(recursiveCallFrameSession());
+    handle.setStep(2);
+    const panel = handle.element.querySelector<HTMLDetailsElement>("details.trace-viewer__execution-story-panel")!;
+    const entry = panel.querySelector<HTMLButtonElement>('[data-frame-id="3"][data-frame-action="entry"]')!;
+
+    expect(entry.dataset.callStep).toBe("40");
+    entry.click();
+    expect(handle.element.dataset.stepIndex).toBe("2");
+    handle.dispose();
+  });
+
+  it("keeps call rows visible but disables navigation for missing raw steps", () => {
+    const handle = createTraceVisualizer(recursiveCallFrameSession());
+    handle.setStep(2);
+    const panel = handle.element.querySelector<HTMLDetailsElement>("details.trace-viewer__execution-story-panel")!;
+    const entry = panel.querySelector<HTMLButtonElement>('[data-frame-id="4"][data-frame-action="entry"]')!;
+
+    expect(entry.dataset.callStep).toBe("25");
+    expect(entry.disabled).toBe(true);
+    expect(handle.element.dataset.stepIndex).toBe("2");
+    entry.click();
+    expect(handle.element.dataset.stepIndex).toBe("2");
+    handle.dispose();
+  });
+
   it("uses sparse raw anchors for navigation and preserves panel collapse",()=>{
     const handle=createTraceVisualizer(controlFlowSession());
     const panel=handle.element.querySelector<HTMLDetailsElement>('details.trace-viewer__execution-story-panel');

@@ -1,3 +1,4 @@
+import { buildCallFrameStory } from "../../core/call-frame-story";
 import { buildControlFlowOutlineGroups, buildControlFlowUiModel } from "../../core/execution-story";
 import { createExecutionStory, type ExecutionStoryHandle } from "./ExecutionStory";
 import { interpretTrace } from "../../core/trace-interpreter";
@@ -360,7 +361,12 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const decisionPanel = session.conditionPlan || (session.decisionBatches?.length ?? 0) > 0
     ? createPanel("Decision Evidence", "trace-viewer__decision-panel", false)
     : null;
-  const storyPanel = session.controlFlowPlan || (session.controlFlowBatches?.length ?? 0) > 0 || (session.controlFlowTracing && session.controlFlowTracing.status !== "complete")
+  const hasCallFrameSurface = interpretation.callFrames.byFrameId.size > 0 ||
+    (session.callFrameTracing !== undefined && session.callFrameTracing.status !== "complete");
+  const hasControlFlowSurface = !!session.controlFlowPlan ||
+    (session.controlFlowBatches?.length ?? 0) > 0 ||
+    (session.controlFlowTracing !== undefined && session.controlFlowTracing.status !== "complete");
+  const storyPanel = hasCallFrameSurface || hasControlFlowSurface
     ? createPanel("Execution Story", "trace-viewer__execution-story-panel", false)
     : null;
   const expressionPanel = createPanel("Expression Evidence", "trace-viewer__expression-panel", false);
@@ -424,14 +430,33 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     controlFlow: interpretation.controlFlow, decisionEvidence: interpretation.decisionEvidence,
     decisionChains: interpretation.decisionChains, tracingState: session.controlFlowTracing
   });
-  const updateExecutionStory = (controlFlow: ReturnType<typeof storyModelAt>): void => {
+  const callFrameStoryAt = (rawIndex: number) => buildCallFrameStory({
+    callFrames: interpretation.callFrames,
+    frameEvidenceIndex: interpretation.frameEvidenceIndex,
+    functionPlan: session.functionPlan,
+    events: session.events,
+    currentRawIndex: rawIndex
+  });
+  const canNavigateStep = (step: number): boolean => traceIndex.stepToIndex.has(step);
+  const updateExecutionStory = (
+    controlFlow: ReturnType<typeof storyModelAt>,
+    rawIndex: number
+  ): void => {
     if (!storyPanel) return;
+    const model = {
+      callFrame: hasCallFrameSurface ? callFrameStoryAt(rawIndex) : undefined,
+      controlFlow: hasControlFlowSurface ? controlFlow : undefined
+    };
     if (!executionStoryHandle) {
-      executionStoryHandle = createExecutionStory({ model: { controlFlow }, onNavigateStep });
+      executionStoryHandle = createExecutionStory({
+        model,
+        onNavigateStep,
+        canNavigateStep
+      });
       storyPanel.body.append(executionStoryHandle.element);
       return;
     }
-    executionStoryHandle.update({ controlFlow });
+    executionStoryHandle.update(model);
     if (!storyPanel.body.contains(executionStoryHandle.element)) {
       storyPanel.body.append(executionStoryHandle.element);
     }
@@ -451,12 +476,15 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
   const setStep = (requestedIndex: number): void => {
     if (interpretation.visualStates.length === 0) {
       codePanel.setCurrentLine(undefined);
-      updateEvidencePanel(storyPanel, "Execution Story", false, session.controlFlowTracing);
+      const storyTracing = session.callFrameTracing?.status !== "complete"
+        ? session.callFrameTracing
+        : session.controlFlowTracing;
+      updateEvidencePanel(storyPanel, "Execution Story", hasCallFrameSurface, storyTracing);
       updateEvidencePanel(decisionPanel, "Decision Evidence", false, session.decisionTracing);
       updateEvidencePanel(expressionPanel, "Expression Evidence", false, session.expressionTracing);
       changesPanel.panel.hidden = true;
       localsPanel.panel.hidden = true;
-      updateExecutionStory(storyModelAt(-1, -1));
+      updateExecutionStory(storyModelAt(-1, -1), -1);
       currentIndex = 0;
       stepLabel.textContent = "No steps";
       stepMeta.textContent = "";
@@ -513,7 +541,8 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
     codePanel.setCurrentLine(state?.currentLine);
 
     const controlFlowUiModel = storyModelAt(event?.step ?? -1, event?.frameId ?? -1);
-    updateExecutionStory(controlFlowUiModel);
+    const callFrameUiModel = hasCallFrameSurface ? callFrameStoryAt(currentIndex) : undefined;
+    updateExecutionStory(controlFlowUiModel, currentIndex);
     const decisionEvidence = event
       ? interpretation.decisionEvidence.get(event.step)
       : undefined;
@@ -526,10 +555,23 @@ export function createTraceVisualizer(session: TraceSession): TraceVisualizerHan
       ? interpretation.decisionHistory.get(decisionEvidence.siteId) ?? []
       : [];
     const activation = controlFlowUiModel.currentActivation;
-    const storyTitle = activation && controlFlowUiModel.currentIteration
+    const currentFrame = callFrameUiModel?.currentFrameId === undefined
+      ? undefined
+      : callFrameUiModel.byFrameId.get(callFrameUiModel.currentFrameId);
+    const storyTitle = currentFrame
+      ? `Execution Story · ${currentFrame.functionName}`
+      : activation && controlFlowUiModel.currentIteration
       ? `Execution Story · ${activation.loopKind.toUpperCase()} · #${controlFlowUiModel.currentIteration.ordinal}`
       : "Execution Story";
-    updateEvidencePanel(storyPanel, storyTitle, controlFlowUiModel.storyItems.length > 0, session.controlFlowTracing);
+    const storyTracing = session.callFrameTracing?.status !== "complete"
+      ? session.callFrameTracing
+      : session.controlFlowTracing;
+    updateEvidencePanel(
+      storyPanel,
+      storyTitle,
+      hasCallFrameSurface || controlFlowUiModel.storyItems.length > 0,
+      storyTracing
+    );
     updateEvidencePanel(decisionPanel, "Decision Evidence", !!decisionEvidence || !!decisionChain, session.decisionTracing);
     updateEvidencePanel(expressionPanel, "Expression Evidence", !!event && interpretation.expressionEvidence.has(event.step), session.expressionTracing);
     changesPanel.panel.hidden = !state?.mutations.length;

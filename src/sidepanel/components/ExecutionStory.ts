@@ -11,6 +11,7 @@ export interface ExecutionStoryModel {
 export interface ExecutionStoryOptions {
   model: ExecutionStoryModel;
   onNavigateStep(step: number): void;
+  canNavigateStep?(step: number): boolean;
 }
 
 export interface ExecutionStoryHandle {
@@ -110,7 +111,11 @@ export function createExecutionStory(options: ExecutionStoryOptions): ExecutionS
     root.replaceChildren();
     if (currentModel.callFrame) {
       if (!callFrameHandle) {
-        callFrameHandle = createCallFrameStory({ model: currentModel.callFrame, onNavigateStep: options.onNavigateStep });
+        callFrameHandle = createCallFrameStory({
+          model: currentModel.callFrame,
+          onNavigateStep: options.onNavigateStep,
+          canNavigateStep: options.canNavigateStep
+        });
       } else {
         callFrameHandle.update(currentModel.callFrame);
       }

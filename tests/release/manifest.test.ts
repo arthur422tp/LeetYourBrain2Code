@@ -32,8 +32,8 @@ describe("release manifest", () => {
     const manifest = readManifest();
 
     expect(manifest.manifest_version).toBe(3);
-    expect(manifest.name).toBe("LeetCode Python Execution Visualizer");
-    expect(manifest.short_name).toBe("LC Visualizer");
+    expect(manifest.name).toBe("LeetYourBrain2Code");
+    expect(manifest.short_name).toBe("LeetYB2Code");
     expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(manifest.description).toBe(
       "Visualize how your Python code actually executes on LeetCode with local step-by-step runtime evidence."
@@ -68,7 +68,7 @@ describe("release manifest", () => {
       "128": "icons/icon128.png"
     });
     expect(manifest.action).toEqual({
-      default_title: "Open LeetCode Python Execution Visualizer",
+      default_title: "Open LeetYourBrain2Code",
       default_icon: {
         "16": "icons/icon16.png",
         "32": "icons/icon32.png"

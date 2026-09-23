@@ -32,7 +32,7 @@ const EXPECTED_ICONS = {
   "128": "icons/icon128.png"
 };
 const EXPECTED_ACTION = {
-  default_title: "Open LeetCode Python Execution Visualizer",
+  default_title: "Open LeetYourBrain2Code",
   default_icon: {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png"

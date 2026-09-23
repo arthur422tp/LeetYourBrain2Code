@@ -4,7 +4,7 @@ Status: draft for v0.1.0
 
 ## Product identity
 
-- Name: LeetCode Python Execution Visualizer
+- Name: LeetYourBrain2Code
 - Single purpose: **Visualize and compare the local execution behavior of
   Python solutions and testcases currently open on LeetCode.**
 - Suggested category: Developer Tools

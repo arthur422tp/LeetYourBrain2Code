@@ -2,7 +2,7 @@
 
 Effective date: 2026-09-20
 
-LeetCode Python Execution Visualizer is a Chrome extension that visualizes the local execution behavior of Python code and visible testcases on the active LeetCode page.
+LeetYourBrain2Code is a Chrome extension that visualizes the local execution behavior of Python code and visible testcases on the active LeetCode page.
 
 ## Data accessed
 

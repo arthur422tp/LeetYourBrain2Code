@@ -1,4 +1,4 @@
-# LeetCode Python Execution Visualizer
+# LeetYourBrain2Code
 
 English | [繁體中文](README.zh-TW.md)
 

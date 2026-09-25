@@ -49,6 +49,10 @@ The Side Panel follows the active LeetCode tab in its current Chrome window. Swi
 
 When the active tab is not LeetCode, Live Visualization pauses without clearing the last trace. Returning to LeetCode resumes from the newly active tab automatically.
 
+Playback highlights the current line directly in LeetCode's visible Python editor, alongside the Side Panel visualization. **Follow line** scrolls only when the current line leaves the viewport; it does not move your editing cursor. A `before line` label means the displayed state was captured before that line executes. Source edits clear the marker until a matching run is available. If the editor cannot be reached, **Code · recorded source** keeps the trace's original code available in the panel.
+
+Playback controls stay at the bottom of the workspace. Open **Details · variables, output & analysis** for supporting evidence, or **Settings** for input mirrors, baseline controls, and privacy information.
+
 The MVP is designed to expose:
 
 - the active source line;

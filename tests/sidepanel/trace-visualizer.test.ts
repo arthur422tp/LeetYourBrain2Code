@@ -807,6 +807,31 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("reports the same raw cursor for editor highlighting and visual navigation", () => {
+    const onStepChange = vi.fn();
+    const view = createTraceVisualizer(session(), { onStepChange });
+    expect(onStepChange).toHaveBeenLastCalledWith(expect.objectContaining({ line: 5, event: "line" }));
+    view.element.querySelector<HTMLButtonElement>("#trace-next")!.click();
+    expect(onStepChange).toHaveBeenLastCalledWith(expect.objectContaining({ line: 6 }));
+    const range = view.element.querySelector<HTMLInputElement>('[data-role="trace-range"]')!;
+    range.value = "0";
+    range.dispatchEvent(new Event("input"));
+    expect(onStepChange).toHaveBeenLastCalledWith(expect.objectContaining({ line: 5 }));
+    view.dispose();
+  });
+
+  it("collapses duplicate code only after editor sync succeeds and restores it for stale source", () => {
+    const view = createTraceVisualizer(session(), { onStepChange: vi.fn() });
+    const code = view.element.querySelector<HTMLDetailsElement>(".trace-viewer__code-panel")!;
+    expect(code.open).toBe(true);
+    view.setEditorSyncStatus("synced");
+    expect(code.open).toBe(false);
+    expect(view.element.querySelector(".trace-viewer__editor-status")?.textContent).toContain("LeetCode");
+    view.setEditorSyncStatus("stale");
+    expect(code.open).toBe(true);
+    expect(view.element.querySelector(".trace-viewer__editor-status")?.textContent).toContain("changed");
+    view.dispose();
+  });
   it("keeps a collapsed behavioral diff panel mounted and inspects through the current raw cursor", () => {
     const comparison: BehavioralDiffViewModel = {
       summary: "First observed divergence: Decision result changed",

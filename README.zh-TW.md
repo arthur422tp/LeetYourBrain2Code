@@ -47,6 +47,10 @@ Side Panel 只會跟隨目前 Chrome window 中的 active LeetCode tab。即使�
 
 當 active tab 不是 LeetCode 時，Live Visualization 會顯示 `Live: paused · No active LeetCode tab`，但保留上一份 trace visualization。切回 LeetCode 後會自動從新的 active tab 恢復同步。
 
+回放時會直接在 LeetCode 可見的 Python 編輯器高亮目前行，右側同步顯示視覺化。**Follow line** 只在目前行離開可見範圍時捲動，不會移動你的編輯游標。`before line` 表示畫面呈現該行執行前的狀態。修改程式碼後會清除標記，直到取得相符的新 trace；若無法連接原編輯器，側欄的 **Code · recorded source** 仍可檢視該次執行的原始程式碼。
+
+播放控制固定在工作區底部。其他執行資訊可從 **Details · variables, output & analysis** 展開；輸入鏡像、baseline 控制與隱私說明集中在 **Settings**。
+
 MVP 的目標是呈現：
 
 - 目前執行到的 source line；

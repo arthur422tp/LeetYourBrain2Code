@@ -18,11 +18,14 @@ export const LEETCODE_MESSAGE_SOURCE = "leetcode-python-visualizer";
 export const LEETCODE_MESSAGE_TYPES = {
   requestPageState: "request_page_state",
   responsePageState: "response_page_state",
+  setEditorTrace: "set_editor_trace",
+  editorTraceResult: "editor_trace_result",
   pageStateUpdated: "page_state_updated"
 } as const;
 
 export const LEETCODE_CONTENT_MESSAGE_TYPES = {
   requestPageState: "request_leetcode_page_state",
+  setEditorTrace: "set_leetcode_editor_trace",
   pageStateUpdated: "leetcode_page_state_updated"
 } as const;
 

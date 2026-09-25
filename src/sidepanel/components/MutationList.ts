@@ -99,6 +99,10 @@ function renderMutation(mutation: RuntimeMutation): HTMLDivElement {
   return row;
 }
 
+export function formatMutationSummary(mutation: RuntimeMutation): string {
+  return `${mutationLabel(mutation)}: ${mutationValue(mutation)}`;
+}
+
 export function createMutationList(mutations: RuntimeMutation[]): HTMLDivElement {
   const body = createElement("div", "trace-viewer__mutations");
   if (mutations.length === 0) {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { LeetCodePageState } from "../../src/content/leetcode-page-state";
 import {
   createPageStateMessageHandler,
+  createEditorTraceMessageHandler,
   createPageStateUpdateHandler,
   LEETCODE_CONTENT_MESSAGE_TYPES
 } from "../../src/content/content-script";
@@ -19,6 +20,19 @@ const partialState: LeetCodePageState = {
 };
 
 describe("content script page-state handler", () => {
+  it("forwards a validated editor cursor but rejects oversized or malformed requests", async () => {
+    const request = vi.fn().mockResolvedValue("synced");
+    const reply = vi.fn();
+    const handler = createEditorTraceMessageHandler(request);
+    const location = { sourceCode: "pass", problemSlug: null, line: 1, follow: true };
+    expect(handler({ type: LEETCODE_CONTENT_MESSAGE_TYPES.setEditorTrace, location }, {}, reply)).toBe(true);
+    await vi.waitFor(() => expect(reply).toHaveBeenCalledWith({ status: "synced" }));
+    expect(request).toHaveBeenCalledWith(location);
+    for (const invalid of [{ ...location, line: -1 }, { ...location, sourceCode: "x".repeat(1_000_001) }]) {
+      handler({ type: LEETCODE_CONTENT_MESSAGE_TYPES.setEditorTrace, location: invalid }, {}, reply);
+    }
+    expect(request).toHaveBeenCalledTimes(1);
+  });
   it("responds with partial page state before testcase is available", async () => {
     const adapter = { getPageState: vi.fn(async () => partialState) };
     const sendResponse = vi.fn();

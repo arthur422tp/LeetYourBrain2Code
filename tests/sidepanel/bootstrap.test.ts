@@ -70,6 +70,36 @@ function deferred<T>() {
 }
 
 describe("renderSidePanel", () => {
+  it("syncs playback to its owning editor and clears immediately on edits or tab changes", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const editorTraceTransport = vi.fn().mockResolvedValue("synced");
+    const execute = vi.fn(async (request: ExecutionRequest) => ({
+      ...completedSession(request),
+      events: [2, 3].map((line, index) => ({
+        step: index, event: "line" as const, frameId: 1, parentFrameId: null,
+        function: "one", line, callDepth: 1, locals: {}, objects: [], stdoutDelta: ""
+      }))
+    }));
+    const handle = renderSidePanel(root, { controller: { execute }, activeTabSourceFactory: source.factory, editorTraceTransport, liveDebounceMs: 0 });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: pageState() });
+    await vi.waitFor(() => expect(root.querySelector(".trace-viewer")?.getAttribute("data-editor-sync")).toBe("synced"));
+    expect(root.querySelector<HTMLDetailsElement>(".trace-viewer__code-panel")!.open).toBe(false);
+    root.querySelector<HTMLButtonElement>("#trace-next")!.click();
+    await vi.waitFor(() => expect(editorTraceTransport).toHaveBeenLastCalledWith(11, expect.objectContaining({ line: 3, sourceCode: pageState().code })));
+    source.callbacks().onPageState({ tabId: 11, state: pageState({ code: pageState().code + "# editing", testcase: null }) });
+    await vi.waitFor(() => expect(editorTraceTransport).toHaveBeenLastCalledWith(11, null));
+    expect(root.querySelector<HTMLDetailsElement>(".trace-viewer__code-panel")!.open).toBe(true);
+    root.querySelector<HTMLButtonElement>("#trace-previous")!.click();
+    await Promise.resolve();
+    expect(editorTraceTransport).toHaveBeenLastCalledWith(11, null);
+    source.callbacks().onOwnershipInvalidated();
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 22 });
+    await Promise.resolve();
+    expect(editorTraceTransport.mock.calls.some(([tab, cursor]) => tab === 22 && cursor !== null)).toBe(false);
+    handle.dispose();
+  });
   it("collapses synced mirrors while keeping case selection and Run accessible", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

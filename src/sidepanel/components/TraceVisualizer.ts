@@ -4,7 +4,8 @@ import { createExecutionStory, type ExecutionStoryHandle } from "./ExecutionStor
 import { interpretTraceSession } from "../../core/trace-session-interpreter";
 import type { TraceInterpretation } from "../../core/trace-interpreter";
 import type { VisualState } from "../../core/visual-model";
-import type { TraceSession } from "../../shared/trace-types";
+import type { TraceEvent, TraceSession } from "../../shared/trace-types";
+import type { EditorTraceStatus } from "../../shared/editor-trace";
 import {
   buildTraceStepIndex,
   resolveBehavioralEvidenceMap
@@ -24,7 +25,7 @@ import {
 import type { BehavioralDiffViewModel } from "../behavioral-diff-view";
 import { createDecisionEvidence, decisionBadgeText } from "./DecisionEvidence";
 import { createExpressionEvidence } from "./ExpressionEvidence";
-import { createMutationList } from "./MutationList";
+import { createMutationList, formatMutationSummary } from "./MutationList";
 import {
   createTraceOutline,
   type TraceOutlineHandle
@@ -43,6 +44,7 @@ export interface TraceVisualizerHandle {
   element: HTMLElement;
   setStep(index: number): void;
   setBehavioralDiff(model: BehavioralDiffViewModel | null): void;
+  setEditorSyncStatus(status: EditorTraceStatus): void;
   dispose(): void;
 }
 
@@ -50,6 +52,9 @@ export interface TraceVisualizerOptions {
   interpretation?: TraceInterpretation;
   comparison?: BehavioralDiffViewModel | null;
   comparisonActions?: unknown;
+  onStepChange?(event: TraceEvent | undefined): void;
+  onFollowEditorChange?(follow: boolean): void;
+  followEditor?: boolean;
 }
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
@@ -374,7 +379,38 @@ export function createTraceVisualizer(
   summary.append(summaryHeading, summaryDetail);
 
   const codePanel = renderCodePanel(session.sourceCode);
-  const visualPanel = createPanel("Visual State", "trace-viewer__visual-panel");
+  const editorContext = createElement("div", "trace-viewer__editor-context");
+  editorContext.hidden = !options.onStepChange;
+  const editorStatus = createElement("span", "trace-viewer__editor-status", "Connecting to LeetCode editor…");
+  editorStatus.setAttribute("role", "status");
+  const executionLocation = createElement("span", "trace-viewer__execution-location");
+  const followEditor = createElement("button", "trace-viewer__follow-editor", "Follow line");
+  followEditor.type = "button";
+  followEditor.setAttribute("aria-pressed", String(options.followEditor ?? true));
+  followEditor.addEventListener("click", () => {
+    const follow = followEditor.getAttribute("aria-pressed") !== "true";
+    followEditor.setAttribute("aria-pressed", String(follow));
+    options.onFollowEditorChange?.(follow);
+  });
+  editorContext.append(editorStatus, executionLocation, followEditor);
+  let editorSyncStatus: EditorTraceStatus | undefined;
+  const setEditorSyncStatus = (status: EditorTraceStatus): void => {
+    if (status === editorSyncStatus) return;
+    editorSyncStatus = status;
+    root.dataset.editorSync = status;
+    editorStatus.textContent = status === "synced" ? "Highlighted in LeetCode"
+      : status === "stale" ? "Code changed · waiting for a new run"
+      : status === "cleared" ? "No active source line"
+      : "Editor unavailable · showing trace code";
+    codePanel.panel.open = status !== "synced";
+    codePanel.panel.querySelector(".trace-viewer__panel-title")!.textContent = status === "synced" ? "Trace code" : "Code · recorded source";
+  };
+  const visualPanel = {
+    panel: createElement("section", "trace-viewer__panel trace-viewer__visual-panel"),
+    body: createElement("div", "trace-viewer__panel-body")
+  };
+  visualPanel.panel.setAttribute("aria-label", "Visual State");
+  visualPanel.panel.append(visualPanel.body);
   const visualStateRenderer = createVisualStateRenderer();
   visualPanel.body.append(visualStateRenderer.body);
   const decisionPanel = session.conditionPlan || (session.decisionBatches?.length ?? 0) > 0
@@ -425,12 +461,16 @@ export function createTraceVisualizer(
   play.id = "trace-play";
   play.type = "button";
   const controls = createElement("nav", "trace-viewer__controls");
+  controls.setAttribute("aria-label", "Trace playback");
   const stepInfo = createElement("div", "trace-viewer__step-info");
   stepInfo.append(stepLabel, stepMeta);
-  controls.append(previous, stepInfo, next, play);
+  controls.append(previous, play, next, stepInfo);
 
   const inspectorGrid = createElement("div", "trace-viewer__inspector-grid");
   inspectorGrid.append(changesPanel.panel, localsPanel.panel);
+  const recentChange = createElement("div", "trace-viewer__recent-change");
+  recentChange.setAttribute("aria-label", "Changes since the previous captured step");
+  recentChange.hidden = true;
 
   let currentIndex = 0;
   let timer: number | null = null;
@@ -544,6 +584,8 @@ export function createTraceVisualizer(
       previous.disabled = true;
       next.disabled = true;
       play.disabled = true;
+      executionLocation.textContent = "No captured source step";
+      options.onStepChange?.(undefined);
       return;
     }
 
@@ -564,6 +606,9 @@ export function createTraceVisualizer(
       }
     }
     codePanel.setCurrentLine(state?.currentLine);
+    executionLocation.textContent = event && event.line !== null && event.line > 0
+      ? `${event.function} · L${event.line} · ${event.event === "line" ? "before line" : event.event}`
+      : "Outside recorded source";
 
     const controlFlowUiModel = storyModelAt(event?.step ?? -1, event?.frameId ?? -1);
     const callFrameUiModel = hasCallFrameSurface ? callFrameStoryAt(currentIndex) : undefined;
@@ -597,6 +642,9 @@ export function createTraceVisualizer(
     updateEvidencePanel(decisionPanel, "Decision Evidence", !!decisionEvidence || !!decisionChain, session.decisionTracing);
     updateEvidencePanel(expressionPanel, "Expression Evidence", !!event && interpretation.expressionEvidence.has(event.step), session.expressionTracing);
     changesPanel.panel.hidden = !state?.mutations.length;
+    const stepChanges = (state?.mutations ?? []).filter(mutation => mutation.origin !== "initial_snapshot");
+    recentChange.hidden = stepChanges.length === 0;
+    recentChange.textContent = stepChanges.slice(0, 2).map(formatMutationSummary).join(" · ");
     const committed = interpretation.controlFlow.actions.find(action => action.frameId === event?.frameId && action.status === "committed" && action.anchorStepResolved === event?.step);
     const observed = interpretation.controlFlow.actions.find(action => action.frameId === event?.frameId && action.anchorStepObserved === event?.step);
     const boundary = controlFlowUiModel.currentIteration;
@@ -652,6 +700,7 @@ export function createTraceVisualizer(
     if (currentIndex === interpretation.visualStates.length - 1) {
       stopPlaying();
     }
+    options.onStepChange?.(event);
   };
 
   navigateDirect = (index: number): void => {
@@ -703,7 +752,7 @@ export function createTraceVisualizer(
   });
   // Reuse the existing raw slider and its cursor callback; only move its DOM location.
   const rawRange = timelineHandle.element.querySelector<HTMLInputElement>('[data-role="trace-range"]');
-  if (rawRange) controls.prepend(rawRange);
+  if (rawRange) controls.append(rawRange);
   advancedPanel.body.append(behavioralPanel.panel, outlineHandle.element, timelineHandle.element, callStackPanel, debugPanel.panel);
 
   previous.addEventListener("click", () => setStep(currentIndex - 1));
@@ -728,18 +777,22 @@ export function createTraceVisualizer(
   if (failureFirstEntry) {
     root.append(failureFirstEntry);
   }
-  root.append(
+  const primary = createElement("div", "trace-viewer__primary");
+  primary.append(
     codePanel.panel,
-    visualPanel.panel,
+    visualPanel.panel
+  );
+  const details = createPanel("Details · variables, output & analysis", "trace-viewer__details", false);
+  details.body.append(
     ...(storyPanel ? [storyPanel.panel] : []),
     behavioralDiffPanel.panel,
     ...(decisionPanel ? [decisionPanel.panel] : []),
     expressionPanel.panel,
     inspectorGrid,
     outputPanel.panel,
-    advancedPanel.panel,
-    controls
+    advancedPanel.panel
   );
+  root.append(editorContext, primary, recentChange, details.panel, controls);
   const firstSolutionLine = session.events.findIndex(event =>
     event.event === "line" && event.line !== null && event.line > 0 && event.function === session.entrypoint.methodName
   );
@@ -749,6 +802,7 @@ export function createTraceVisualizer(
     element: root,
     setStep,
     setBehavioralDiff,
+    setEditorSyncStatus,
     dispose: () => {
       stopPlaying();
       executionStoryHandle?.dispose();

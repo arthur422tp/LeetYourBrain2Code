@@ -7,6 +7,8 @@ import {
   type LeetCodeAdapter,
   type LeetCodePageState
 } from "./leetcode-adapter";
+import { requestEditorTrace } from "./editor-trace-client";
+import { isEditorTraceLocation, type EditorTraceLocation, type EditorTraceStatus } from "../shared/editor-trace";
 
 export { LEETCODE_CONTENT_MESSAGE_TYPES } from "./leetcode-adapter";
 
@@ -85,8 +87,24 @@ export function createPageStateMessageHandler(
   };
 }
 
+export function createEditorTraceMessageHandler(
+  request: (location: EditorTraceLocation | null) => Promise<EditorTraceStatus>
+) {
+  return (message: unknown, _sender: unknown, sendResponse: (response: { status: EditorTraceStatus }) => void): boolean => {
+    if (typeof message !== "object" || message === null || !("type" in message)
+      || message.type !== LEETCODE_CONTENT_MESSAGE_TYPES.setEditorTrace) return false;
+    if (!("location" in message) || (message.location !== null && !isEditorTraceLocation(message.location))) {
+      sendResponse({ status: "unavailable" });
+      return false;
+    }
+    void request(message.location).then(status => sendResponse({ status }), () => sendResponse({ status: "unavailable" }));
+    return true;
+  };
+}
+
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener(createPageStateMessageHandler(createLeetCodeAdapter()));
+  chrome.runtime.onMessage.addListener(createEditorTraceMessageHandler(location => requestEditorTrace(window, location)));
 }
 
 if (typeof window !== "undefined") {

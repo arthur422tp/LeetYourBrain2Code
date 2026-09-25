@@ -1,5 +1,7 @@
 import type { ExecutionRequest } from "../shared/execution-types";
-import type { TraceSession } from "../shared/trace-types";
+import type { TraceEvent, TraceSession } from "../shared/trace-types";
+import { sameEditorSource } from "../shared/editor-trace";
+import { createEditorTraceSync, type EditorTraceTransport } from "./editor-trace-sync";
 import {
   toRunnableSnapshot,
   type LeetCodePageState,
@@ -59,6 +61,7 @@ export interface SidePanelDependencies {
   controller?: SidePanelController;
   activeTabSourceFactory?: ActiveTabSourceFactory;
   liveDebounceMs?: number;
+  editorTraceTransport?: EditorTraceTransport;
 }
 
 export interface SidePanelHandle {
@@ -243,6 +246,9 @@ export function renderSidePanel(
   const recoveryNotice = createRecoveryNotice();
 
   let activeVisualizer: TraceVisualizerHandle | null = null;
+  let editorEvent: TraceEvent | undefined;
+  let followEditor = true;
+  const editorSync = createEditorTraceSync(status => activeVisualizer?.setEditorSyncStatus(status), dependencies.editorTraceTransport);
   const comparisonState = createRunComparisonState();
   let baselinePrepared: PreparedCrossRun | null = null;
   let currentPrepared: PreparedCrossRun | null = null;
@@ -388,6 +394,8 @@ export function renderSidePanel(
   };
 
   const clearVisualization = (): void => {
+    editorSync.update(null, null);
+    editorEvent = undefined;
     activeVisualizer?.dispose();
     activeVisualizer = null;
     behavioralDiffPanelOpen = false;
@@ -477,6 +485,32 @@ export function renderSidePanel(
     return renderedPageIdentity.slug !== state.metadata.slug;
   };
 
+  const syncEditor = (): void => {
+    const tabId = ownershipState?.kind === "leetcode" ? ownershipState.tabId : null;
+    const sourceMatches = currentPageState?.code !== null && currentPageState?.code !== undefined
+      && renderedPageIdentity !== null
+      && currentPageState.language === "python"
+      && currentPageState.metadata.slug === renderedPageIdentity.slug
+      && sameEditorSource(currentPageState.code, renderedPageIdentity.sourceCode);
+    if (tabId === null || !sourceMatches) {
+      editorSync.update(null, null);
+      activeVisualizer?.setEditorSyncStatus(tabId !== null && renderedPageIdentity !== null ? "stale" : "unavailable");
+      return;
+    }
+    const line = editorEvent?.line;
+    if (!line || line < 1 || line > renderedPageIdentity!.sourceCode.split("\n").length) {
+      editorSync.update(tabId, null);
+      activeVisualizer?.setEditorSyncStatus("cleared");
+      return;
+    }
+    editorSync.update(tabId, {
+      sourceCode: renderedPageIdentity!.sourceCode,
+      problemSlug: renderedPageIdentity!.slug,
+      line,
+      follow: followEditor
+    });
+  };
+
   baselineControls = createBaselineControls({
     model: {
       hasCurrent: false,
@@ -526,15 +560,22 @@ export function renderSidePanel(
       comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
       recomputeComparison();
       activeVisualizer?.dispose();
-      activeVisualizer = createTraceVisualizer(session, {
-        interpretation,
-        comparison: currentComparison
-      });
+      activeVisualizer = null;
       renderedPageIdentity = {
         slug: accepted.input.problemSlug,
         sourceCode: accepted.input.sourceCode,
         rawTestcase: accepted.input.rawTestcase
       };
+      activeVisualizer = createTraceVisualizer(session, {
+        interpretation,
+        comparison: currentComparison,
+        followEditor,
+        ...(hasActiveTabSource ? {
+          onStepChange: (event: TraceEvent | undefined) => { editorEvent = event; syncEditor(); },
+          onFollowEditorChange: (follow: boolean) => { followEditor = follow; syncEditor(); }
+        } : {})
+      });
+      if (hasActiveTabSource) syncEditor();
       result.replaceChildren(activeVisualizer.element);
       const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
         ".trace-viewer__behavioral-diff-panel"
@@ -587,6 +628,7 @@ export function renderSidePanel(
     }
 
     currentPageState = state;
+    if (hasActiveTabSource) syncEditor();
 
     if (state.code !== null) {
       source.value = state.code;
@@ -629,6 +671,7 @@ export function renderSidePanel(
       clearRecoveryNotice();
       currentPageState = null;
       ownershipState = null;
+      syncEditor();
       currentComparison = null;
       updateActiveComparison();
       scheduler.invalidate();
@@ -639,6 +682,7 @@ export function renderSidePanel(
       if (disposed) return;
       ownershipGeneration += 1;
       ownershipState = state;
+      syncEditor();
       if (state.kind === "paused") {
         currentPageState = null;
         currentComparison = null;
@@ -660,15 +704,17 @@ export function renderSidePanel(
     }
   });
 
-  app.append(
-    header,
-    status,
-    aboutPrivacy.element,
-    inputPanel,
-    inputControls,
-    baselineControls.element,
-    result
-  );
+  const settings = document.createElement("details");
+  settings.className = "app-settings";
+  const settingsSummary = document.createElement("summary");
+  settingsSummary.textContent = "Settings";
+  const settingsBody = document.createElement("div");
+  settingsBody.className = "app-settings__body";
+  settingsBody.append(aboutPrivacy.element, inputPanel, baselineControls.element);
+  settings.append(settingsSummary, settingsBody);
+  subtitle.remove();
+  header.append(status, settings);
+  app.append(header, inputControls, result);
   root.replaceChildren(app);
   renderReleaseOnboarding();
 
@@ -721,6 +767,7 @@ export function renderSidePanel(
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      editorSync.dispose();
       activeTabSource?.dispose();
       scheduler.dispose();
       baselineControls?.dispose();

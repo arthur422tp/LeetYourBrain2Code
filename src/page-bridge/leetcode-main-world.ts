@@ -8,19 +8,10 @@ import {
   validatePageState
 } from "../content/leetcode-adapter";
 import type { LeetCodePageState } from "../content/leetcode-adapter";
+import { createEditorHighlighter, type MonacoTraceWindow } from "./editor-highlight";
+import { isEditorTraceLocation } from "../shared/editor-trace";
 
-interface MonacoModelLike {
-  getLanguageId(): string;
-  getValue(): string;
-}
-
-interface MonacoLike {
-  editor?: {
-    getModels?: () => MonacoModelLike[];
-  };
-}
-
-export type LeetCodePageWindow = Window & { monaco?: MonacoLike };
+export type LeetCodePageWindow = MonacoTraceWindow;
 
 export interface MainWorldBridgeOptions {
   watchIntervalMs?: number;
@@ -88,8 +79,10 @@ export function installMainWorldBridge(
   const pageOrigin = pageWindow.location.origin;
   const targetOrigin = pageOrigin && pageOrigin !== "null" ? pageOrigin : "*";
   let lastPageStateKey: string | null = null;
+  const highlighter = createEditorHighlighter(pageWindow, doc);
 
   const publishPageStateUpdate = (): void => {
+    highlighter.revalidate();
     const state = extractPageState(doc, pageWindow);
     if (!validatePageState(state)) {
       return;
@@ -125,6 +118,18 @@ export function installMainWorldBridge(
       return;
     }
 
+    if (message.type === LEETCODE_MESSAGE_TYPES.setEditorTrace) {
+      const status = message.location === null || isEditorTraceLocation(message.location)
+        ? highlighter.set(message.location)
+        : "unavailable";
+      pageWindow.postMessage({
+        source: LEETCODE_MESSAGE_SOURCE,
+        type: LEETCODE_MESSAGE_TYPES.editorTraceResult,
+        requestId: message.requestId,
+        status
+      }, targetOrigin);
+      return;
+    }
     const state = extractPageState(doc, pageWindow);
     if (message.type === LEETCODE_MESSAGE_TYPES.requestPageState) {
       pageWindow.postMessage(
@@ -147,6 +152,7 @@ export function installMainWorldBridge(
   );
 
   return () => {
+    highlighter.dispose();
     pageWindow.removeEventListener("message", onMessage);
     pageWindow.clearInterval(watchInterval);
   };

@@ -32,6 +32,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Compatibility contract tests
+        run: npm run test:compat
+
       - name: Typecheck
         run: npm run typecheck
 

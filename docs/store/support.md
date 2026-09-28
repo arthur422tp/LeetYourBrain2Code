@@ -22,6 +22,11 @@ Review the report and the rest of the issue before posting. GitHub issues are
 public, and older extension versions or a panel that cannot open may require
 the manual fallback fields below.
 
+Maintainers classify reports and choose the smallest regression gate using the
+[public issue-triage workflow](../maintenance/issue-triage.md). Reporters do
+not need to use the maintainer-facing category names; select the closest
+symptom in the issue form and describe the reproduction sequence.
+
 ## What to include in a bug report
 
 Please provide:

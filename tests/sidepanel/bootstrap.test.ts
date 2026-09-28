@@ -1809,7 +1809,6 @@ describe("renderSidePanel", () => {
       root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-left")?.disabled
     ).toBe(false));
 
-    const editorCallCount = editorTraceTransport.mock.calls.length;
     root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-left")!.click();
     expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
       .toBe(requests[0]?.sessionId);
@@ -1819,7 +1818,10 @@ describe("renderSidePanel", () => {
       .toContain("Case A: Case 1");
     expect(root.querySelector(".case-comparison-controls")?.textContent)
       .toContain("Case B: Case 2");
-    expect(editorTraceTransport.mock.calls.length).toBe(editorCallCount);
+    await vi.waitFor(() => expect(editorTraceTransport).toHaveBeenLastCalledWith(
+      11,
+      expect.objectContaining({ sourceCode: current.code, problemSlug: "one" })
+    ));
 
     root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-right")!.click();
     expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
@@ -1830,6 +1832,54 @@ describe("renderSidePanel", () => {
     root.querySelector<HTMLButtonElement>("#case-behavioral-diff-return-current")!.click();
     expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
       .toBe(requests[1]?.sessionId);
+    handle.dispose();
+  });
+
+  it("clears inspected-run editor replay after a visible source edit without losing the captured viewer", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const editorTraceTransport = vi.fn().mockResolvedValue("synced");
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn(async (request: ExecutionRequest) => {
+      requests.push(request);
+      return anchoredSession(request, Number.parseInt(request.rawTestcase, 10));
+    });
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      editorTraceTransport,
+      liveDebounceMs: 0
+    });
+
+    const current = pageState({ testcase: "7\n8" });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: current });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+    const caseSelector = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    caseSelector.value = "1";
+    caseSelector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-right")!.click();
+    await vi.waitFor(() => expect(
+      root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-left")?.disabled
+    ).toBe(false));
+    root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-left")!.click();
+    await vi.waitFor(() => expect(editorTraceTransport).toHaveBeenLastCalledWith(
+      11,
+      expect.objectContaining({ sourceCode: current.code, problemSlug: "one" })
+    ));
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ code: `${current.code}# edited\n`, testcase: null })
+    });
+
+    await vi.waitFor(() => expect(editorTraceTransport).toHaveBeenLastCalledWith(11, null));
+    expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
+      .toBe(requests[0]?.sessionId);
+    expect(root.querySelector(".case-comparison-controls")?.textContent)
+      .toContain("Case A: Case 1");
     handle.dispose();
   });
 

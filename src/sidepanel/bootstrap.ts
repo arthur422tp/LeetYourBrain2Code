@@ -2,7 +2,11 @@ import type { ExecutionRequest } from "../shared/execution-types";
 import type { TraceEvent, TraceSession } from "../shared/trace-types";
 import { sameEditorSource } from "../shared/editor-trace";
 import type { EditorTraceStatus } from "../shared/editor-trace";
-import { createEditorTraceSync, type EditorTraceTransport } from "./editor-trace-sync";
+import {
+  createEditorTraceSync,
+  isEditorReplaySafe,
+  type EditorTraceTransport
+} from "./editor-trace-sync";
 import {
   toRunnableSnapshot,
   type LeetCodePageState,
@@ -34,7 +38,8 @@ import {
 import {
   compareRunCompatibility,
   createRunComparisonState,
-  runRecordFromAcceptedSession
+  runRecordFromAcceptedSession,
+  type RunRecord
 } from "./run-comparison-state";
 import {
   buildBehavioralDiffViewModel,
@@ -294,6 +299,8 @@ export function renderSidePanel(
   let editorSyncStatus: EditorTraceStatus = "unavailable";
   let pageBridgeStatus = "unavailable";
   let latestAcceptedSession: TraceSession | null = null;
+  let inspectedRun: RunRecord | null = null;
+  let inspectedStep: number | null = null;
   let visualizerKind: string | null = null;
   let rawCursor: string | null = null;
   const updateEditorSyncStatus = (nextStatus: EditorTraceStatus): void => {
@@ -463,6 +470,8 @@ export function renderSidePanel(
     activeVisualizer?.dispose();
     activeVisualizer = null;
     displayMode = "live";
+    inspectedRun = null;
+    inspectedStep = null;
     latestAcceptedSession = null;
     visualizerKind = null;
     rawCursor = null;
@@ -673,8 +682,33 @@ export function renderSidePanel(
   };
 
   const syncEditor = (): void => {
-    if (displayMode !== "live") return;
     const tabId = ownershipState?.kind === "leetcode" ? ownershipState.tabId : null;
+    if (displayMode !== "live") {
+      const replayRun = inspectedRun;
+      const event = replayRun !== null && inspectedStep !== null
+        ? replayRun.session.events.find(candidate => candidate.step === inspectedStep)
+        : undefined;
+      const safe = replayRun !== null
+        && currentPageState !== null
+        && isEditorReplaySafe(
+          replayRun.session.sourceCode,
+          currentPageState.code,
+          replayRun.context.problemSlug,
+          currentPageState.metadata.slug
+        );
+      if (tabId === null || !safe || event === undefined || event.line === null || event.line < 1) {
+        editorSync.update(tabId === null ? null : tabId, null);
+        updateEditorSyncStatus(tabId === null ? "unavailable" : "stale");
+        return;
+      }
+      editorSync.update(tabId, {
+        sourceCode: replayRun!.session.sourceCode,
+        problemSlug: replayRun!.context.problemSlug,
+        line: event.line,
+        follow: followEditor
+      });
+      return;
+    }
     const sourceMatches = currentPageState?.code !== null && currentPageState?.code !== undefined
       && renderedPageIdentity !== null
       && currentPageState.language === "python"
@@ -753,19 +787,36 @@ export function renderSidePanel(
     if (run === null) return;
 
     displayMode = side;
+    inspectedRun = run;
+    inspectedStep = null;
     activeVisualizer?.dispose();
+    activeVisualizer = null;
+    const interpretation = interpretTraceSession(run.session);
     activeVisualizer = createTraceVisualizer(run.session, {
-      interpretation: interpretTraceSession(run.session)
+      interpretation,
+      onStepChange: (event: TraceEvent | undefined) => {
+        inspectedStep = event?.step ?? null;
+        syncEditor();
+      },
+      onFollowEditorChange: (follow: boolean) => {
+        followEditor = follow;
+        syncEditor();
+      }
     });
     rawCursor = null;
     visualizerKind = null;
     result.replaceChildren(activeVisualizer.element);
-    activeVisualizer.inspectStep(step);
+    if (!activeVisualizer.inspectStep(step)) {
+      inspectedStep = null;
+    }
+    syncEditor();
     renderCaseComparison();
   };
 
   const returnToCurrentRun = (): void => {
     if (latestAcceptedSession === null) return;
+    inspectedRun = null;
+    inspectedStep = null;
     mountLiveVisualizer(
       latestAcceptedSession,
       currentPrepared?.interpretation ?? interpretTraceSession(latestAcceptedSession)
@@ -845,6 +896,8 @@ export function renderSidePanel(
       currentPrepared = prepareCrossRun(session, interpretation);
       comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
       displayMode = "live";
+      inspectedRun = null;
+      inspectedStep = null;
       recomputeComparison();
       recomputeCaseComparison();
       renderedPageIdentity = {

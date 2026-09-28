@@ -1,11 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createEditorTraceSync, type EditorTraceTransport } from "../../src/sidepanel/editor-trace-sync";
+import {
+  createEditorTraceSync,
+  isEditorReplaySafe,
+  type EditorTraceTransport
+} from "../../src/sidepanel/editor-trace-sync";
 import type { EditorTraceLocation, EditorTraceStatus } from "../../src/shared/editor-trace";
 
 const location: EditorTraceLocation = { sourceCode: "pass\npass", problemSlug: "one", line: 1, follow: true };
 afterEach(() => vi.useRealTimers());
 
 describe("editor trace ownership", () => {
+  it("allows replay only when captured source and active problem identity both match", () => {
+    expect(isEditorReplaySafe("pass\n", "pass\r\n", "one", "one")).toBe(true);
+    expect(isEditorReplaySafe("pass\n", "pass\n# changed", "one", "one")).toBe(false);
+    expect(isEditorReplaySafe("pass\n", "pass\n", "one", "two")).toBe(false);
+    expect(isEditorReplaySafe("pass\n", "pass\n", null, "one")).toBe(false);
+  });
+
   it("clears the old tab and ignores its delayed reply after ownership changes", async () => {
     let resolveOld!: (status: EditorTraceStatus) => void;
     const status = vi.fn();

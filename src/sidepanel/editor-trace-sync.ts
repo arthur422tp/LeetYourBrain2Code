@@ -1,7 +1,25 @@
 import { LEETCODE_CONTENT_MESSAGE_TYPES } from "../content/leetcode-adapter";
-import { isEditorTraceStatus, type EditorTraceLocation, type EditorTraceStatus } from "../shared/editor-trace";
+import {
+  isEditorTraceStatus,
+  sameEditorSource,
+  type EditorTraceLocation,
+  type EditorTraceStatus
+} from "../shared/editor-trace";
 
 export type EditorTraceTransport = (tabId: number, location: EditorTraceLocation | null) => Promise<EditorTraceStatus>;
+
+export function isEditorReplaySafe(
+  capturedSourceCode: string,
+  visibleSourceCode: string | null,
+  capturedProblemSlug: string | null,
+  visibleProblemSlug: string | null
+): boolean {
+  return visibleSourceCode !== null
+    && capturedProblemSlug !== null
+    && visibleProblemSlug !== null
+    && capturedProblemSlug === visibleProblemSlug
+    && sameEditorSource(capturedSourceCode, visibleSourceCode);
+}
 
 export const sendEditorTrace: EditorTraceTransport = (tabId, location) => new Promise(resolve => {
   if (typeof chrome === "undefined" || !chrome.tabs?.sendMessage) { resolve("unavailable"); return; }

@@ -33,11 +33,14 @@ describe("release artifact workflow", () => {
   });
 
   it("uploads only after all validation and checksum steps", () => {
+    const checksumCommand = '(cd "$(dirname "$ZIP_PATH")" && sha256sum "$(basename "$ZIP_PATH")") > "$SHA_PATH"';
+
     expect(lineOf("npm run release:check")).toBeLessThan(lineOf("npm run release:zip"));
-    expect(lineOf("npm run release:zip")).toBeLessThan(lineOf("sha256sum \"$ZIP_PATH\""));
-    expect(lineOf("sha256sum \"$ZIP_PATH\"")).toBeLessThan(
+    expect(lineOf("npm run release:zip")).toBeLessThan(lineOf(checksumCommand));
+    expect(lineOf(checksumCommand)).toBeLessThan(
       lineOf("actions/upload-artifact@v4")
     );
+    expect(workflow).not.toContain('sha256sum "$ZIP_PATH" > "$SHA_PATH"');
   });
 
   it("does not introduce automatic Chrome Web Store publishing credentials", () => {

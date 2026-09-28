@@ -20,6 +20,9 @@ the Chrome Web Store and does not require Web Store API credentials.
    sha256sum -c leetyourbrain2code-v<version>.zip.sha256
    ```
 
+   The checksum records the ZIP basename so this command works with the
+   downloaded workflow artifact, where the ZIP and checksum sit side by side.
+
 5. Run the final real-LeetCode smoke checklist in
    [`v0.1.1-smoke-checklist.md`](v0.1.1-smoke-checklist.md), or the matching
    versioned checklist for a later patch.

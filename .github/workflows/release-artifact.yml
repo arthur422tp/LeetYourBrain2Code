@@ -70,7 +70,7 @@ jobs:
           ZIP_PATH="release/leetyourbrain2code-v${VERSION}.zip"
           SHA_PATH="${ZIP_PATH}.sha256"
           test -f "$ZIP_PATH"
-          sha256sum "$ZIP_PATH" > "$SHA_PATH"
+          (cd "$(dirname "$ZIP_PATH")" && sha256sum "$(basename "$ZIP_PATH")") > "$SHA_PATH"
           SOURCE_COMMIT="$(git rev-parse HEAD)"
           SHA256="$(sha256sum "$ZIP_PATH" | awk '{print $1}')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

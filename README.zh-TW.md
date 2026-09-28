@@ -160,7 +160,7 @@ visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integratio
 
 ## 開發
 
-目前穩定版本：v0.1.0。
+目前穩定版本：v0.1.1。
 
 v0.1.x 僅用於相容性、正確性、復原、診斷與 release maintenance 修復。
 新的除錯能力預計放在未來的 minor release。

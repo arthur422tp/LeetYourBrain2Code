@@ -183,7 +183,7 @@ This project is released under the [MIT License](LICENSE).
 
 ## Development
 
-Current stable release: v0.1.0.
+Current stable release: v0.1.1.
 
 v0.1.x is reserved for compatibility, correctness, recovery, diagnostics, and
 release-maintenance fixes. New debugging capabilities target a future minor

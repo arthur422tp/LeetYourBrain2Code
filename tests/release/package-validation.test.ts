@@ -33,7 +33,7 @@ describe("release package validation", () => {
   it("keeps the source manifest aligned with the package identity", () => {
     const result = releaseCheck.validateSourceManifest(resolve(process.cwd()));
 
-    expect(result.version).toBe("0.1.0");
+    expect(result.version).toBe("0.1.1");
     expect(releaseCheck.REQUIRED_DIST_FILES).toEqual(
       expect.arrayContaining([
         "manifest.json",

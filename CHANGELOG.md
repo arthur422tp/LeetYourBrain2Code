@@ -8,6 +8,28 @@
 
 ### Fixed
 
+## [0.1.1]
+
+### Added
+
+- Privacy-safe, user-triggered support diagnostics with copyable status output.
+- An explicit LeetCode compatibility regression gate for page state, tab
+  ownership, and editor replay contracts.
+- A reproducible release artifact workflow with versioned ZIP and SHA-256
+  checksum output.
+
+### Changed
+
+- Repository support, issue triage, smoke evidence, and release lifecycle now
+  reflect public post-release maintenance.
+- Release packaging now exposes the project-named versioned artifact and keeps
+  development, diagnostic, and secret-like files outside the extension ZIP.
+
+### Fixed
+
+- Corrected coarse macOS/Windows platform classification in diagnostic
+  environment reporting.
+
 ## [0.1.0]
 
 ### Added

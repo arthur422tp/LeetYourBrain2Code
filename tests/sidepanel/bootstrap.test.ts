@@ -1570,6 +1570,190 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("keeps accepted Case A and Case B stable while the current visualization changes cases", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: "7\n8\n9" })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    const caseSelector = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    const controls = root.querySelector<HTMLElement>(".case-comparison-controls")!;
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+    expect(controls.textContent).toContain("Case A: Case 1");
+
+    caseSelector.value = "2";
+    caseSelector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-right")!.click();
+
+    expect(caseSelector.value).toBe("2");
+    expect(controls.textContent).toContain("Current: Case 3");
+    expect(controls.textContent).toContain("Case A: Case 1");
+    expect(controls.textContent).toContain("Case B: Case 3");
+    expect(root.querySelector(".case-behavioral-diff")?.textContent)
+      .toContain("Case 1 vs Case 3");
+
+    caseSelector.value = "1";
+    caseSelector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(3));
+
+    expect(controls.textContent).toContain("Current: Case 2");
+    expect(controls.textContent).toContain("Case A: Case 1");
+    expect(controls.textContent).toContain("Case B: Case 3");
+    handle.dispose();
+  });
+
+  it("keeps Case A when a later accepted capture has different source code", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    const initial = pageState({ testcase: "7\n8" });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: initial });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+
+    const edited = pageState({
+      code: `${initial.code}# changed\n`,
+      testcase: "7\n8"
+    });
+    source.callbacks().onPageState({ tabId: 11, state: edited });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    const controls = root.querySelector<HTMLElement>(".case-comparison-controls")!;
+    expect(controls.textContent).toContain("Case A: Case 1");
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-right")!.click();
+    expect(root.querySelector(".case-behavioral-diff")?.textContent).toContain(
+      "Code changed between captures"
+    );
+    handle.dispose();
+  });
+
+  it("clears Case A and Case B after a confirmed problem change", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: "7\n8" })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+    const caseSelector = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    caseSelector.value = "1";
+    caseSelector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-right")!.click();
+
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ metadata: { slug: "two", title: "Two" }, testcase: "7\n8" })
+    });
+
+    const controls = root.querySelector<HTMLElement>(".case-comparison-controls")!;
+    expect(controls.textContent).toContain("Case A: Not selected");
+    expect(controls.textContent).toContain("Case B: Not selected");
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(3));
+    handle.dispose();
+  });
+
+  it("preserves the accepted case pair while the active tab is paused", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ testcase: "7\n8" })
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+
+    source.callbacks().onOwnershipInvalidated();
+    source.callbacks().onStateChange({ kind: "paused" });
+
+    const controls = root.querySelector<HTMLElement>(".case-comparison-controls")!;
+    expect(controls.textContent).toContain("Case A: Case 1");
+    expect(controls.textContent).not.toContain("Case A: Not selected");
+    handle.dispose();
+  });
+
+  it("ignores a stale session completion when a newer accepted run already owns the panel", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const first = deferred<TraceSession>();
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn((request: ExecutionRequest) => {
+      requests.push(request);
+      return requests.length === 1
+        ? first.promise
+        : Promise.resolve(completedSession(request));
+    });
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    const firstPage = pageState({
+      code: "class Solution:\n    def first(self, value):\n        return value\n",
+      testcase: "7\n8\n9"
+    });
+    const secondPage = pageState({
+      code: "class Solution:\n    def second(self, value):\n        return value\n",
+      testcase: "7\n8\n9"
+    });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: firstPage });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+    source.callbacks().onPageState({ tabId: 11, state: secondPage });
+    await Promise.resolve();
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    first.resolve(completedSession(requests[0]!));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+    expect(root.querySelector(".case-comparison-controls")?.textContent)
+      .toContain("Case A: Case 1");
+
+    expect(root.querySelector<HTMLTextAreaElement>("#source-code")?.value).toBe(secondPage.code);
+    expect(root.querySelector(".case-comparison-controls")?.textContent)
+      .toContain("Case A: Case 1");
+    handle.dispose();
+  });
+
   it("disposes the active tab source and persistent controller", () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

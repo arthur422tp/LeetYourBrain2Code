@@ -14,6 +14,8 @@ import {
   type LiveStatus
 } from "../execution/live-execution-scheduler";
 import { compareCrossRuns } from "../core/cross-run-diff";
+import type { CrossRunDiffResult } from "../core/cross-run-diff";
+import { compareCaseBehavioralDiff, type CaseBehavioralDiffResult } from "../core/case-behavioral-diff";
 import { prepareCrossRun, type PreparedCrossRun } from "../core/cross-run-prepare";
 import { interpretTraceSession } from "../core/trace-session-interpreter";
 import { getTestcaseCases } from "../execution/testcase-selection";
@@ -38,6 +40,18 @@ import {
   buildBehavioralDiffViewModel,
   type BehavioralDiffViewModel
 } from "./behavioral-diff-view";
+import { buildCaseDivergencePresentation } from "./case-diff-presentation";
+import {
+  createCaseComparisonState
+} from "./case-comparison-state";
+import {
+  createCaseComparisonControls,
+  type CaseComparisonControlsHandle
+} from "./components/CaseComparisonControls";
+import {
+  createCaseBehavioralDiff,
+  type CaseBehavioralDiffHandle
+} from "./components/CaseBehavioralDiff";
 import { createAboutPrivacy } from "./components/AboutPrivacy";
 import {
   createReleaseOnboarding,
@@ -286,10 +300,14 @@ export function renderSidePanel(
   };
   const editorSync = createEditorTraceSync(updateEditorSyncStatus, dependencies.editorTraceTransport);
   const comparisonState = createRunComparisonState();
+  const caseComparisonState = createCaseComparisonState();
   let baselinePrepared: PreparedCrossRun | null = null;
   let currentPrepared: PreparedCrossRun | null = null;
   let currentComparison: BehavioralDiffViewModel | null = null;
+  let caseComparisonResult: CaseBehavioralDiffResult | null = null;
   let baselineControls: BaselineControlsHandle | null = null;
+  let caseComparisonControls: CaseComparisonControlsHandle | null = null;
+  let caseBehavioralDiff: CaseBehavioralDiffHandle | null = null;
   let currentPageState: LeetCodePageState | null = hasActiveTabSource
     ? null
     : {
@@ -463,10 +481,13 @@ export function renderSidePanel(
 
   const clearComparisonForProblemChange = (): void => {
     comparisonState.clearForProblemChange();
+    caseComparisonState.clearForProblemChange();
     baselinePrepared = null;
     currentPrepared = null;
     currentComparison = null;
+    caseComparisonResult = null;
     renderBaselineControls();
+    renderCaseComparison();
   };
 
   const recomputeComparison = (): void => {
@@ -519,6 +540,121 @@ export function renderSidePanel(
     renderBaselineControls();
   };
 
+  const caseCoverageMessage = (diff: CrossRunDiffResult | undefined): string | undefined => {
+    if (!diff) return undefined;
+    const messages: string[] = [];
+    if (diff.stopReason === "coverage_ended") {
+      messages.push("No divergence observed before comparison coverage ended.");
+    } else if (
+      diff.stopReason === "ambiguous_alignment" ||
+      diff.stopReason === "alignment_boundary"
+    ) {
+      messages.push("Comparison stopped because the next evidence could not be aligned safely.");
+    } else if (diff.stopReason === "unmatched_function") {
+      messages.push("Comparison stopped because the next function occurrence could not be aligned safely.");
+    }
+    if (diff.coverage.callFrames !== "complete") {
+      messages.push(`Call-frame evidence is ${diff.coverage.callFrames}.`);
+    }
+    if (diff.coverage.decisions !== "complete") {
+      messages.push(`Decision evidence is ${diff.coverage.decisions}.`);
+    }
+    if (diff.coverage.expressions !== "complete") {
+      messages.push(`Expression evidence is ${diff.coverage.expressions}.`);
+    }
+    if (diff.coverage.controlFlow !== "complete") {
+      messages.push(`Control-flow evidence is ${diff.coverage.controlFlow}.`);
+    }
+    if (diff.coverage.mutations.status !== "complete") {
+      messages.push("Mutation evidence is partial.");
+    }
+    if (diff.coverage.values.incomparableCount > 0) {
+      messages.push(`${diff.coverage.values.incomparableCount} value comparison(s) were not comparable across runs.`);
+    }
+    if (diff.coverage.mutations.skippedUnstableObjectMutations > 0) {
+      messages.push("Some object-owned mutations were excluded from cross-run alignment.");
+    }
+    return messages.length > 0 ? messages.join(" ") : undefined;
+  };
+
+  const anchorIsAuthoritative = (
+    step: number | undefined,
+    run: ReturnType<typeof caseComparisonState.get>["left"]
+  ): boolean => step !== undefined && run !== null
+    && run.session.events.some((event) => event.step === step);
+
+  const renderCaseComparison = (): void => {
+    const selection = caseComparisonState.get();
+    const current = comparisonState.get().current;
+    const currentCaseIndex = current?.context.selectedCaseIndex ?? null;
+    const result = caseComparisonResult;
+    const diff = result?.diff;
+    const leftCaseIndex = result?.leftCaseIndex
+      ?? selection.left?.context.selectedCaseIndex
+      ?? null;
+    const rightCaseIndex = result?.rightCaseIndex
+      ?? selection.right?.context.selectedCaseIndex
+      ?? null;
+    const presentation = diff?.firstDivergence
+      && result?.leftCaseIndex !== undefined
+      && result.rightCaseIndex !== undefined
+      ? buildCaseDivergencePresentation(
+          diff.firstDivergence,
+          result.leftCaseIndex,
+          result.rightCaseIndex
+        )
+      : undefined;
+
+    caseComparisonControls?.update({
+      hasCurrent: current !== null && currentPrepared !== null,
+      currentCaseIndex,
+      caseAIndex: selection.left?.context.selectedCaseIndex ?? null,
+      caseBIndex: selection.right?.context.selectedCaseIndex ?? null,
+      ...(result ? { compatibility: result.compatibility } : {})
+    });
+    caseBehavioralDiff?.update({
+      leftCaseIndex,
+      rightCaseIndex,
+      ...(result ? { compatibility: result.compatibility } : {}),
+      ...(presentation ? { presentation } : {}),
+      ...(diff ? { coverageMessage: caseCoverageMessage(diff), stopReason: diff.stopReason } : {}),
+      leftAnchorAuthoritative: anchorIsAuthoritative(diff?.firstDivergence?.baseline?.step, selection.left),
+      rightAnchorAuthoritative: anchorIsAuthoritative(diff?.firstDivergence?.current?.step, selection.right)
+    });
+  };
+
+  const recomputeCaseComparison = (): void => {
+    const selection = caseComparisonState.get();
+    if (selection.left === null || selection.right === null) {
+      caseComparisonResult = null;
+      renderCaseComparison();
+      return;
+    }
+    caseComparisonResult = compareCaseBehavioralDiff(selection.left, selection.right);
+    renderCaseComparison();
+  };
+
+  const selectCurrentCaseAsLeft = (): void => {
+    const current = comparisonState.get().current;
+    if (current === null || currentPrepared === null) return;
+    caseComparisonState.selectLeft(current);
+    recomputeCaseComparison();
+  };
+
+  const selectCurrentCaseAsRight = (): void => {
+    const current = comparisonState.get().current;
+    const selection = caseComparisonState.get();
+    if (current === null || currentPrepared === null || selection.left === null) return;
+    caseComparisonState.selectRight(current);
+    recomputeCaseComparison();
+  };
+
+  const clearCaseComparison = (): void => {
+    caseComparisonState.clear();
+    caseComparisonResult = null;
+    renderCaseComparison();
+  };
+
   const isDifferentProblem = (state: LeetCodePageState): boolean => {
     if (!activeVisualizer || !renderedPageIdentity) return false;
 
@@ -562,6 +698,26 @@ export function renderSidePanel(
     onReplace: replaceBaseline,
     onClear: clearBaseline
   });
+  caseComparisonControls = createCaseComparisonControls({
+    model: {
+      hasCurrent: false,
+      currentCaseIndex: null,
+      caseAIndex: null,
+      caseBIndex: null
+    },
+    onSelectLeft: selectCurrentCaseAsLeft,
+    onSelectRight: selectCurrentCaseAsRight,
+    onClear: clearCaseComparison
+  });
+  caseBehavioralDiff = createCaseBehavioralDiff({
+    model: {
+      leftCaseIndex: null,
+      rightCaseIndex: null
+    },
+    onInspectLeft: () => undefined,
+    onInspectRight: () => undefined
+  });
+  renderCaseComparison();
 
   caseSelector.addEventListener("change", () => {
     const nextIndex = Number.parseInt(caseSelector.value, 10);
@@ -603,6 +759,7 @@ export function renderSidePanel(
       currentPrepared = prepareCrossRun(session, interpretation);
       comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
       recomputeComparison();
+      recomputeCaseComparison();
       activeVisualizer?.dispose();
       activeVisualizer = null;
       renderedPageIdentity = {
@@ -841,7 +998,14 @@ export function renderSidePanel(
   settingsSummary.textContent = "Settings";
   const settingsBody = document.createElement("div");
   settingsBody.className = "app-settings__body";
-  settingsBody.append(aboutPrivacy.element, supportDiagnostics.element, inputPanel, baselineControls.element);
+  settingsBody.append(
+    aboutPrivacy.element,
+    supportDiagnostics.element,
+    inputPanel,
+    baselineControls.element,
+    caseComparisonControls.element,
+    caseBehavioralDiff.element
+  );
   settings.append(settingsSummary, settingsBody);
   subtitle.remove();
   header.append(status, settings);
@@ -904,6 +1068,8 @@ export function renderSidePanel(
       activeTabSource?.dispose();
       scheduler.dispose();
       baselineControls?.dispose();
+      caseComparisonControls?.dispose();
+      caseBehavioralDiff?.dispose();
       activeVisualizer?.dispose();
       activeVisualizer = null;
       controller.dispose?.();

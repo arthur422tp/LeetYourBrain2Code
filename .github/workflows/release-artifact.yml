@@ -1,0 +1,91 @@
+name: Release artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact branch, tag, or commit to validate and package
+        required: false
+        default: ""
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Python fixtures
+        run: python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
+
+      - name: Full Vitest suite
+        run: npm test
+
+      - name: Compatibility contract tests
+        run: npm run test:compat
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Release package check
+        run: npm run release:check
+
+      - name: Generate release ZIP
+        run: npm run release:zip
+
+      - name: Create checksum and print release evidence
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          ZIP_PATH="release/leetyourbrain2code-v${VERSION}.zip"
+          SHA_PATH="${ZIP_PATH}.sha256"
+          test -f "$ZIP_PATH"
+          sha256sum "$ZIP_PATH" > "$SHA_PATH"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          SHA256="$(sha256sum "$ZIP_PATH" | awk '{print $1}')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "sha_path=$SHA_PATH" >> "$GITHUB_OUTPUT"
+          echo "package version: $VERSION"
+          echo "source commit: $SOURCE_COMMIT"
+          echo "ZIP path: $ZIP_PATH"
+          echo "SHA-256: $SHA256"
+
+      - name: Upload validated release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leetyourbrain2code-v${{ steps.release.outputs.version }}
+          if-no-files-found: error
+          path: |
+            ${{ steps.release.outputs.zip_path }}
+            ${{ steps.release.outputs.sha_path }}

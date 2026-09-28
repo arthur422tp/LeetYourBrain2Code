@@ -12,7 +12,11 @@ import {
   validateReleasePackage
 } from "./release-check.mjs";
 
-const RELEASE_PREFIX = "leetcode-python-execution-visualizer";
+export const RELEASE_PREFIX = "leetyourbrain2code";
+
+export function getReleaseZipPath(projectRoot, version) {
+  return resolve(projectRoot, "release", `${RELEASE_PREFIX}-v${version}.zip`);
+}
 
 function crc32(buffer) {
   let crc = 0xffffffff;
@@ -106,11 +110,7 @@ export function createDeterministicZip(root) {
 
 export function writeReleaseZip(projectRoot = PROJECT_ROOT) {
   const summary = validateReleasePackage(projectRoot);
-  const outputPath = resolve(
-    projectRoot,
-    "release",
-    `${RELEASE_PREFIX}-v${summary.version}.zip`
-  );
+  const outputPath = getReleaseZipPath(projectRoot, summary.version);
   const archive = createDeterministicZip(summary.distRoot);
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, archive);

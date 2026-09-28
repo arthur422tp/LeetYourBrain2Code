@@ -50,6 +50,11 @@ const FORBIDDEN_RELEASE_SEGMENTS = new Set([
   "node_modules",
   ".git"
 ]);
+const FORBIDDEN_RELEASE_FILE_PATTERNS = [
+  /(^|\/)\.env(?:\.[^/]+)?$/i,
+  /(^|\/)(?:credentials?|secrets?)(?:[.-].*)?$/i,
+  /(^|\/).*diagnostic.*$/i
+];
 
 function fail(message) {
   throw new Error(message);
@@ -103,6 +108,9 @@ export function assertReleaseRootIsSafe(root) {
     }
     if (file.endsWith(".log")) {
       fail(`Release root contains a log file: ${file}`);
+    }
+    if (FORBIDDEN_RELEASE_FILE_PATTERNS.some((pattern) => pattern.test(file))) {
+      fail(`Release root contains a forbidden generated or secret file: ${file}`);
     }
   }
 }

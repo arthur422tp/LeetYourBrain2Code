@@ -1,4 +1,10 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -77,6 +83,27 @@ describe("release package validation", () => {
     writeFileSync(join(root, "src", "unexpected.js"), "export {};");
 
     expect(() => releaseCheck.assertReleaseRootIsSafe(root)).toThrow(/src/);
+  });
+
+  it("rejects generated diagnostics and secret-like files inside a release root", () => {
+    for (const fileName of ["diagnostic-report.txt", ".env.production", "credentials.json"]) {
+      const root = temporaryDirectory();
+      writeFileSync(join(root, fileName), "should not ship\n");
+
+      expect(() => releaseCheck.assertReleaseRootIsSafe(root)).toThrow();
+    }
+  });
+
+  it("rejects a package and manifest version mismatch before packaging", () => {
+    const root = temporaryDirectory();
+    mkdirSync(join(root, "public"), { recursive: true });
+    copyFileSync(
+      resolve(process.cwd(), "public/manifest.json"),
+      join(root, "public/manifest.json")
+    );
+    writeFileSync(join(root, "package.json"), JSON.stringify({ version: "9.9.9" }));
+
+    expect(() => releaseCheck.validateSourceManifest(root)).toThrow(/version mismatch/);
   });
 
   it("sorts release files and produces byte-identical ZIPs", () => {

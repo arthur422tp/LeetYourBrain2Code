@@ -3,7 +3,7 @@
 ## Design Spec v0.1
 
 **Date:** 2026-09-28  
-**Status:** Proposed  
+**Status:** Automated implementation complete; manual Chrome acceptance pending
 **Target release:** LeetYourBrain2Code v0.1.1  
 **Release baseline:** v0.1.0 public Chrome Web Store release  
 **Primary goal:** Convert the project from release-candidate development into a maintainable public extension with reproducible diagnostics, LeetCode compatibility regression coverage, and a repeatable patch-release pipeline.
@@ -1121,6 +1121,31 @@ The decision gate for v0.2.0 should consider:
 
 # Implementation Status
 
-Proposed.
+Automated implementation is complete; final real-browser release acceptance is
+pending an interactive Chrome session.
 
-This document defines the v0.1.1 maintenance contract only. Implementation work should follow in a separate implementation plan.
+Implemented:
+
+- post-release README/changelog lifecycle;
+- privacy-safe copyable diagnostics;
+- diagnostic support/issue workflow;
+- explicit LeetCode compatibility contract suite;
+- named `test:compat` CI gate;
+- public issue triage guidance;
+- v0.1.1 live integration smoke gate checklist and automated package audit;
+- reproducible release ZIP workflow;
+- release ZIP SHA-256 artifact workflow.
+
+Pending acceptance evidence:
+
+- real-LeetCode v0.1.1 smoke execution;
+- manual diagnostic privacy verification with recognizable values;
+- toolbar/Side Panel lifecycle verification in interactive Chrome.
+
+Deferred:
+
+- automatic Chrome Web Store publishing;
+- telemetry/crash analytics;
+- persistent diagnostic history;
+- automatic diagnostic uploads;
+- new v0.2 debugging capability.

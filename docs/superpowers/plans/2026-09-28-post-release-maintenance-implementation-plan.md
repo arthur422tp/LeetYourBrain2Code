@@ -74,7 +74,7 @@ no checksum beside generated release ZIP
 - Modify: `README.md`
 - Modify: `README.zh-TW.md`
 
-- [ ] **Step 1: Add `CHANGELOG.md`**
+- [x] **Step 1: Add `CHANGELOG.md`**
 
 Use a compact public-product changelog:
 
@@ -104,7 +104,7 @@ Use the actual Web Store publication date if known from release records. Do not 
 
 Do not reproduce the commit log.
 
-- [ ] **Step 2: Replace the English release-candidate status**
+- [x] **Step 2: Replace the English release-candidate status**
 
 Remove wording equivalent to:
 
@@ -124,11 +124,11 @@ New debugging capabilities target a future minor release.
 
 Exact prose may be tightened.
 
-- [ ] **Step 3: Mirror the state in Traditional Chinese**
+- [x] **Step 3: Mirror the state in Traditional Chinese**
 
 Keep English and Traditional Chinese release semantics equivalent.
 
-- [ ] **Step 4: Add the post-release maintenance documents to Project documents**
+- [x] **Step 4: Add the post-release maintenance documents to Project documents**
 
 Add links to:
 
@@ -139,7 +139,7 @@ docs/superpowers/plans/2026-09-28-post-release-maintenance-implementation-plan.m
 
 Do not reorder the entire historical document list unless necessary.
 
-- [ ] **Step 5: Sanity check**
+- [x] **Step 5: Sanity check**
 
 Verify:
 
@@ -148,7 +148,7 @@ Verify:
 - privacy copy still matches runtime behavior;
 - relative links resolve.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add CHANGELOG.md README.md README.zh-TW.md
@@ -217,13 +217,13 @@ export interface DiagnosticSnapshot {
 
 Do not put user-bearing trace/value objects into this interface.
 
-- [ ] **Step 1: Create the diagnostic type surface**
+- [x] **Step 1: Create the diagnostic type surface**
 
 Prefer closed string unions where the current product already has stable status enums.
 
 Use `string` only where the current subsystem has no stable shared enum and introducing one would over-refactor this patch.
 
-- [ ] **Step 2: Add a pure formatter**
+- [x] **Step 2: Add a pure formatter**
 
 Target function:
 
@@ -241,7 +241,7 @@ Requirements:
 - one bounded plain-text report;
 - stable labels suitable for public GitHub issues.
 
-- [ ] **Step 3: Clamp untrusted numeric fields**
+- [x] **Step 3: Clamp untrusted numeric fields**
 
 For defensive formatting:
 
@@ -251,7 +251,7 @@ For defensive formatting:
 
 Do not stringify unexpected objects.
 
-- [ ] **Step 4: Add privacy regression tests**
+- [x] **Step 4: Add privacy regression tests**
 
 Tests must construct tempting unsafe objects containing:
 
@@ -278,7 +278,7 @@ and prove the formatter output contains none of those values.
 
 The formatter should accept only the safe snapshot type, but tests should still guard against accidental future widening.
 
-- [ ] **Step 5: Add stable-format tests**
+- [x] **Step 5: Add stable-format tests**
 
 Cover:
 
@@ -290,14 +290,14 @@ Cover:
 - UTC timestamp;
 - stable newline layout.
 
-- [ ] **Step 6: Run**
+- [x] **Step 6: Run**
 
 ```bash
 npx vitest run tests/sidepanel/diagnostics.test.ts
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/sidepanel/diagnostics.ts tests/sidepanel/diagnostics.test.ts
@@ -337,7 +337,7 @@ collectDiagnosticSnapshot(...)
 DiagnosticSnapshot
 ```
 
-- [ ] **Step 1: Inventory authoritative values already held by `bootstrap.ts`**
+- [x] **Step 1: Inventory authoritative values already held by `bootstrap.ts`**
 
 Map current variables/state to diagnostics before adding any new state.
 
@@ -354,7 +354,7 @@ At minimum locate:
 - baseline state;
 - behavioral-diff availability.
 
-- [ ] **Step 2: Add a pure collector input**
+- [x] **Step 2: Add a pure collector input**
 
 Prefer:
 
@@ -372,7 +372,7 @@ export function collectDiagnosticSnapshot(
 
 This keeps Chrome globals out of formatter tests.
 
-- [ ] **Step 3: Read extension version from manifest at runtime**
+- [x] **Step 3: Read extension version from manifest at runtime**
 
 Use:
 
@@ -384,7 +384,7 @@ or inject equivalent environment values for testability.
 
 Do not separately hardcode `0.1.1` into UI source.
 
-- [ ] **Step 4: Keep browser/platform coarse**
+- [x] **Step 4: Keep browser/platform coarse**
 
 Allowed examples:
 
@@ -403,7 +403,7 @@ Do not add fingerprinting-oriented fields such as:
 
 If browser version cannot be obtained safely/reliably, emit `unavailable`.
 
-- [ ] **Step 5: Do not expose exception messages**
+- [x] **Step 5: Do not expose exception messages**
 
 Execution status may be:
 
@@ -413,13 +413,13 @@ exception
 
 but no value-bearing exception message belongs in the default report.
 
-- [ ] **Step 6: Determine visualizer kind from existing typed state**
+- [x] **Step 6: Determine visualizer kind from existing typed state**
 
 Do not scrape a DOM heading.
 
 If a stable kind is not exposed by the current visualizer handle, add the smallest typed projection necessary.
 
-- [ ] **Step 7: Tests**
+- [x] **Step 7: Tests**
 
 Cover:
 
@@ -439,14 +439,14 @@ Cover:
 14. editor sync stale/unavailable;
 15. no visualizer.
 
-- [ ] **Step 8: Run**
+- [x] **Step 8: Run**
 
 ```bash
 npx vitest run   tests/sidepanel/diagnostics.test.ts   tests/sidepanel/bootstrap.test.ts
 npm run typecheck
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add   src/sidepanel/diagnostics.ts   src/sidepanel/bootstrap.ts   src/sidepanel/active-tab-source.ts   src/sidepanel/editor-trace-sync.ts   tests/sidepanel/diagnostics.test.ts   tests/sidepanel/bootstrap.test.ts
@@ -480,7 +480,7 @@ Copies technical status only.
 Your code, testcase, variables, stdout, and trace values are not included.
 ```
 
-- [ ] **Step 1: Create an isolated component**
+- [x] **Step 1: Create an isolated component**
 
 Recommended API:
 
@@ -493,7 +493,7 @@ createSupportDiagnostics({
 
 Dependency-inject clipboard behavior for tests.
 
-- [ ] **Step 2: Implement explicit user-triggered copy**
+- [x] **Step 2: Implement explicit user-triggered copy**
 
 Prefer:
 
@@ -505,7 +505,7 @@ when available under a user gesture.
 
 Do not add `clipboardWrite` manifest permission solely for this feature unless browser testing proves the existing approach impossible.
 
-- [ ] **Step 3: Add fallback**
+- [x] **Step 3: Add fallback**
 
 If clipboard copy fails:
 
@@ -514,17 +514,17 @@ If clipboard copy fails:
 - do not silently fail;
 - do not show source/testcase as an alternative.
 
-- [ ] **Step 4: Add transient success state**
+- [x] **Step 4: Add transient success state**
 
 Use a compact `Copied` status.
 
 Do not create toast infrastructure for one button if the existing UI has no such abstraction.
 
-- [ ] **Step 5: Ensure diagnostics are generated at click time**
+- [x] **Step 5: Ensure diagnostics are generated at click time**
 
 Do not cache a stale report when the component is first mounted.
 
-- [ ] **Step 6: Accessibility**
+- [x] **Step 6: Accessibility**
 
 Verify:
 
@@ -533,7 +533,7 @@ Verify:
 - success/failure state has readable text;
 - no status is color-only.
 
-- [ ] **Step 7: Tests**
+- [x] **Step 7: Tests**
 
 Cover:
 
@@ -545,14 +545,14 @@ Cover:
 - repeated copy after failure;
 - visualizer state is not reset by diagnostic interaction.
 
-- [ ] **Step 8: Run**
+- [x] **Step 8: Run**
 
 ```bash
 npx vitest run   tests/sidepanel/support-diagnostics.test.ts   tests/sidepanel/bootstrap.test.ts
 npm run typecheck
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add   src/sidepanel/components/SupportDiagnostics.ts   src/sidepanel/bootstrap.ts   src/sidepanel/styles.css   src/sidepanel/components/AboutPrivacy.ts   tests/sidepanel/support-diagnostics.test.ts   tests/sidepanel/bootstrap.test.ts
@@ -573,7 +573,7 @@ Omit unchanged files.
 - Optional modify: `README.md`
 - Optional modify: `README.zh-TW.md`
 
-- [ ] **Step 1: Add diagnostic instructions**
+- [x] **Step 1: Add diagnostic instructions**
 
 Support docs should tell users:
 
@@ -585,7 +585,7 @@ Open Settings / Support
 
 Use exact shipping UI wording.
 
-- [ ] **Step 2: Add optional diagnostic field to issue forms**
+- [x] **Step 2: Add optional diagnostic field to issue forms**
 
 The field must remain optional because:
 
@@ -593,17 +593,17 @@ The field must remain optional because:
 - users may be unable to open the panel;
 - public issue content remains user-controlled.
 
-- [ ] **Step 3: Keep privacy warning**
+- [x] **Step 3: Keep privacy warning**
 
 Explicitly say the generated diagnostic report excludes code/testcase values by default.
 
 Still tell users to review public issue content before submission.
 
-- [ ] **Step 4: Do not ask for duplicate metadata unnecessarily**
+- [x] **Step 4: Do not ask for duplicate metadata unnecessarily**
 
 If diagnostics already contain extension version, Chrome version, problem slug, and status, issue forms may keep manual fields for fallback but should not imply both are mandatory.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add   docs/store/support.md   .github/ISSUE_TEMPLATE/bug_report.yml   .github/ISSUE_TEMPLATE/integration_issue.yml   README.md README.zh-TW.md
@@ -629,7 +629,7 @@ This task establishes one command that answers:
 
 > Does the current build satisfy the LeetCode integration contract?
 
-- [ ] **Step 1: Add `test:compat`**
+- [x] **Step 1: Add `test:compat`**
 
 Recommended:
 
@@ -639,7 +639,7 @@ Recommended:
 
 Do not make it call the full `npm test`.
 
-- [ ] **Step 2: Build contract tests by importing production modules**
+- [x] **Step 2: Build contract tests by importing production modules**
 
 Use current production modules:
 
@@ -656,13 +656,13 @@ src/sidepanel/editor-trace-sync.ts
 
 Do not duplicate production parsing logic in test helpers.
 
-- [ ] **Step 3: Keep fixtures deterministic**
+- [x] **Step 3: Keep fixtures deterministic**
 
 Use synthetic/recorded DOM and Monaco-like objects.
 
 No network request to LeetCode.
 
-- [ ] **Step 4: Add CI step**
+- [x] **Step 4: Add CI step**
 
 Order:
 
@@ -677,7 +677,7 @@ Python fixtures
 
 It is acceptable that compatibility tests are also included in full `npm test`; the explicit step is still valuable as a named contract gate.
 
-- [ ] **Step 5: Run**
+- [x] **Step 5: Run**
 
 ```bash
 npm run test:compat
@@ -685,7 +685,7 @@ npm test
 npm run typecheck
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add   tests/compatibility   package.json package-lock.json   .github/workflows/ci.yml
@@ -710,42 +710,42 @@ The tests should lock the current supported behavior, not redesign it.
 
 ## Contract A — problem identity
 
-- [ ] LeetCode problem slug is extracted from supported problem-page identity.
-- [ ] missing/non-problem identity degrades to explicit unavailable/null state.
-- [ ] changing problem identity changes the page-state identity.
+- [x] LeetCode problem slug is extracted from supported problem-page identity.
+- [x] missing/non-problem identity degrades to explicit unavailable/null state.
+- [x] changing problem identity changes the page-state identity.
 
 ## Contract B — Python editor discovery
 
-- [ ] visible active Python Monaco model wins.
-- [ ] hidden/stale editor models are rejected when visibility is relevant.
-- [ ] unsupported language is represented explicitly.
-- [ ] multiple Monaco models do not silently select a non-Python editor.
+- [x] visible active Python Monaco model wins.
+- [x] hidden/stale editor models are rejected when visibility is relevant.
+- [x] unsupported language is represented explicitly.
+- [x] multiple Monaco models do not silently select a non-Python editor.
 
 ## Contract C — source synchronization
 
-- [ ] changed source creates a changed page-state key/update.
-- [ ] identical source does not create unnecessary duplicate logical state.
-- [ ] source sync does not require LeetCode Run or Submit.
+- [x] changed source creates a changed page-state key/update.
+- [x] identical source does not create unnecessary duplicate logical state.
+- [x] source sync does not require LeetCode Run or Submit.
 
 ## Contract D — testcase discovery
 
-- [ ] available testcase produces a runnable snapshot.
-- [ ] missing testcase produces waiting/unavailable state without clearing valid source.
-- [ ] malformed/unavailable testcase does not fabricate input.
+- [x] available testcase produces a runnable snapshot.
+- [x] missing testcase produces waiting/unavailable state without clearing valid source.
+- [x] malformed/unavailable testcase does not fabricate input.
 
 ## Contract E — case selection
 
-- [ ] selected case index remains associated with its testcase.
-- [ ] switching Case changes execution identity.
-- [ ] stale/background Case state cannot overwrite current active page identity.
+- [x] selected case index remains associated with its testcase.
+- [x] switching Case changes execution identity.
+- [x] stale/background Case state cannot overwrite current active page identity.
 
-- [ ] **Run**
+- [x] **Run**
 
 ```bash
 npm run test:compat
 ```
 
-- [ ] **Commit**
+- [x] **Commit**
 
 If tests pass without production changes:
 
@@ -773,37 +773,37 @@ If a current regression is discovered, include the smallest production fix and i
 
 ## Contract F — SPA navigation
 
-- [ ] same browser tab can change from problem A to problem B without reload.
-- [ ] new slug/state replaces the old problem identity.
-- [ ] source/testcase state is requested/refreshed for the new problem.
-- [ ] old problem editor replay cannot remain authoritative.
+- [x] same browser tab can change from problem A to problem B without reload.
+- [x] new slug/state replaces the old problem identity.
+- [x] source/testcase state is requested/refreshed for the new problem.
+- [x] old problem editor replay cannot remain authoritative.
 
 ## Contract G — active-tab ownership
 
-- [ ] current-window active LeetCode tab owns live state.
-- [ ] background LeetCode updates are ignored.
-- [ ] switching active LeetCode tabs refreshes exact-tab state.
-- [ ] switching to non-LeetCode pauses without fabricating ownership.
-- [ ] returning to LeetCode resumes from the newly active exact tab.
+- [x] current-window active LeetCode tab owns live state.
+- [x] background LeetCode updates are ignored.
+- [x] switching active LeetCode tabs refreshes exact-tab state.
+- [x] switching to non-LeetCode pauses without fabricating ownership.
+- [x] returning to LeetCode resumes from the newly active exact tab.
 
 ## Contract H — editor replay
 
-- [ ] matching problem + matching source + valid line → synced.
-- [ ] source mismatch → stale/cleared, never highlight wrong source.
-- [ ] problem mismatch → no highlight.
-- [ ] source edit clears existing decoration.
-- [ ] editor disposal/navigation fails safely.
-- [ ] `follow=false` does not force scroll.
-- [ ] `follow=true` scrolls only when required by current behavior.
+- [x] matching problem + matching source + valid line → synced.
+- [x] source mismatch → stale/cleared, never highlight wrong source.
+- [x] problem mismatch → no highlight.
+- [x] source edit clears existing decoration.
+- [x] editor disposal/navigation fails safely.
+- [x] `follow=false` does not force scroll.
+- [x] `follow=true` scrolls only when required by current behavior.
 
-- [ ] **Run**
+- [x] **Run**
 
 ```bash
 npm run test:compat
 npm test
 ```
 
-- [ ] **Commit**
+- [x] **Commit**
 
 ```bash
 git add   tests/compatibility/active-tab-contract.test.ts   tests/compatibility/editor-replay-contract.test.ts
@@ -842,7 +842,7 @@ RELEASE_PACKAGE
 UNKNOWN
 ```
 
-- [ ] **Step 1: Define severity**
+- [x] **Step 1: Define severity**
 
 Use:
 
@@ -853,7 +853,7 @@ P2 localized defect
 P3 enhancement
 ```
 
-- [ ] **Step 2: Define maintenance loop**
+- [x] **Step 2: Define maintenance loop**
 
 ```text
 issue
@@ -866,11 +866,11 @@ issue
 → patch artifact
 ```
 
-- [ ] **Step 3: Keep category labels maintainer-facing**
+- [x] **Step 3: Keep category labels maintainer-facing**
 
 No need to expose internal enum-style labels in the Side Panel.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add   docs/maintenance/issue-triage.md   docs/store/support.md   .github/ISSUE_TEMPLATE
@@ -924,7 +924,7 @@ The smoke gate is not required to test every visualizer family on every patch.
 
 For an integration-only patch, focus on the integration contracts.
 
-- [ ] **Step 1: Include environment fields**
+- [x] **Step 1: Include environment fields**
 
 Record:
 
@@ -935,11 +935,11 @@ Record:
 - tested LeetCode problem URLs/slugs;
 - pass/fail notes.
 
-- [ ] **Step 2: Do not put private source/testcase content into smoke docs**
+- [x] **Step 2: Do not put private source/testcase content into smoke docs**
 
 Use public LeetCode examples and sanitized fixtures.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/release/v0.1.1-smoke-checklist.md
@@ -970,15 +970,15 @@ Example target:
 release/leetyourbrain2code-v0.1.1.zip
 ```
 
-- [ ] **Step 1: Ensure output filename derives from package/manifest version**
+- [x] **Step 1: Ensure output filename derives from package/manifest version**
 
 No separate hardcoded workflow version.
 
-- [ ] **Step 2: Ensure release directory is ignored by git**
+- [x] **Step 2: Ensure release directory is ignored by git**
 
 Do not commit generated ZIPs.
 
-- [ ] **Step 3: Ensure ZIP contains `dist/` contents at extension root**
+- [x] **Step 3: Ensure ZIP contains `dist/` contents at extension root**
 
 Expected:
 
@@ -997,11 +997,11 @@ dist/manifest.json
 
 unless the current Web Store package already intentionally uses another proven layout.
 
-- [ ] **Step 4: Test filename/version consistency**
+- [x] **Step 4: Test filename/version consistency**
 
 A mismatched source manifest/package version must fail before packaging.
 
-- [ ] **Step 5: Test package exclusions**
+- [x] **Step 5: Test package exclusions**
 
 No:
 
@@ -1013,7 +1013,7 @@ No:
 - generated diagnostics;
 - secrets.
 
-- [ ] **Step 6: Run**
+- [x] **Step 6: Run**
 
 ```bash
 npm run build
@@ -1022,7 +1022,7 @@ npm run release:zip
 npx vitest run tests/release
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add   scripts/release-zip.mjs   scripts/release-check.mjs   tests/release
@@ -1073,11 +1073,11 @@ checkout
 → upload ZIP + checksum
 ```
 
-- [ ] **Step 1: Reuse current CI runtime versions**
+- [x] **Step 1: Reuse current CI runtime versions**
 
 Do not create unnecessary CI/runtime skew.
 
-- [ ] **Step 2: Name artifact with version**
+- [x] **Step 2: Name artifact with version**
 
 The uploaded GitHub Actions artifact should clearly contain:
 
@@ -1088,7 +1088,7 @@ leetyourbrain2code-v<version>.zip.sha256
 
 or the established release ZIP basename plus `.sha256`.
 
-- [ ] **Step 3: Generate SHA-256 outside the extension ZIP**
+- [x] **Step 3: Generate SHA-256 outside the extension ZIP**
 
 Linux example:
 
@@ -1096,7 +1096,7 @@ Linux example:
 sha256sum "$ZIP" > "$ZIP.sha256"
 ```
 
-- [ ] **Step 4: Print release evidence**
+- [x] **Step 4: Print release evidence**
 
 Workflow log should show:
 
@@ -1107,15 +1107,15 @@ Workflow log should show:
 
 Do not inject these into runtime extension files.
 
-- [ ] **Step 5: Upload only after every gate is green**
+- [x] **Step 5: Upload only after every gate is green**
 
 No artifact upload after failed tests/release check.
 
-- [ ] **Step 6: Do not publish to Web Store**
+- [x] **Step 6: Do not publish to Web Store**
 
 No Chrome Web Store API secrets.
 
-- [ ] **Step 7: Document manual owner step**
+- [x] **Step 7: Document manual owner step**
 
 `docs/release/release-process.md`:
 
@@ -1129,7 +1129,7 @@ No Chrome Web Store API secrets.
 7. record Store submission/publication state
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add   .github/workflows/release-artifact.yml   docs/release/release-process.md   package.json package-lock.json
@@ -1151,7 +1151,7 @@ Do not attempt to execute GitHub Actions inside Vitest.
 
 Test the repository contract statically.
 
-- [ ] **Step 1: Read `.github/workflows/release-artifact.yml` in the test**
+- [x] **Step 1: Read `.github/workflows/release-artifact.yml` in the test**
 
 Assert the workflow includes gates for:
 
@@ -1166,26 +1166,26 @@ Assert the workflow includes gates for:
 - SHA-256 generation;
 - artifact upload.
 
-- [ ] **Step 2: Assert artifact upload occurs after validation commands in workflow order**
+- [x] **Step 2: Assert artifact upload occurs after validation commands in workflow order**
 
 A simple structured/textual test is sufficient if robust.
 
 Do not build a YAML framework just for one workflow unless already available.
 
-- [ ] **Step 3: Assert no Web Store credentials are introduced**
+- [x] **Step 3: Assert no Web Store credentials are introduced**
 
 Search workflow for unexpected publish/secrets patterns associated with automatic Web Store deployment.
 
 Repository secrets in unrelated workflows are outside scope.
 
-- [ ] **Step 4: Run**
+- [x] **Step 4: Run**
 
 ```bash
 npx vitest run tests/release
 npm test
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/release/workflow.test.ts tests/release/package-validation.test.ts
@@ -1206,7 +1206,7 @@ git commit -m "test: validate release artifact workflow"
 
 Do this only after Tasks 0–12 are green.
 
-- [ ] **Step 1: Set version to `0.1.1`**
+- [x] **Step 1: Set version to `0.1.1`**
 
 Keep:
 
@@ -1218,7 +1218,7 @@ public/manifest.json
 
 consistent.
 
-- [ ] **Step 2: Move relevant Unreleased entries to `0.1.1`**
+- [x] **Step 2: Move relevant Unreleased entries to `0.1.1`**
 
 Expected high-level entries:
 
@@ -1237,11 +1237,11 @@ Fixed
 
 Do not claim fixes that did not occur.
 
-- [ ] **Step 3: Update README stable release**
+- [x] **Step 3: Update README stable release**
 
 Use `v0.1.1`.
 
-- [ ] **Step 4: Run release consistency checks**
+- [x] **Step 4: Run release consistency checks**
 
 ```bash
 npm test
@@ -1254,7 +1254,7 @@ npm run release:zip
 
 Expected: all pass and generated ZIP name contains `0.1.1`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add   package.json package-lock.json   public/manifest.json   CHANGELOG.md   README.md README.zh-TW.md
@@ -1268,7 +1268,7 @@ git commit -m "chore: prepare v0.1.1 release"
 
 No new feature code should be introduced during this task unless a release blocker is found.
 
-- [ ] **Step 1: Python fixtures**
+- [x] **Step 1: Python fixtures**
 
 ```bash
 python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
@@ -1276,7 +1276,7 @@ python3 -m unittest discover -s tests/fixtures/python -p "test_*.py"
 
 Expected: PASS.
 
-- [ ] **Step 2: Full Vitest**
+- [x] **Step 2: Full Vitest**
 
 ```bash
 npm test
@@ -1284,7 +1284,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 3: Compatibility contract**
+- [x] **Step 3: Compatibility contract**
 
 ```bash
 npm run test:compat
@@ -1292,7 +1292,7 @@ npm run test:compat
 
 Expected: PASS.
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 ```bash
 npm run typecheck
@@ -1300,7 +1300,7 @@ npm run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 5: Production build**
+- [x] **Step 5: Production build**
 
 ```bash
 npm run build
@@ -1308,7 +1308,7 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 6: Release package validation**
+- [x] **Step 6: Release package validation**
 
 ```bash
 npm run release:check
@@ -1316,7 +1316,7 @@ npm run release:check
 
 Expected: PASS.
 
-- [ ] **Step 7: Release ZIP**
+- [x] **Step 7: Release ZIP**
 
 ```bash
 npm run release:zip
@@ -1324,7 +1324,7 @@ npm run release:zip
 
 Expected: one v0.1.1 Web Store ZIP.
 
-- [ ] **Step 8: Verify generated package manually**
+- [x] **Step 8: Verify generated package manually**
 
 Check:
 
@@ -1394,11 +1394,11 @@ Deferred:
 - new v0.2 debugging capability.
 ```
 
-- [ ] **Step 1: Mark implementation plan task checkboxes accurately**
+- [x] **Step 1: Mark implementation plan task checkboxes accurately**
 
 Do not mark manual smoke items complete unless actually run.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add   docs/superpowers/specs/2026-09-28-post-release-maintenance-design.md   docs/superpowers/plans/2026-09-28-post-release-maintenance-implementation-plan.md   docs/release/v0.1.1-smoke-checklist.md
@@ -1407,6 +1407,15 @@ git commit -m "docs: record v0.1.1 maintenance completion"
 ```
 
 Omit the smoke file if not changed.
+
+## Current execution status
+
+Tasks 0–13 and Task 14 Steps 1–8 are complete and have automated evidence.
+Task 14 Steps 9–11 remain pending because this workspace has no Chrome or
+Chromium binary and no interactive LeetCode session. The v0.1.1 smoke
+checklist records those manual rows as `PENDING`; they must be completed before
+Web Store upload. Task 15 records this state rather than treating automated
+tests as live-browser evidence.
 
 ---
 

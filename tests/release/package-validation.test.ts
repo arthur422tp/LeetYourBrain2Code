@@ -124,6 +124,7 @@ describe("release package validation", () => {
     ) as { scripts: Record<string, string> };
 
     expect(packageJson.scripts.validate).toBe("npm test && npm run typecheck && npm run build");
+    expect(packageJson.scripts["test:compat"]).toBe("vitest run tests/compatibility");
     expect(packageJson.scripts["release:check"]).toBe("node scripts/release-check.mjs");
     expect(packageJson.scripts["release:zip"]).toBe("node scripts/release-zip.mjs");
   });

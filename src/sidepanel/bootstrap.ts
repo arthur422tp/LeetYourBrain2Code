@@ -49,11 +49,16 @@ import {
 } from "./components/RecoveryNotice";
 import {
   collectDiagnosticSnapshot,
+  formatDiagnosticReport,
   getDiagnosticEnvironment,
   type DiagnosticEnvironment,
   type DiagnosticRuntimeView,
   type DiagnosticSnapshot
 } from "./diagnostics";
+import {
+  createSupportDiagnostics,
+  type SupportDiagnosticsOptions
+} from "./components/SupportDiagnostics";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -71,6 +76,7 @@ export interface SidePanelDependencies {
   liveDebounceMs?: number;
   editorTraceTransport?: EditorTraceTransport;
   diagnosticEnvironment?: DiagnosticEnvironment;
+  diagnosticCopyText?: SupportDiagnosticsOptions["copyText"];
 }
 
 export interface SidePanelHandle {
@@ -822,13 +828,18 @@ export function renderSidePanel(
     );
   };
 
+  const supportDiagnostics = createSupportDiagnostics({
+    getReport: () => formatDiagnosticReport(getDiagnosticSnapshot()),
+    copyText: dependencies.diagnosticCopyText
+  });
+
   const settings = document.createElement("details");
   settings.className = "app-settings";
   const settingsSummary = document.createElement("summary");
   settingsSummary.textContent = "Settings";
   const settingsBody = document.createElement("div");
   settingsBody.className = "app-settings__body";
-  settingsBody.append(aboutPrivacy.element, inputPanel, baselineControls.element);
+  settingsBody.append(aboutPrivacy.element, supportDiagnostics.element, inputPanel, baselineControls.element);
   settings.append(settingsSummary, settingsBody);
   subtitle.remove();
   header.append(status, settings);

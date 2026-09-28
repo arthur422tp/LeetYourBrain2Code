@@ -162,6 +162,57 @@ button.is-primary:hover:not(:disabled) {
   color: #1d67ed;
 }
 
+.support-diagnostics {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 11px 11px;
+}
+
+.support-diagnostics__heading,
+.support-diagnostics__copy,
+.support-diagnostics__status {
+  margin: 0;
+}
+
+.support-diagnostics__heading {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.support-diagnostics__copy,
+.support-diagnostics__status {
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.support-diagnostics__button {
+  justify-self: start;
+  padding: 6px 9px;
+  font-size: 11px;
+}
+
+.support-diagnostics__status {
+  min-height: 16px;
+}
+
+.support-diagnostics__fallback {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #d7dee9;
+  border-radius: 7px;
+  background: #fff;
+  color: #0f172a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px;
+}
+
 .release-onboarding {
   display: grid;
   gap: 8px;

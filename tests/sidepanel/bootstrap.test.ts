@@ -188,6 +188,29 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("mounts support diagnostics in Settings without resetting the active visualizer", async () => {
+    const root = document.createElement("main");
+    const copyText = vi.fn().mockResolvedValue(undefined);
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      diagnosticCopyText: copyText,
+      liveDebounceMs: 0
+    });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(root.querySelector("#trace-viewer")).not.toBeNull());
+    const viewer = root.querySelector("#trace-viewer");
+
+    expect(root.querySelector(".support-diagnostics")?.textContent)
+      .toContain("Copies technical status only");
+    root.querySelector<HTMLButtonElement>(".support-diagnostics__button")?.click();
+
+    await vi.waitFor(() => expect(copyText).toHaveBeenCalledTimes(1));
+    expect(root.querySelector("#trace-viewer")).toBe(viewer);
+    handle.dispose();
+  });
+
   it("shows actionable onboarding when there is no active LeetCode tab", () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();

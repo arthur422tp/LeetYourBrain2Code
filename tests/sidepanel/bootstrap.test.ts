@@ -41,6 +41,76 @@ function completedSession(request: ExecutionRequest): TraceSession {
   };
 }
 
+function anchoredSession(request: ExecutionRequest, returnValue: number): TraceSession {
+  const methodName = request.entrypoint.methodName;
+  const className = request.entrypoint.className;
+  const functionId = `method:${className}.${methodName}`;
+  const value = { type: "int" as const, value: String(returnValue) };
+  return {
+    ...completedSession(request),
+    schemaVersion: 6,
+    events: [
+      {
+        step: 10,
+        event: "line",
+        frameId: 1,
+        parentFrameId: null,
+        function: methodName,
+        line: 3,
+        callDepth: 1,
+        locals: { value },
+        stdoutDelta: ""
+      },
+      {
+        step: 11,
+        event: "line",
+        frameId: 1,
+        parentFrameId: null,
+        function: methodName,
+        line: 4,
+        callDepth: 1,
+        locals: { value },
+        stdoutDelta: ""
+      }
+    ],
+    functionPlan: {
+      version: 1,
+      functions: [{
+        functionId,
+        kind: "method",
+        name: methodName,
+        qualifiedName: `${className}.${methodName}`,
+        span: { line: 2, column: 4, endLine: 4, endColumn: 20 },
+        firstBodyLine: 3,
+        parameterNames: ["self", "value"],
+        parameterKinds: ["positional_or_keyword", "positional_or_keyword"]
+      }]
+    },
+    callFrameBatches: [{
+      batchId: 1,
+      updates: [{
+        updateId: 1,
+        kind: "frame_enter",
+        frameId: 1,
+        parentFrameId: null,
+        functionName: methodName,
+        functionId,
+        callStep: 10,
+        depth: 1,
+        arguments: []
+      }, {
+        updateId: 2,
+        kind: "frame_return",
+        frameId: 1,
+        exitStep: 11,
+        value
+      }]
+    }],
+    callFrameTracing: { status: "complete" },
+    returnValue: value
+  };
+}
+
 function fakeActiveTabSourceFactory() {
   let callbacks!: ActiveTabSourceOptions;
   const refresh = vi.fn<() => Promise<ActiveTabPageState | null>>()
@@ -1705,6 +1775,61 @@ describe("renderSidePanel", () => {
     const controls = root.querySelector<HTMLElement>(".case-comparison-controls")!;
     expect(controls.textContent).toContain("Case A: Case 1");
     expect(controls.textContent).not.toContain("Case A: Not selected");
+    handle.dispose();
+  });
+
+  it("inspects captured Case A and Case B without changing the live Case selection", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const editorTraceTransport = vi.fn().mockResolvedValue("synced");
+    const requests: ExecutionRequest[] = [];
+    const execute = vi.fn(async (request: ExecutionRequest) => {
+      requests.push(request);
+      return anchoredSession(request, Number.parseInt(request.rawTestcase, 10));
+    });
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      editorTraceTransport,
+      liveDebounceMs: 0
+    });
+
+    const current = pageState({ testcase: "7\n8" });
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({ tabId: 11, state: current });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-left")!.click();
+
+    const caseSelector = root.querySelector<HTMLSelectElement>("#testcase-case")!;
+    caseSelector.value = "1";
+    caseSelector.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    root.querySelector<HTMLButtonElement>("#case-comparison-select-right")!.click();
+    await vi.waitFor(() => expect(
+      root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-left")?.disabled
+    ).toBe(false));
+
+    const editorCallCount = editorTraceTransport.mock.calls.length;
+    root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-left")!.click();
+    expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
+      .toBe(requests[0]?.sessionId);
+    expect(root.querySelector("#trace-viewer")?.getAttribute("data-step-index")).toBe("0");
+    expect(caseSelector.value).toBe("1");
+    expect(root.querySelector(".case-comparison-controls")?.textContent)
+      .toContain("Case A: Case 1");
+    expect(root.querySelector(".case-comparison-controls")?.textContent)
+      .toContain("Case B: Case 2");
+    expect(editorTraceTransport.mock.calls.length).toBe(editorCallCount);
+
+    root.querySelector<HTMLButtonElement>("#case-behavioral-diff-inspect-right")!.click();
+    expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
+      .toBe(requests[1]?.sessionId);
+    expect(root.querySelector("#trace-viewer")?.getAttribute("data-step-index")).toBe("0");
+    expect(caseSelector.value).toBe("1");
+
+    root.querySelector<HTMLButtonElement>("#case-behavioral-diff-return-current")!.click();
+    expect(root.querySelector("#trace-viewer")?.getAttribute("data-session-id"))
+      .toBe(requests[1]?.sessionId);
     handle.dispose();
   });
 

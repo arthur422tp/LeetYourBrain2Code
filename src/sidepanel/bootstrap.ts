@@ -105,6 +105,8 @@ type SourceReadiness =
   | "unsupported_language"
   | "candidate";
 
+type DisplayMode = "live" | "left" | "right";
+
 const SAMPLE_SOURCE = `class Solution:
     def twoSum(self, numbers, target):
         for index, value in enumerate(numbers):
@@ -321,6 +323,7 @@ export function renderSidePanel(
   let selectedCaseIndex = 0;
   let ownershipGeneration = 0;
   let disposed = false;
+  let displayMode: DisplayMode = "live";
   let collapsedInitialMirrors = false;
   let behavioralDiffPanelOpen = false;
   let sessionReportedForLatestRun = false;
@@ -332,6 +335,7 @@ export function renderSidePanel(
   const diagnosticEnvironment = dependencies.diagnosticEnvironment ?? getDiagnosticEnvironment();
 
   const updateActiveComparison = (): void => {
+    if (displayMode !== "live") return;
     activeVisualizer?.setBehavioralDiff(currentComparison);
   };
 
@@ -353,6 +357,10 @@ export function renderSidePanel(
   };
 
   const renderReleaseOnboarding = (): void => {
+    if (displayMode !== "live") {
+      releaseOnboarding.element.remove();
+      return;
+    }
     const state = onboardingState();
     if (activeVisualizer && traceMatchesCurrentPage()) {
       releaseOnboarding.element.remove();
@@ -454,6 +462,7 @@ export function renderSidePanel(
     editorEvent = undefined;
     activeVisualizer?.dispose();
     activeVisualizer = null;
+    displayMode = "live";
     latestAcceptedSession = null;
     visualizerKind = null;
     rawCursor = null;
@@ -615,6 +624,7 @@ export function renderSidePanel(
     caseBehavioralDiff?.update({
       leftCaseIndex,
       rightCaseIndex,
+      displayMode,
       ...(result ? { compatibility: result.compatibility } : {}),
       ...(presentation ? { presentation } : {}),
       ...(diff ? { coverageMessage: caseCoverageMessage(diff), stopReason: diff.stopReason } : {}),
@@ -663,6 +673,7 @@ export function renderSidePanel(
   };
 
   const syncEditor = (): void => {
+    if (displayMode !== "live") return;
     const tabId = ownershipState?.kind === "leetcode" ? ownershipState.tabId : null;
     const sourceMatches = currentPageState?.code !== null && currentPageState?.code !== undefined
       && renderedPageIdentity !== null
@@ -686,6 +697,80 @@ export function renderSidePanel(
       line,
       follow: followEditor
     });
+  };
+
+  const mountLiveVisualizer = (
+    session: TraceSession,
+    interpretation: ReturnType<typeof interpretTraceSession>,
+    sessionRecovery: RecoveryNoticeState | null = null
+  ): void => {
+    displayMode = "live";
+    clearRecoveryNotice();
+    activeVisualizer?.dispose();
+    activeVisualizer = createTraceVisualizer(session, {
+      interpretation,
+      comparison: currentComparison,
+      followEditor,
+      ...(hasActiveTabSource ? {
+        onStepChange: (event: TraceEvent | undefined) => {
+          editorEvent = event;
+          const eventIndex = event === undefined
+            ? -1
+            : session.events.findIndex(candidate => candidate.step === event.step);
+          rawCursor = eventIndex >= 0 ? `${eventIndex}/${session.events.length}` : null;
+          visualizerKind = eventIndex >= 0
+            ? interpretation.visualStates[eventIndex]?.visuals[0]?.kind ?? null
+            : null;
+          syncEditor();
+        },
+        onFollowEditorChange: (follow: boolean) => { followEditor = follow; syncEditor(); }
+      } : {})
+    });
+    if (!hasActiveTabSource) {
+      const firstEvent = session.events[0];
+      const firstIndex = firstEvent === undefined ? -1 : 0;
+      rawCursor = firstIndex >= 0 ? `${firstIndex}/${session.events.length}` : null;
+      visualizerKind = firstIndex >= 0
+        ? interpretation.visualStates[firstIndex]?.visuals[0]?.kind ?? null
+        : null;
+    }
+    if (hasActiveTabSource) syncEditor();
+    result.replaceChildren(activeVisualizer.element);
+    const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
+      ".trace-viewer__behavioral-diff-panel"
+    );
+    if (nextBehavioralDiffPanel) {
+      nextBehavioralDiffPanel.open = behavioralDiffPanelOpen;
+    }
+    if (sessionRecovery !== null) {
+      showRecoveryNotice(sessionRecovery);
+    }
+  };
+
+  const inspectCapturedCase = (side: "left" | "right", step: number): void => {
+    const selection = caseComparisonState.get();
+    const run = side === "left" ? selection.left : selection.right;
+    if (run === null) return;
+
+    displayMode = side;
+    activeVisualizer?.dispose();
+    activeVisualizer = createTraceVisualizer(run.session, {
+      interpretation: interpretTraceSession(run.session)
+    });
+    rawCursor = null;
+    visualizerKind = null;
+    result.replaceChildren(activeVisualizer.element);
+    activeVisualizer.inspectStep(step);
+    renderCaseComparison();
+  };
+
+  const returnToCurrentRun = (): void => {
+    if (latestAcceptedSession === null) return;
+    mountLiveVisualizer(
+      latestAcceptedSession,
+      currentPrepared?.interpretation ?? interpretTraceSession(latestAcceptedSession)
+    );
+    renderCaseComparison();
   };
 
   baselineControls = createBaselineControls({
@@ -714,8 +799,9 @@ export function renderSidePanel(
       leftCaseIndex: null,
       rightCaseIndex: null
     },
-    onInspectLeft: () => undefined,
-    onInspectRight: () => undefined
+    onInspectLeft: (step) => inspectCapturedCase("left", step),
+    onInspectRight: (step) => inspectCapturedCase("right", step),
+    onReturnToCurrent: returnToCurrentRun
   });
   renderCaseComparison();
 
@@ -758,53 +844,15 @@ export function renderSidePanel(
       const interpretation = interpretTraceSession(session);
       currentPrepared = prepareCrossRun(session, interpretation);
       comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
+      displayMode = "live";
       recomputeComparison();
       recomputeCaseComparison();
-      activeVisualizer?.dispose();
-      activeVisualizer = null;
       renderedPageIdentity = {
         slug: accepted.input.problemSlug,
         sourceCode: accepted.input.sourceCode,
         rawTestcase: accepted.input.rawTestcase
       };
-      activeVisualizer = createTraceVisualizer(session, {
-        interpretation,
-        comparison: currentComparison,
-        followEditor,
-        ...(hasActiveTabSource ? {
-          onStepChange: (event: TraceEvent | undefined) => {
-            editorEvent = event;
-            const eventIndex = event === undefined
-              ? -1
-              : session.events.findIndex(candidate => candidate.step === event.step);
-            rawCursor = eventIndex >= 0 ? `${eventIndex}/${session.events.length}` : null;
-            visualizerKind = eventIndex >= 0
-              ? interpretation.visualStates[eventIndex]?.visuals[0]?.kind ?? null
-              : null;
-            syncEditor();
-          },
-          onFollowEditorChange: (follow: boolean) => { followEditor = follow; syncEditor(); }
-        } : {})
-      });
-      if (!hasActiveTabSource) {
-        const firstEvent = session.events[0];
-        const firstIndex = firstEvent === undefined ? -1 : 0;
-        rawCursor = firstIndex >= 0 ? `${firstIndex}/${session.events.length}` : null;
-        visualizerKind = firstIndex >= 0
-          ? interpretation.visualStates[firstIndex]?.visuals[0]?.kind ?? null
-          : null;
-      }
-      if (hasActiveTabSource) syncEditor();
-      result.replaceChildren(activeVisualizer.element);
-      const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
-        ".trace-viewer__behavioral-diff-panel"
-      );
-      if (nextBehavioralDiffPanel) {
-        nextBehavioralDiffPanel.open = behavioralDiffPanelOpen;
-      }
-      if (sessionRecovery !== null) {
-        showRecoveryNotice(sessionRecovery);
-      }
+      mountLiveVisualizer(session, interpretation, sessionRecovery);
     }
   });
 

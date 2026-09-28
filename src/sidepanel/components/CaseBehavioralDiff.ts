@@ -5,6 +5,7 @@ import type { ComparisonCompatibility } from "../run-comparison-state";
 export interface CaseBehavioralDiffModel {
   leftCaseIndex: number | null;
   rightCaseIndex: number | null;
+  displayMode?: "live" | "left" | "right";
   compatibility?: ComparisonCompatibility;
   presentation?: CaseDivergencePresentation;
   coverageMessage?: string;
@@ -17,6 +18,7 @@ export interface CaseBehavioralDiffOptions {
   model: CaseBehavioralDiffModel;
   onInspectLeft(step: number): void;
   onInspectRight(step: number): void;
+  onReturnToCurrent?(): void;
 }
 
 export interface CaseBehavioralDiffHandle {
@@ -131,14 +133,27 @@ export function createCaseBehavioralDiff(
   const element = createElement("section", "case-behavioral-diff");
   element.setAttribute("aria-live", "polite");
   const heading = createElement("h2", "case-behavioral-diff__heading", "Case comparison");
+  const returnCurrent = createElement(
+    "button",
+    "case-behavioral-diff__return-current",
+    "Return to current run"
+  );
+  returnCurrent.id = "case-behavioral-diff-return-current";
+  returnCurrent.type = "button";
+  returnCurrent.hidden = true;
   const body = createElement("div", "case-behavioral-diff__body");
-  element.append(heading, body);
+  element.append(heading, returnCurrent, body);
 
   let disposed = false;
   const isDisposed = (): boolean => disposed;
+  const onReturnToCurrent = (): void => {
+    if (!disposed) options.onReturnToCurrent?.();
+  };
+  returnCurrent.addEventListener("click", onReturnToCurrent);
 
   const update = (model: CaseBehavioralDiffModel): void => {
     if (disposed) return;
+    returnCurrent.hidden = model.displayMode === undefined || model.displayMode === "live";
     body.replaceChildren();
     const missingSide = noSideMessage(model);
     if (missingSide) {
@@ -205,6 +220,7 @@ export function createCaseBehavioralDiff(
     element,
     update,
     dispose(): void {
+      returnCurrent.removeEventListener("click", onReturnToCurrent);
       disposed = true;
     }
   };

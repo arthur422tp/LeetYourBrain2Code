@@ -498,6 +498,12 @@ button.is-primary:hover:not(:disabled) {
   font-size: 15px;
 }
 
+.case-behavioral-diff__return-current {
+  justify-self: start;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
 .case-behavioral-diff__body {
   display: grid;
   gap: 8px;

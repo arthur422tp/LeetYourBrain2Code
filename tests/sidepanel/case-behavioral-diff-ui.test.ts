@@ -155,4 +155,20 @@ describe("CaseBehavioralDiff", () => {
     expect(onInspectRight).not.toHaveBeenCalled();
     handle.dispose();
   });
+
+  it("offers a return-to-current action while inspecting a captured side", () => {
+    const onReturnToCurrent = vi.fn();
+    const handle = createCaseBehavioralDiff({
+      model: model({ displayMode: "left" }),
+      onInspectLeft: vi.fn(),
+      onInspectRight: vi.fn(),
+      onReturnToCurrent
+    });
+
+    const button = handle.element.querySelector<HTMLButtonElement>("#case-behavioral-diff-return-current");
+    expect(button).not.toBeNull();
+    button!.click();
+    expect(onReturnToCurrent).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
 });

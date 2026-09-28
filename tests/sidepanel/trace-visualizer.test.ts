@@ -807,6 +807,18 @@ function graphConnection(view: HTMLElement): SVGGElement {
 }
 
 describe("createTraceVisualizer", () => {
+  it("maps an exact captured step through the trace index without guessing a nearest step", () => {
+    const view = createTraceVisualizer(session());
+
+    expect(view.inspectStep(2)).toBe(true);
+    expect(view.element.dataset.stepIndex).toBe("1");
+    expect(view.element.querySelector(".trace-viewer__step-label")?.textContent).toBe("Step 2 / 2");
+
+    expect(view.inspectStep(3)).toBe(false);
+    expect(view.element.dataset.stepIndex).toBe("1");
+    view.dispose();
+  });
+
   it("reports the same raw cursor for editor highlighting and visual navigation", () => {
     const onStepChange = vi.fn();
     const view = createTraceVisualizer(session(), { onStepChange });

@@ -1361,6 +1361,13 @@ On a real public problem:
 - tab switch;
 - non-LeetCode switch/back.
 
+> Audit note (2026-09-28): a connected Chrome session completed a page-level
+> audit for all four public acceptance pages and observed page-level
+> `two-sum` → `add-two-numbers` navigation. Steps 9–11 remain unchecked because
+> the connected browser surface cannot control Chrome's toolbar or extension
+> Side Panel; page-level observations must not be promoted to extension smoke
+> evidence.
+
 ---
 
 # Task 15: Record Implementation Completion

@@ -809,9 +809,9 @@ export function renderSidePanel(
         problemSlug: currentPageState?.metadata.slug ?? null,
         language: currentPageState?.language ?? null,
         pageState: diagnosticPageState(currentPageState),
-        activeTabOwned: !hasActiveTabSource
+        activeTabOwned: !hasActiveTabSource || ownershipState === null
           ? "unavailable"
-          : ownershipState?.kind === "leetcode",
+          : ownershipState.kind === "leetcode",
         pageBridge: pageBridgeStatus,
         editorSync: editorSyncStatus,
         testcaseState: testcaseReady ? "ready" : "unavailable",

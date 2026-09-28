@@ -41,7 +41,7 @@ export interface DiagnosticRuntimeView {
 export interface DiagnosticSnapshot {
   extension: {
     version: string;
-    manifestVersion: number;
+    manifestVersion: number | "unavailable";
   };
   browser: {
     chrome: string | "unavailable";
@@ -142,9 +142,7 @@ export function collectDiagnosticSnapshot(
   return {
     extension: {
       version: optionalText(environment.extensionVersion),
-      manifestVersion: typeof environment.manifestVersion === "number"
-        ? environment.manifestVersion
-        : 0
+      manifestVersion: environment.manifestVersion
     },
     browser: {
       chrome: optionalText(environment.chrome),
@@ -221,7 +219,9 @@ export function formatDiagnosticReport(snapshot: DiagnosticSnapshot): string {
     "",
     "Extension",
     `version: ${safeStatus(snapshot.extension.version)}`,
-    `manifest: ${safeNonNegativeInteger(snapshot.extension.manifestVersion, 10)}`,
+    `manifest: ${snapshot.extension.manifestVersion === "unavailable"
+      ? "unavailable"
+      : safeNonNegativeInteger(snapshot.extension.manifestVersion, 10)}`,
     "",
     "Browser",
     `chrome: ${safeStatus(snapshot.browser.chrome)}`,

@@ -132,6 +132,19 @@ describe("renderSidePanel", () => {
     expect(root.textContent).toContain("Live: not started");
   });
 
+  it("reports unavailable ownership until the active tab source resolves", () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const handle = renderSidePanel(root, {
+      controller: { execute: vi.fn() },
+      activeTabSourceFactory: source.factory,
+      liveDebounceMs: 0
+    });
+
+    expect(handle.getDiagnosticSnapshot().integration.activeTabOwned).toBe("unavailable");
+    handle.dispose();
+  });
+
   it("projects active runtime state into diagnostics without scraping the rendered UI", async () => {
     const root = document.createElement("main");
     const source = fakeActiveTabSourceFactory();
@@ -1359,6 +1372,7 @@ describe("renderSidePanel", () => {
     source.callbacks().onStateChange({ kind: "paused" });
     expect(root.querySelector("#runtime-status")?.textContent)
       .toBe("Live: paused · No active LeetCode tab");
+    expect(handle.getDiagnosticSnapshot().integration.activeTabOwned).toBe(false);
     expect(root.querySelector("#trace-viewer")).not.toBeNull();
     expect(execute).toHaveBeenCalledTimes(1);
 

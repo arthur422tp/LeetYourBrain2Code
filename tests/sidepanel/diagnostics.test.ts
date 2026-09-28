@@ -115,6 +115,17 @@ describe("diagnostic report", () => {
     });
   });
 
+  it("preserves an unavailable manifest version in the snapshot and report", () => {
+    const snapshot = collectDiagnosticSnapshot(
+      readyRuntime(),
+      { ...readyEnvironment(), manifestVersion: "unavailable" },
+      new Date("2026-09-28T03:00:00.000Z")
+    );
+
+    expect(snapshot.extension.manifestVersion).toBe("unavailable");
+    expect(formatDiagnosticReport(snapshot)).toContain("manifest: unavailable");
+  });
+
   it("projects authoritative runtime state into the safe snapshot schema", () => {
     expect(collectDiagnosticSnapshot(
       readyRuntime(),

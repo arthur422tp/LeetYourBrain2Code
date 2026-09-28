@@ -150,7 +150,9 @@ Python 不會在 Side Panel 的 main thread 中執行。Pyodide 會隨擴充功�
 visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integration_issue.yml)
 回報 LeetCode page 或 tab state 問題，或使用[功能請求表單](.github/ISSUE_TEMPLATE/feature_request.yml)
 提出範圍明確的改善建議。[商店支援草稿](docs/store/support.md)說明應提供的
-資訊。將程式碼或 testcase 貼到公開 issue 前，請先移除任何不想公開的內容。
+資訊。若要提供技術狀態，請開啟 Settings / Support → Copy diagnostic info，
+確認內容後再貼到公開 issue。將程式碼或 testcase 貼到公開 issue 前，請先移除
+任何不想公開的內容。
 
 ## 授權
 

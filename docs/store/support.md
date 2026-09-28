@@ -10,13 +10,25 @@ requests. Choose the closest issue form:
 - [Integration issue](../../.github/ISSUE_TEMPLATE/integration_issue.yml)
 - [Feature request](../../.github/ISSUE_TEMPLATE/feature_request.yml)
 
+## Copy diagnostic information
+
+For the first useful layer of technical context, open the extension's
+**Settings / Support** section, select **Copy diagnostic info**, and paste the
+report into the issue. The report is generated only after this user action and
+contains technical status only; source code, testcase values, variables,
+stdout, and trace values are excluded by default.
+
+Review the report and the rest of the issue before posting. GitHub issues are
+public, and older extension versions or a panel that cannot open may require
+the manual fallback fields below.
+
 ## What to include in a bug report
 
 Please provide:
 
 - the problem slug or URL;
-- Chrome version and operating system;
-- extension version;
+- Chrome version and operating system, if the diagnostic report is unavailable;
+- extension version, if the diagnostic report is unavailable;
 - issue category;
 - the smallest reproduction sequence, including the selected testcase when
   relevant;
@@ -46,4 +58,3 @@ Support triage can investigate extension behavior, page integration, local
 Pyodide execution, visualization evidence, and recovery states. The extension
 does not determine whether a solution is correct, reproduce every LeetCode
 judge detail, or provide a private channel through a public issue.
-

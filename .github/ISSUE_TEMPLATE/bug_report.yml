@@ -7,28 +7,25 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before attaching code or testcase content to a public issue, remove anything you do not want to share publicly.
+        If possible, open Settings / Support → Copy diagnostic info and paste the report below. It excludes source code, testcase values, variables, stdout, and trace values by default. Review all public issue content before posting.
   - type: input
     id: problem_url
     attributes:
       label: LeetCode problem slug or URL
       placeholder: "e.g. https://leetcode.com/problems/binary-search/"
-    validations:
-      required: true
+      description: Leave blank if the diagnostic report already includes the problem slug.
   - type: input
     id: chrome_version
     attributes:
       label: Chrome version
       placeholder: "e.g. Chrome 140.0.7339.80"
-    validations:
-      required: true
+      description: Optional fallback when diagnostic information is unavailable.
   - type: input
     id: extension_version
     attributes:
       label: Extension version
       placeholder: "e.g. 0.1.0"
-    validations:
-      required: true
+      description: Optional fallback when diagnostic information is unavailable.
   - type: dropdown
     id: category
     attributes:
@@ -54,6 +51,11 @@ body:
     validations:
       required: true
   - type: textarea
+    id: diagnostic_report
+    attributes:
+      label: Optional diagnostic info
+      description: Paste the report from Settings / Support → Copy diagnostic info after reviewing it for anything you do not want to share publicly.
+  - type: textarea
     id: code_testcase
     attributes:
       label: Optional code or testcase
@@ -70,4 +72,3 @@ body:
       options:
         - label: I refreshed the LeetCode page, reopened the Side Panel, and reproduced the issue again.
           required: true
-

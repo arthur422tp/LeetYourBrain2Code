@@ -172,8 +172,10 @@ Use the [bug report form](.github/ISSUE_TEMPLATE/bug_report.yml) for a
 reproducible visualizer problem, the [integration issue form](.github/ISSUE_TEMPLATE/integration_issue.yml)
 for LeetCode page or tab-state problems, and the [feature request form](.github/ISSUE_TEMPLATE/feature_request.yml)
 for scoped improvements. The [store support draft](docs/store/support.md)
-explains the fields to include. Before sharing code or testcase content in a
-public issue, remove anything you do not want to disclose publicly.
+explains the fields to include. For technical status, open Settings / Support
+→ Copy diagnostic info and review the report before pasting it into a public
+issue. Before sharing code or testcase content in a public issue, remove
+anything you do not want to disclose publicly.
 
 ## License
 

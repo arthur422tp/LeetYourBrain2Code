@@ -160,7 +160,9 @@ visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integratio
 
 ## 開發
 
-目前穩定版本：v0.1.1。
+目前 Chrome Web Store 穩定版本：v0.1.0。
+
+v0.1.1 目前是維護版本候選版，仍待完成最後的真實瀏覽器發佈驗收。
 
 v0.1.x 僅用於相容性、正確性、復原、診斷與 release maintenance 修復。
 新的除錯能力預計放在未來的 minor release。

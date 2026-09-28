@@ -183,7 +183,10 @@ This project is released under the [MIT License](LICENSE).
 
 ## Development
 
-Current stable release: v0.1.1.
+Current Chrome Web Store release: v0.1.0.
+
+v0.1.1 is the current maintenance release candidate and is pending final
+real-browser release acceptance.
 
 v0.1.x is reserved for compatibility, correctness, recovery, diagnostics, and
 release-maintenance fixes. New debugging capabilities target a future minor

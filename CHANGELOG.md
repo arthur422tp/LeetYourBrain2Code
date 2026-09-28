@@ -2,13 +2,7 @@
 
 ## [Unreleased]
 
-### Added
-
-### Changed
-
-### Fixed
-
-## [0.1.1]
+v0.1.1 remains unreleased pending final real-browser release acceptance.
 
 ### Added
 

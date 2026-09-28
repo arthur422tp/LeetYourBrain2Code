@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectDiagnosticSnapshot,
   formatDiagnosticReport,
+  getDiagnosticEnvironment,
+  type DiagnosticEnvironment,
+  type DiagnosticRuntimeView,
   type DiagnosticSnapshot,
 } from "../../src/sidepanel/diagnostics";
 
@@ -44,7 +48,179 @@ function readySnapshot(): DiagnosticSnapshot {
   };
 }
 
+function readyRuntime(overrides: Partial<DiagnosticRuntimeView> = {}): DiagnosticRuntimeView {
+  return {
+    activeContext: "leetcode",
+    problemSlug: "two-sum",
+    language: "python",
+    pageState: "ready",
+    activeTabOwned: true,
+    pageBridge: "ready",
+    editorSync: "synced",
+    testcaseState: "ready",
+    selectedCase: 2,
+    executionStatus: "completed",
+    traceEvents: 4,
+    durationMs: 23,
+    acceptedSnapshot: true,
+    visualizerKind: "list",
+    rawCursor: "3/4",
+    baseline: "none",
+    behavioralDiff: "unavailable",
+    ...overrides,
+  };
+}
+
+function readyEnvironment(): DiagnosticEnvironment {
+  return {
+    extensionVersion: "0.1.1",
+    manifestVersion: 3,
+    chrome: "153",
+    platform: "Windows",
+  };
+}
+
 describe("diagnostic report", () => {
+  it("reads only manifest version and coarse browser fields for the environment", () => {
+    expect(getDiagnosticEnvironment({
+      manifest: { version: "0.1.1", manifest_version: 3 },
+      userAgent: "Mozilla/5.0 Chrome/153.0.1.2 Safari/537.36",
+      platform: "Win32"
+    })).toEqual({
+      extensionVersion: "0.1.1",
+      manifestVersion: 3,
+      chrome: "153",
+      platform: "Windows"
+    });
+  });
+
+  it("does not misclassify Darwin as Windows", () => {
+    expect(getDiagnosticEnvironment({
+      manifest: { version: "0.1.1", manifest_version: 3 },
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/153.0.1.2 Safari/537.36",
+      platform: "Darwin"
+    }).platform).toBe("macOS");
+  });
+
+  it("uses unavailable values when runtime environment details cannot be read", () => {
+    expect(getDiagnosticEnvironment({
+      manifest: undefined,
+      userAgent: "",
+      platform: ""
+    })).toEqual({
+      extensionVersion: "unavailable",
+      manifestVersion: "unavailable",
+      chrome: "unavailable",
+      platform: "unavailable"
+    });
+  });
+
+  it("projects authoritative runtime state into the safe snapshot schema", () => {
+    expect(collectDiagnosticSnapshot(
+      readyRuntime(),
+      readyEnvironment(),
+      new Date("2026-09-28T03:00:00.000Z")
+    )).toEqual(readySnapshot());
+  });
+
+  it("preserves unavailable context without inventing page or visualizer data", () => {
+    const snapshot = collectDiagnosticSnapshot(
+      readyRuntime({
+        activeContext: "non_leetcode",
+        problemSlug: null,
+        language: null,
+        pageState: "unavailable",
+        activeTabOwned: false,
+        pageBridge: "unavailable",
+        editorSync: "unavailable",
+        testcaseState: "unavailable",
+        selectedCase: null,
+        acceptedSnapshot: false,
+        visualizerKind: null,
+        rawCursor: null,
+      }),
+      { ...readyEnvironment(), chrome: "unavailable", platform: "unavailable" },
+      new Date("2026-09-28T03:00:00.000Z")
+    );
+
+    expect(snapshot.page).toEqual({
+      activeContext: "non_leetcode",
+      problemSlug: "unavailable",
+      language: "unavailable",
+      pageState: "unavailable",
+    });
+    expect(snapshot.integration).toEqual({
+      activeTabOwned: false,
+      pageBridge: "unavailable",
+      editorSync: "unavailable",
+      testcaseState: "unavailable",
+      selectedCase: "unavailable",
+    });
+    expect(snapshot.visualization).toEqual({
+      kind: "unavailable",
+      rawCursor: "unavailable",
+      baseline: "none",
+      behavioralDiff: "unavailable",
+    });
+  });
+
+  it.each([
+    ["waiting editor", { pageState: "waiting_editor", language: "python", testcaseState: "unavailable" }],
+    ["waiting testcase", { pageState: "waiting_testcase", language: "python", testcaseState: "unavailable" }],
+    ["unsupported language", { pageState: "unsupported_language", language: "java" }],
+    ["page bridge unavailable", { pageState: "disconnected", pageBridge: "unavailable" }],
+    ["editor stale", { editorSync: "stale" }],
+    ["editor unavailable", { editorSync: "unavailable" }],
+    ["no visualizer", { visualizerKind: null, rawCursor: null }],
+  ] as const)("projects %s status", (_label, overrides) => {
+    const expected = overrides as Partial<DiagnosticRuntimeView>;
+    const snapshot = collectDiagnosticSnapshot(
+      readyRuntime(overrides),
+      readyEnvironment(),
+      new Date("2026-09-28T03:00:00.000Z")
+    );
+
+    expect(snapshot.page.pageState).toBe(expected.pageState ?? "ready");
+    if (expected.language !== undefined) {
+      expect(snapshot.page.language).toBe(expected.language);
+    }
+    if (expected.pageBridge !== undefined) {
+      expect(snapshot.integration.pageBridge).toBe(expected.pageBridge);
+    }
+    if (expected.editorSync !== undefined) {
+      expect(snapshot.integration.editorSync).toBe(expected.editorSync);
+    }
+    if (expected.visualizerKind === null) {
+      expect(snapshot.visualization.kind).toBe("unavailable");
+      expect(snapshot.visualization.rawCursor).toBe("unavailable");
+    }
+  });
+
+  it.each(["running", "completed", "exception", "timeout", "trace_limit"] as const)(
+    "projects %s execution state without exception details",
+    (executionStatus) => {
+      const snapshot = collectDiagnosticSnapshot(
+        readyRuntime({ executionStatus }),
+        readyEnvironment(),
+        new Date("2026-09-28T03:00:00.000Z")
+      );
+
+      expect(snapshot.execution.status).toBe(executionStatus);
+      expect(formatDiagnosticReport(snapshot)).not.toContain("exception.message");
+    }
+  );
+
+  it.each(["none", "compatible", "incompatible"] as const)(
+    "projects %s baseline state",
+    (baseline) => {
+      expect(collectDiagnosticSnapshot(
+        readyRuntime({ baseline }),
+        readyEnvironment(),
+        new Date("2026-09-28T03:00:00.000Z")
+      ).visualization.baseline).toBe(baseline);
+    }
+  );
+
   it("formats a ready snapshot with a deterministic safe field order", () => {
     expect(formatDiagnosticReport(readySnapshot())).toBe(
       [

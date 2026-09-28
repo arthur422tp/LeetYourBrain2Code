@@ -1,6 +1,7 @@
 import type { ExecutionRequest } from "../shared/execution-types";
 import type { TraceEvent, TraceSession } from "../shared/trace-types";
 import { sameEditorSource } from "../shared/editor-trace";
+import type { EditorTraceStatus } from "../shared/editor-trace";
 import { createEditorTraceSync, type EditorTraceTransport } from "./editor-trace-sync";
 import {
   toRunnableSnapshot,
@@ -46,6 +47,13 @@ import {
   createRecoveryNotice,
   type RecoveryNoticeState
 } from "./components/RecoveryNotice";
+import {
+  collectDiagnosticSnapshot,
+  getDiagnosticEnvironment,
+  type DiagnosticEnvironment,
+  type DiagnosticRuntimeView,
+  type DiagnosticSnapshot
+} from "./diagnostics";
 import "./styles.css";
 
 export interface SidePanelController {
@@ -62,10 +70,12 @@ export interface SidePanelDependencies {
   activeTabSourceFactory?: ActiveTabSourceFactory;
   liveDebounceMs?: number;
   editorTraceTransport?: EditorTraceTransport;
+  diagnosticEnvironment?: DiagnosticEnvironment;
 }
 
 export interface SidePanelHandle {
   dispose(): void;
+  getDiagnosticSnapshot(): DiagnosticSnapshot;
 }
 
 type SourceReadiness =
@@ -151,6 +161,17 @@ function recoveryStateForSession(session: TraceSession): RecoveryNoticeState | n
   if (session.status === "timeout") return "timeout";
   if (session.status === "trace_limit") return "trace_limit";
   return null;
+}
+
+function diagnosticPageState(state: LeetCodePageState | null): string {
+  if (state === null) return "unavailable";
+  switch (sourceReadiness(state)) {
+    case "waiting_for_editor": return "waiting_editor";
+    case "waiting_for_language": return "waiting_language";
+    case "waiting_for_testcase": return "waiting_testcase";
+    case "unsupported_language": return "unsupported_language";
+    case "candidate": return "ready";
+  }
 }
 
 export function renderSidePanel(
@@ -248,7 +269,16 @@ export function renderSidePanel(
   let activeVisualizer: TraceVisualizerHandle | null = null;
   let editorEvent: TraceEvent | undefined;
   let followEditor = true;
-  const editorSync = createEditorTraceSync(status => activeVisualizer?.setEditorSyncStatus(status), dependencies.editorTraceTransport);
+  let editorSyncStatus: EditorTraceStatus = "unavailable";
+  let pageBridgeStatus = "unavailable";
+  let latestAcceptedSession: TraceSession | null = null;
+  let visualizerKind: string | null = null;
+  let rawCursor: string | null = null;
+  const updateEditorSyncStatus = (nextStatus: EditorTraceStatus): void => {
+    editorSyncStatus = nextStatus;
+    activeVisualizer?.setEditorSyncStatus(nextStatus);
+  };
+  const editorSync = createEditorTraceSync(updateEditorSyncStatus, dependencies.editorTraceTransport);
   const comparisonState = createRunComparisonState();
   let baselinePrepared: PreparedCrossRun | null = null;
   let currentPrepared: PreparedCrossRun | null = null;
@@ -275,6 +305,7 @@ export function renderSidePanel(
     sourceCode: string;
     rawTestcase: string;
   } | null = null;
+  const diagnosticEnvironment = dependencies.diagnosticEnvironment ?? getDiagnosticEnvironment();
 
   const updateActiveComparison = (): void => {
     activeVisualizer?.setBehavioralDiff(currentComparison);
@@ -395,9 +426,13 @@ export function renderSidePanel(
 
   const clearVisualization = (): void => {
     editorSync.update(null, null);
+    updateEditorSyncStatus("unavailable");
     editorEvent = undefined;
     activeVisualizer?.dispose();
     activeVisualizer = null;
+    latestAcceptedSession = null;
+    visualizerKind = null;
+    rawCursor = null;
     behavioralDiffPanelOpen = false;
     renderedPageIdentity = null;
     clearRecoveryNotice();
@@ -494,13 +529,13 @@ export function renderSidePanel(
       && sameEditorSource(currentPageState.code, renderedPageIdentity.sourceCode);
     if (tabId === null || !sourceMatches) {
       editorSync.update(null, null);
-      activeVisualizer?.setEditorSyncStatus(tabId !== null && renderedPageIdentity !== null ? "stale" : "unavailable");
+      updateEditorSyncStatus(tabId !== null && renderedPageIdentity !== null ? "stale" : "unavailable");
       return;
     }
     const line = editorEvent?.line;
     if (!line || line < 1 || line > renderedPageIdentity!.sourceCode.split("\n").length) {
       editorSync.update(tabId, null);
-      activeVisualizer?.setEditorSyncStatus("cleared");
+      updateEditorSyncStatus("cleared");
       return;
     }
     editorSync.update(tabId, {
@@ -543,6 +578,9 @@ export function renderSidePanel(
     },
     onSession: (session, accepted: AcceptedLiveSession) => {
       sessionReportedForLatestRun = true;
+      latestAcceptedSession = session;
+      visualizerKind = null;
+      rawCursor = null;
       const sessionRecovery = recoveryStateForSession(session);
       clearRecoveryNotice();
       if (!collapsedInitialMirrors) {
@@ -571,10 +609,28 @@ export function renderSidePanel(
         comparison: currentComparison,
         followEditor,
         ...(hasActiveTabSource ? {
-          onStepChange: (event: TraceEvent | undefined) => { editorEvent = event; syncEditor(); },
+          onStepChange: (event: TraceEvent | undefined) => {
+            editorEvent = event;
+            const eventIndex = event === undefined
+              ? -1
+              : session.events.findIndex(candidate => candidate.step === event.step);
+            rawCursor = eventIndex >= 0 ? `${eventIndex}/${session.events.length}` : null;
+            visualizerKind = eventIndex >= 0
+              ? interpretation.visualStates[eventIndex]?.visuals[0]?.kind ?? null
+              : null;
+            syncEditor();
+          },
           onFollowEditorChange: (follow: boolean) => { followEditor = follow; syncEditor(); }
         } : {})
       });
+      if (!hasActiveTabSource) {
+        const firstEvent = session.events[0];
+        const firstIndex = firstEvent === undefined ? -1 : 0;
+        rawCursor = firstIndex >= 0 ? `${firstIndex}/${session.events.length}` : null;
+        visualizerKind = firstIndex >= 0
+          ? interpretation.visualStates[firstIndex]?.visuals[0]?.kind ?? null
+          : null;
+      }
       if (hasActiveTabSource) syncEditor();
       result.replaceChildren(activeVisualizer.element);
       const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
@@ -667,10 +723,12 @@ export function renderSidePanel(
   const activeTabSource = activeTabSourceFactory?.({
     onOwnershipInvalidated: () => {
       if (disposed) return;
+      pageBridgeStatus = "unavailable";
       ownershipGeneration += 1;
       clearRecoveryNotice();
       currentPageState = null;
       ownershipState = null;
+      updateEditorSyncStatus("unavailable");
       syncEditor();
       currentComparison = null;
       updateActiveComparison();
@@ -682,6 +740,7 @@ export function renderSidePanel(
       if (disposed) return;
       ownershipGeneration += 1;
       ownershipState = state;
+      pageBridgeStatus = state.kind === "leetcode" ? "waiting" : "unavailable";
       syncEditor();
       if (state.kind === "paused") {
         currentPageState = null;
@@ -694,15 +753,74 @@ export function renderSidePanel(
       renderLiveStatus();
     },
     onPageState: ({ state: acceptedState }) => {
+      pageBridgeStatus = "ready";
       applyPageState(acceptedState);
     },
     onError: (error) => {
       if (disposed) return;
+      pageBridgeStatus = "unavailable";
       status.removeAttribute("data-live-status");
       status.textContent = `Live: ${errorText(error)}`;
       showRecoveryNotice("connection");
     }
   });
+
+  const diagnosticExecutionStatus = (): string => {
+    if (schedulerStatus === "updating") return "running";
+    if (schedulerStatus === "timeout") return "timeout";
+    if (schedulerStatus === "runtime_error") {
+      return latestAcceptedSession?.status ?? "worker_error";
+    }
+    if (latestAcceptedSession !== null) return latestAcceptedSession.status;
+    return "idle";
+  };
+
+  const diagnosticBaseline = (): string => {
+    const comparison = comparisonState.get();
+    if (comparison.baseline === null) return "none";
+    if (comparison.current === null) return "unavailable";
+    const compatibility = compareRunCompatibility(comparison.baseline, comparison.current);
+    return compatibility.status === "compatible" || compatibility.status === "same_run"
+      ? "compatible"
+      : "incompatible";
+  };
+
+  const getDiagnosticSnapshot = (): DiagnosticSnapshot => {
+    const activeContext: DiagnosticRuntimeView["activeContext"] = !hasActiveTabSource
+      ? "unavailable"
+      : ownershipState?.kind === "leetcode"
+        ? "leetcode"
+        : ownershipState?.kind === "paused"
+          ? "non_leetcode"
+          : "unavailable";
+    const testcaseReady = currentPageState?.testcase !== null && currentPageState?.testcase !== undefined;
+
+    return collectDiagnosticSnapshot(
+      {
+        activeContext,
+        problemSlug: currentPageState?.metadata.slug ?? null,
+        language: currentPageState?.language ?? null,
+        pageState: diagnosticPageState(currentPageState),
+        activeTabOwned: !hasActiveTabSource
+          ? "unavailable"
+          : ownershipState?.kind === "leetcode",
+        pageBridge: pageBridgeStatus,
+        editorSync: editorSyncStatus,
+        testcaseState: testcaseReady ? "ready" : "unavailable",
+        selectedCase: testcaseReady ? selectedCaseIndex + 1 : null,
+        executionStatus: diagnosticExecutionStatus(),
+        traceEvents: latestAcceptedSession?.events.length ?? null,
+        durationMs: null,
+        acceptedSnapshot: latestAcceptedSession !== null,
+        visualizerKind,
+        rawCursor,
+        baseline: diagnosticBaseline(),
+        behavioralDiff: currentComparison === null ? "unavailable" : "available"
+      },
+      diagnosticEnvironment,
+      new Date()
+    );
+  };
 
   const settings = document.createElement("details");
   settings.className = "app-settings";
@@ -722,6 +840,7 @@ export function renderSidePanel(
     renderLiveStatus();
     void activeTabSource.start().catch((error: unknown) => {
       if (!disposed) {
+        pageBridgeStatus = "unavailable";
         status.textContent = `Live: ${errorText(error)}`;
         showRecoveryNotice("connection");
       }
@@ -764,6 +883,7 @@ export function renderSidePanel(
   });
 
   return {
+    getDiagnosticSnapshot,
     dispose(): void {
       if (disposed) return;
       disposed = true;

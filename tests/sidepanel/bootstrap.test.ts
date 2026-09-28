@@ -13,6 +13,7 @@ import type {
   ActiveTabSourceOptions,
   ActiveTabPageState
 } from "../../src/sidepanel/active-tab-source";
+import type { DiagnosticEnvironment } from "../../src/sidepanel/diagnostics";
 
 function pageState(overrides: Partial<LeetCodePageState> = {}): LeetCodePageState {
   return {
@@ -129,6 +130,62 @@ describe("renderSidePanel", () => {
 
     expect(root.textContent).toContain("Visualizer");
     expect(root.textContent).toContain("Live: not started");
+  });
+
+  it("projects active runtime state into diagnostics without scraping the rendered UI", async () => {
+    const root = document.createElement("main");
+    const source = fakeActiveTabSourceFactory();
+    const execute = vi.fn(async (request: ExecutionRequest) => completedSession(request));
+    const environment: DiagnosticEnvironment = {
+      extensionVersion: "0.1.1",
+      manifestVersion: 3,
+      chrome: "153",
+      platform: "Windows"
+    };
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      activeTabSourceFactory: source.factory,
+      diagnosticEnvironment: environment,
+      liveDebounceMs: 0
+    });
+
+    source.callbacks().onStateChange({ kind: "leetcode", tabId: 11 });
+    source.callbacks().onPageState({
+      tabId: 11,
+      state: pageState({ metadata: { slug: "two-sum", title: "Two Sum" } })
+    });
+
+    expect(handle.getDiagnosticSnapshot()).toMatchObject({
+      extension: {
+        version: environment.extensionVersion,
+        manifestVersion: environment.manifestVersion
+      },
+      page: {
+        activeContext: "leetcode",
+        problemSlug: "two-sum",
+        language: "python",
+        pageState: "ready"
+      },
+      integration: {
+        activeTabOwned: true,
+        pageBridge: "ready",
+        testcaseState: "ready",
+        selectedCase: 1
+      },
+      execution: {
+        status: "running",
+        acceptedSnapshot: false
+      }
+    });
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(handle.getDiagnosticSnapshot().execution).toMatchObject({
+      status: "completed",
+      traceEvents: 0,
+      acceptedSnapshot: true
+    }));
+
+    handle.dispose();
   });
 
   it("shows actionable onboarding when there is no active LeetCode tab", () => {

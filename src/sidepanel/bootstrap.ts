@@ -775,7 +775,9 @@ export function renderSidePanel(
     if (schedulerStatus === "updating") return "running";
     if (schedulerStatus === "timeout") return "timeout";
     if (schedulerStatus === "runtime_error") {
-      return latestAcceptedSession?.status ?? "worker_error";
+      return sessionReportedForLatestRun && latestAcceptedSession !== null
+        ? latestAcceptedSession.status
+        : "worker_error";
     }
     if (latestAcceptedSession !== null) return latestAcceptedSession.status;
     return "idle";

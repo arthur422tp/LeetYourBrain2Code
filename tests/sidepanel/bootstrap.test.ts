@@ -188,6 +188,26 @@ describe("renderSidePanel", () => {
     handle.dispose();
   });
 
+  it("does not report a stale completed session after a later worker failure", async () => {
+    const root = document.createElement("main");
+    const execute = vi.fn()
+      .mockImplementationOnce(async (request: ExecutionRequest) => completedSession(request))
+      .mockRejectedValueOnce(new Error("SECRET_WORKER_FAILURE"));
+    const handle = renderSidePanel(root, {
+      controller: { execute },
+      liveDebounceMs: 1_000
+    });
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(handle.getDiagnosticSnapshot().execution.status).toBe("completed"));
+
+    root.querySelector<HTMLButtonElement>("#run")?.click();
+    await vi.waitFor(() => expect(handle.getDiagnosticSnapshot().execution.status).toBe("worker_error"));
+
+    handle.dispose();
+  });
+
   it("mounts support diagnostics in Settings without resetting the active visualizer", async () => {
     const root = document.createElement("main");
     const copyText = vi.fn().mockResolvedValue(undefined);

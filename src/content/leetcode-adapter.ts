@@ -156,6 +156,8 @@ const NON_VALUE_INPUT_TYPES = new Set([
   "radio"
 ]);
 
+const MAX_TESTCASE_LABEL_ANCESTOR_DEPTH = 10;
+
 function isUsableTestcaseControl(doc: Document, element: HTMLElement): boolean {
   if (isCodeEditorElement(doc, element)) return false;
 
@@ -201,7 +203,7 @@ function testcaseRegions(doc: Document): HTMLElement[] {
   for (const label of plainLabels) {
     let ancestor = label.parentElement;
     let depth = 0;
-    while (ancestor && depth < 6) {
+    while (ancestor && depth < MAX_TESTCASE_LABEL_ANCESTOR_DEPTH) {
       const controls = Array.from(
         ancestor.querySelectorAll<HTMLElement>(LEETCODE_ACCESSORS.testcaseControls)
       ).filter((element) => isUsableTestcaseControl(doc, element));

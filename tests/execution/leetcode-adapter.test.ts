@@ -157,6 +157,32 @@ describe("LeetCode adapter", () => {
     expect(extractPageState(document, window).testcase).toBe("[1,null,2,3]");
   });
 
+  it("finds testcase controls when the LeetCode tab label is deeply nested", () => {
+    document.body.innerHTML = `
+      <button>Python3</button>
+      <textarea aria-label="Code editor">class Solution:\n    pass</textarea>
+      <div class="level-8">
+        <div class="level-7">
+          <div class="level-6">
+            <div class="level-5">
+              <div class="level-4">
+                <div class="level-3">
+                  <div class="level-2">
+                    <div class="level-1"><div>Testcase</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div contenteditable="true" class="sentry-testcase">[2,7,11,15]</div>
+        <div contenteditable="true" class="sentry-testcase">9</div>
+      </div>
+    `;
+
+    expect(extractPageState(document, window).testcase).toBe("[2,7,11,15]\n9");
+  });
+
   it("publishes code changes while testcase is still unavailable", async () => {
     installTwoSumEditorWithoutTestcase();
     const updates: LeetCodePageState[] = [];

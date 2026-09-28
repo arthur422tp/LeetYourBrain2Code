@@ -158,9 +158,10 @@ visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integratio
 
 ## 開發
 
-目前狀態：正在準備 v0.1.0 release candidate。
+目前穩定版本：v0.1.0。
 
-Release freeze：v0.1.0 前不新增主要視覺化／除錯能力；只允許修復 release blocker、正確性問題、整合問題與 release hardening。
+v0.1.x 僅用於相容性、正確性、復原、診斷與 release maintenance 修復。
+新的除錯能力預計放在未來的 minor release。
 
 需要 Node.js 與 npm。
 
@@ -193,3 +194,5 @@ Build 完成後，前往 `chrome://extensions`，以「載入未封裝項目」�
 - [Behavioral Trace Navigation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-trace-navigation-implementation-plan.md)
 - [Behavioral Trace Folding Design Spec](docs/superpowers/specs/2026-09-09-behavioral-trace-folding-design.md)
 - [Behavioral Trace Folding Implementation Plan](docs/superpowers/plans/2026-09-09-behavioral-trace-folding-implementation-plan.md)
+- [Post-Release Maintenance Design Spec](docs/superpowers/specs/2026-09-28-post-release-maintenance-design.md)
+- [Post-Release Maintenance Implementation Plan](docs/superpowers/plans/2026-09-28-post-release-maintenance-implementation-plan.md)

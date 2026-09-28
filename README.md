@@ -181,10 +181,11 @@ This project is released under the [MIT License](LICENSE).
 
 ## Development
 
-Current status: preparing v0.1.0 release candidate.
+Current stable release: v0.1.0.
 
-Release freeze: no new major visualization/debugging capability before v0.1.0.
-Only release blockers, correctness fixes, integration fixes, and release hardening are allowed.
+v0.1.x is reserved for compatibility, correctness, recovery, diagnostics, and
+release-maintenance fixes. New debugging capabilities target a future minor
+release.
 
 Requirements: Node.js and npm.
 
@@ -217,3 +218,5 @@ After building, load `dist/` as an unpacked extension from `chrome://extensions`
 - [Behavioral Trace Navigation Implementation Plan](docs/superpowers/plans/2026-09-08-behavioral-trace-navigation-implementation-plan.md)
 - [Behavioral Trace Folding Design Spec](docs/superpowers/specs/2026-09-09-behavioral-trace-folding-design.md)
 - [Behavioral Trace Folding Implementation Plan](docs/superpowers/plans/2026-09-09-behavioral-trace-folding-implementation-plan.md)
+- [Post-Release Maintenance Design Spec](docs/superpowers/specs/2026-09-28-post-release-maintenance-design.md)
+- [Post-Release Maintenance Implementation Plan](docs/superpowers/plans/2026-09-28-post-release-maintenance-implementation-plan.md)

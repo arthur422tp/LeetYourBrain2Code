@@ -157,6 +157,94 @@ describe("LeetCode compatibility: page state", () => {
     }
   });
 
+  it("prefers the source model attached to a visible Monaco editor", () => {
+    installTwoSumPage();
+    const staleSource = "class Solution:\n    # stale hidden source\n    pass";
+    const visibleSource = "class Solution:\n    # current visible source\n    return [0, 1]";
+    const staleModel = { getLanguageId: () => "python", getValue: () => staleSource };
+    const visibleModel = { getLanguageId: () => "python", getValue: () => visibleSource };
+    const hiddenNode = document.createElement("div");
+    hiddenNode.hidden = true;
+    document.body.append(hiddenNode);
+    Object.defineProperty(hiddenNode, "getClientRects", {
+      configurable: true,
+      value: () => [{ width: 800, height: 600 }]
+    });
+    const visibleNode = document.createElement("div");
+    document.body.append(visibleNode);
+    Object.defineProperty(visibleNode, "getClientRects", {
+      configurable: true,
+      value: () => [{ width: 800, height: 600 }]
+    });
+
+    Object.defineProperty(window, "monaco", {
+      configurable: true,
+      value: {
+        editor: {
+          getModels: () => [staleModel, visibleModel],
+          getEditors: () => [
+            { getModel: () => staleModel, getDomNode: () => hiddenNode },
+            { getModel: () => visibleModel, getDomNode: () => visibleNode }
+          ]
+        }
+      }
+    });
+
+    try {
+      expect(extractPageState(document, window)).toMatchObject({
+        code: visibleSource,
+        language: "python"
+      });
+    } finally {
+      delete (window as Window & { monaco?: unknown }).monaco;
+    }
+  });
+
+  it("rejects hidden and disconnected Monaco editors before using the DOM source", () => {
+    installTwoSumPage();
+    const hiddenSource = "class Solution:\n    # hidden source\n    pass";
+    const disconnectedSource = "class Solution:\n    # disconnected source\n    pass";
+    const hiddenModel = { getLanguageId: () => "python", getValue: () => hiddenSource };
+    const disconnectedModel = {
+      getLanguageId: () => "python",
+      getValue: () => disconnectedSource
+    };
+    const hiddenNode = document.createElement("div");
+    hiddenNode.hidden = true;
+    document.body.append(hiddenNode);
+    Object.defineProperty(hiddenNode, "getClientRects", {
+      configurable: true,
+      value: () => [{ width: 800, height: 600 }]
+    });
+    const disconnectedNode = document.createElement("div");
+    Object.defineProperty(disconnectedNode, "getClientRects", {
+      configurable: true,
+      value: () => [{ width: 800, height: 600 }]
+    });
+
+    Object.defineProperty(window, "monaco", {
+      configurable: true,
+      value: {
+        editor: {
+          getModels: () => [hiddenModel, disconnectedModel],
+          getEditors: () => [
+            { getModel: () => hiddenModel, getDomNode: () => hiddenNode },
+            { getModel: () => disconnectedModel, getDomNode: () => disconnectedNode }
+          ]
+        }
+      }
+    });
+
+    try {
+      expect(extractPageState(document, window)).toMatchObject({
+        code: "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]",
+        language: "python"
+      });
+    } finally {
+      delete (window as Window & { monaco?: unknown }).monaco;
+    }
+  });
+
   it("publishes source changes and suppresses duplicate logical page-state updates", async () => {
     installTwoSumPage();
     const updates: LeetCodePageState[] = [];

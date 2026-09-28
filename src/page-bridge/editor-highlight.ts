@@ -11,7 +11,7 @@ interface Decoration {
   range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number };
   options: { isWholeLine: boolean; className: string; linesDecorationsClassName: string };
 }
-interface MonacoEditorLike {
+export interface MonacoEditorLike {
   getModel(): MonacoModelLike | null;
   getDomNode(): HTMLElement | null;
   deltaDecorations(oldIds: string[], decorations: Decoration[]): string[];
@@ -28,7 +28,7 @@ export type MonacoTraceWindow = Window & {
 
 const HIGHLIGHT_LEASE_MS = 6_000;
 
-function isVisibleEditor(node: HTMLElement | null): boolean {
+export function isVisibleEditor(node: HTMLElement | null): boolean {
   if (!node?.isConnected || node.closest("[hidden]")) return false;
   if (!Array.from(node.getClientRects()).some(rect => rect.width > 0 && rect.height > 0)) return false;
   for (let ancestor: HTMLElement | null = node; ancestor; ancestor = ancestor.parentElement) {

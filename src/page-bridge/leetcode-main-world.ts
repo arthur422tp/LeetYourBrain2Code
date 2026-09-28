@@ -8,7 +8,12 @@ import {
   validatePageState
 } from "../content/leetcode-adapter";
 import type { LeetCodePageState } from "../content/leetcode-adapter";
-import { createEditorHighlighter, type MonacoTraceWindow } from "./editor-highlight";
+import {
+  createEditorHighlighter,
+  isVisibleEditor,
+  type MonacoModelLike,
+  type MonacoTraceWindow
+} from "./editor-highlight";
 import { isEditorTraceLocation } from "../shared/editor-trace";
 
 export type LeetCodePageWindow = MonacoTraceWindow;
@@ -36,11 +41,19 @@ function readCodeFromMonaco(
   pageWindow: LeetCodePageWindow,
   selectedLanguage: string | null
 ): { code: string; language: string } | null {
-  const models = pageWindow.monaco?.editor?.getModels?.() ?? [];
-  const candidate =
+  const editorApi = pageWindow.monaco?.editor;
+  const selectModel = (models: MonacoModelLike[]): MonacoModelLike | undefined =>
     models.find((model) => normalizeLanguage(model.getLanguageId()) === selectedLanguage) ??
     models.find((model) => normalizeLanguage(model.getLanguageId()) === "python") ??
     models[0];
+  const editors = editorApi?.getEditors;
+  const models = typeof editors === "function"
+    ? editors()
+      .filter((editor) => isVisibleEditor(editor.getDomNode()))
+      .map((editor) => editor.getModel())
+      .filter((model): model is MonacoModelLike => model !== null)
+    : editorApi?.getModels?.() ?? [];
+  const candidate = selectModel(models);
 
   if (!candidate) {
     return null;

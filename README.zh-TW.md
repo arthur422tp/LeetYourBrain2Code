@@ -163,10 +163,17 @@ visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integratio
 
 目前 Chrome Web Store 穩定版本：v0.1.0。
 
-v0.1.1 目前是維護版本候選版，仍待完成最後的真實瀏覽器發佈驗收。
+Release line 已正式分開：
 
-v0.1.x 僅用於相容性、正確性、復原、診斷與 release maintenance 修復。
-新的除錯能力預計放在未來的 minor release。
+- `release/v0.1.x` 是 production maintenance line，只接受相容性、正確性、
+  復原、診斷與 release hardening 修復。v0.1.1 在確認 Store 發佈前仍維持
+  candidate 狀態。
+- `main` 是 v0.2.0 development line。first-divergence Case-to-Case
+  Behavioral Diff slice 已完成；ordered multi-divergence navigation 延後至
+  v0.2.x。
+
+在 release gates 與版本化 release evidence 完成前，不要從 `main` 發佈
+v0.2.0 artifact。
 
 需要 Node.js 與 npm。
 

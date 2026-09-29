@@ -2,27 +2,18 @@
 
 ## [Unreleased]
 
-v0.1.1 remains unreleased pending final real-browser release acceptance.
+The v0.2.0 development line is maintained on `main`. The v0.1.x production
+maintenance line is maintained separately on `release/v0.1.x`; its v0.1.1
+release notes remain on that line until Store publication is confirmed.
 
 ### Added
 
-- Privacy-safe, user-triggered support diagnostics with copyable status output.
-- An explicit LeetCode compatibility regression gate for page state, tab
-  ownership, and editor replay contracts.
-- A reproducible release artifact workflow with versioned ZIP and SHA-256
-  checksum output.
+- Case-to-Case Behavioral Diff for comparing two testcase executions under the
+  same source revision and inspecting their first observed behavioral
+  divergence.
 
-### Changed
-
-- Repository support, issue triage, smoke evidence, and release lifecycle now
-  reflect public post-release maintenance.
-- Release packaging now exposes the project-named versioned artifact and keeps
-  development, diagnostic, and secret-like files outside the extension ZIP.
-
-### Fixed
-
-- Corrected coarse macOS/Windows platform classification in diagnostic
-  environment reporting.
+The v0.1.1 maintenance entries are retained on `release/v0.1.x` so the two
+release lines do not share an unreleased feature history.
 
 ## [0.1.0]
 

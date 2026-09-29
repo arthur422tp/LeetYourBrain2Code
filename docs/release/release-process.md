@@ -35,6 +35,17 @@ The checksum file is outside the extension ZIP. Do not edit, rezip, or rebuild
 the downloaded artifact after checksum verification; if the artifact changes,
 rerun the workflow from the intended exact ref.
 
+## Release lines
+
+- `release/v0.1.x` is the production maintenance line. It accepts only
+  compatibility, correctness, recovery, diagnostics, accessibility, and
+  release-hardening fixes; patch fixes must not add new debugging semantics.
+- `main` is the v0.2.0 development line. New comparison modes, visualization
+  behavior, and other user-facing debugging capabilities start here.
+- A fix made on `release/v0.1.x` must be reviewed separately and then
+  forward-ported to `main` when it is still relevant. Do not merge v0.2
+  feature work back into the maintenance line.
+
 ## Gate order
 
 ```text

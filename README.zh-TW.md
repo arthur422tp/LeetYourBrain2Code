@@ -161,13 +161,13 @@ visualizer 問題，使用[整合問題表單](.github/ISSUE_TEMPLATE/integratio
 
 ## 開發
 
-目前 Chrome Web Store 穩定版本：v0.1.0。
+目前 Chrome Web Store 穩定版本：v0.1.1。
 
 Release line 已正式分開：
 
 - `release/v0.1.x` 是 production maintenance line，只接受相容性、正確性、
-  復原、診斷與 release hardening 修復。v0.1.1 在確認 Store 發佈前仍維持
-  candidate 狀態。
+  復原、診斷與 release hardening 修復。v0.1.1 已是目前已發布的 maintenance
+  release。
 - `main` 是 v0.2.0 development line。first-divergence Case-to-Case
   Behavioral Diff slice 已完成；ordered multi-divergence navigation 延後至
   v0.2.x。

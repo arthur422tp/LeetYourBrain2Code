@@ -3,8 +3,9 @@
 ## [Unreleased]
 
 The v0.2.0 development line is maintained on `main`. The v0.1.x production
-maintenance line is maintained separately on `release/v0.1.x`; its v0.1.1
-release notes remain on that line until Store publication is confirmed.
+maintenance line is maintained separately on `release/v0.1.x`. The v0.1.1
+maintenance release was published from `b2e2219` as the
+[v0.1.1 GitHub Release](https://github.com/arthur422tp/LeetYourBrain2Code/releases/tag/v0.1.1).
 
 ### Added
 
@@ -12,8 +13,8 @@ release notes remain on that line until Store publication is confirmed.
   same source revision and inspecting their first observed behavioral
   divergence.
 
-The v0.1.1 maintenance entries are retained on `release/v0.1.x` so the two
-release lines do not share an unreleased feature history.
+The v0.1.1 maintenance entries are retained on `release/v0.1.x`; new debugging
+capabilities remain on the v0.2.0 development line.
 
 ## [0.1.0]
 

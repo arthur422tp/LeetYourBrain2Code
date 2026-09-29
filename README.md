@@ -184,13 +184,13 @@ This project is released under the [MIT License](LICENSE).
 
 ## Development
 
-Current Chrome Web Store release: v0.1.0.
+Current Chrome Web Store release: v0.1.1.
 
 Release lines are intentionally separated:
 
 - `release/v0.1.x` is the production maintenance line for compatibility,
   correctness, recovery, diagnostics, and release-hardening fixes. v0.1.1
-  remains a candidate until its Store publication is confirmed.
+  is the current published maintenance release.
 - `main` is the v0.2.0 development line. The first-divergence Case-to-Case
   Behavioral Diff slice is implemented; ordered multi-divergence navigation
   remains deferred to v0.2.x.

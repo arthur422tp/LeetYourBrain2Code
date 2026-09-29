@@ -186,12 +186,17 @@ This project is released under the [MIT License](LICENSE).
 
 Current Chrome Web Store release: v0.1.0.
 
-v0.1.1 is the current maintenance release candidate and is pending final
-real-browser release acceptance.
+Release lines are intentionally separated:
 
-v0.1.x is reserved for compatibility, correctness, recovery, diagnostics, and
-release-maintenance fixes. New debugging capabilities target a future minor
-release.
+- `release/v0.1.x` is the production maintenance line for compatibility,
+  correctness, recovery, diagnostics, and release-hardening fixes. v0.1.1
+  remains a candidate until its Store publication is confirmed.
+- `main` is the v0.2.0 development line. The first-divergence Case-to-Case
+  Behavioral Diff slice is implemented; ordered multi-divergence navigation
+  remains deferred to v0.2.x.
+
+Do not publish a v0.2.0 artifact from `main` until its release gates and
+versioned release evidence are complete.
 
 Requirements: Node.js and npm.
 

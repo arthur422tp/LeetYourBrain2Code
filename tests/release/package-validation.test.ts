@@ -31,9 +31,13 @@ function temporaryDirectory(): string {
 
 describe("release package validation", () => {
   it("keeps the source manifest aligned with the package identity", () => {
-    const result = releaseCheck.validateSourceManifest(resolve(process.cwd()));
+    const projectRoot = resolve(process.cwd());
+    const result = releaseCheck.validateSourceManifest(projectRoot);
+    const packageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8")) as {
+      version: string;
+    };
 
-    expect(result.version).toBe("0.1.1");
+    expect(result.version).toBe(packageJson.version);
     expect(releaseCheck.REQUIRED_DIST_FILES).toEqual(
       expect.arrayContaining([
         "manifest.json",

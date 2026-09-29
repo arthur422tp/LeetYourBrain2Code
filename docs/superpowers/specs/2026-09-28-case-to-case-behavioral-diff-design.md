@@ -3,7 +3,7 @@
 ## Design Spec v0.1
 
 Date: 2026-09-28  
-Status: Proposed  
+Status: Implemented first-divergence slice; multi-divergence deferred to v0.2.x
 Target release: LeetYourBrain2Code v0.2.0
 
 Primary goal: compare two executions of the same source code on two different LeetCode testcase Cases and surface the earliest safely aligned behavioral divergence without inferring correctness, intent, root cause, or a fix.
@@ -878,6 +878,31 @@ Evidence disclaimer:
 
 # 32. Implementation Status
 
-Proposed.
+The v0.2.0 first-divergence slice is implemented.
 
-Implementation should follow in a separate implementation plan after this design is reviewed.
+Implemented:
+
+- explicit `case_to_case` comparison mode with same-problem, same-source, and
+  different-Case compatibility rules;
+- immutable A/B Case selection independent from the pinned-baseline state;
+- captured-run comparison through the existing cross-run alignment and
+  divergence engine;
+- factual first-observed-divergence presentation across decision, mutation,
+  call, control-flow, expression, and termination categories;
+- conservative incompatible, partial, ambiguous-boundary, and no-observed-
+  divergence states;
+- captured A/B inspection with exact trace-anchor navigation and source-safe
+  Monaco replay;
+- automated scenario, integration, compatibility, type, build, and package
+  validation.
+
+Deferred to v0.2.x:
+
+- ordered multi-divergence collection;
+- Previous / Next difference navigation and difference-count state;
+- multi-divergence filters and the expanded evidence UI.
+
+The real-browser Task 15 acceptance remains a release gate and must be
+recorded separately from the automated implementation evidence. The
+implementation does not claim that a divergence is a bug, the wrong path, a
+root cause, or a fix.

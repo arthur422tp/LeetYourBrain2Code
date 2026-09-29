@@ -15,6 +15,10 @@ export interface RunRecord {
   context: RunContext;
 }
 
+export type RunComparisonMode =
+  | "same_testcase_baseline"
+  | "case_to_case";
+
 export function runRecordFromAcceptedSession(
   session: TraceSession,
   accepted: AcceptedLiveSession
@@ -38,6 +42,8 @@ export type ComparisonCompatibility =
   | { status: "missing_problem" }
   | { status: "different_problem" }
   | { status: "different_testcase" }
+  | { status: "same_case" }
+  | { status: "different_source" }
   | { status: "different_entrypoint" }
   | { status: "unsupported_schema" }
   | { status: "unsupported_runtime" };
@@ -66,7 +72,8 @@ function supportedRuntime(session: TraceSession): boolean {
 
 export function compareRunCompatibility(
   baseline: RunRecord | null,
-  current: RunRecord | null
+  current: RunRecord | null,
+  mode: RunComparisonMode = "same_testcase_baseline"
 ): ComparisonCompatibility {
   if (baseline === null) return { status: "no_baseline" };
   if (current === null) return { status: "no_current" };
@@ -82,6 +89,18 @@ export function compareRunCompatibility(
   }
   if (baseline.context.problemSlug !== current.context.problemSlug) {
     return { status: "different_problem" };
+  }
+  if (mode === "case_to_case") {
+    if (baseline.session.sourceCode !== current.session.sourceCode) {
+      return { status: "different_source" };
+    }
+    if (!entrypointsCompatible(baseline.session.entrypoint, current.session.entrypoint)) {
+      return { status: "different_entrypoint" };
+    }
+    if (baseline.context.selectedCaseIndex === current.context.selectedCaseIndex) {
+      return { status: "same_case" };
+    }
+    return { status: "compatible" };
   }
   if (normalizeExecutedTestcase(baseline.session.rawTestcase) !== normalizeExecutedTestcase(current.session.rawTestcase)) {
     return { status: "different_testcase" };

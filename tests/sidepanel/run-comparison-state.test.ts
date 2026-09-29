@@ -115,6 +115,56 @@ describe("run comparison compatibility", () => {
     expect(compareRunCompatibility(run({ sessionId: "session-2", schemaVersion: 99 }), run()))
       .toEqual({ status: "unsupported_schema" });
   });
+
+  it("accepts different selected Cases for the same problem and source even when testcase text differs", () => {
+    expect(compareRunCompatibility(
+      run({}, { selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2", rawTestcase: "8" }, { selectedCaseIndex: 2 }),
+      "case_to_case"
+    )).toEqual({ status: "compatible" });
+  });
+
+  it("rejects selecting the same Case twice in case-to-case mode", () => {
+    expect(compareRunCompatibility(
+      run({}, { selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2", rawTestcase: "8" }, { selectedCaseIndex: 0 }),
+      "case_to_case"
+    )).toEqual({ status: "same_case" });
+  });
+
+  it("rejects different captured source in case-to-case mode", () => {
+    expect(compareRunCompatibility(
+      run({}, { selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2", sourceCode: "edited" }, { selectedCaseIndex: 2 }),
+      "case_to_case"
+    )).toEqual({ status: "different_source" });
+  });
+
+  it("reports problem and missing-problem incompatibility in case-to-case mode", () => {
+    expect(compareRunCompatibility(
+      run({}, { selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2" }, { problemSlug: "two", selectedCaseIndex: 2 }),
+      "case_to_case"
+    )).toEqual({ status: "different_problem" });
+    expect(compareRunCompatibility(
+      run({}, { problemSlug: null, selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2" }, { selectedCaseIndex: 2 }),
+      "case_to_case"
+    )).toEqual({ status: "missing_problem" });
+  });
+
+  it("reports unsupported schema or runtime before deeper case-to-case comparisons", () => {
+    expect(compareRunCompatibility(
+      run({ schemaVersion: 99 }, { selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2", sourceCode: "edited" }, { selectedCaseIndex: 2 }),
+      "case_to_case"
+    )).toEqual({ status: "unsupported_schema" });
+    expect(compareRunCompatibility(
+      run({ executionEnvironment: { runtime: "other", pythonVersion: "unknown" } as unknown as TraceSession["executionEnvironment"] }, { selectedCaseIndex: 0 }),
+      run({ sessionId: "session-2", sourceCode: "edited" }, { selectedCaseIndex: 2 }),
+      "case_to_case"
+    )).toEqual({ status: "unsupported_runtime" });
+  });
 });
 
 describe("run comparison state", () => {

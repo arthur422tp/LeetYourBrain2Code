@@ -43,6 +43,7 @@ const PLAY_INTERVAL_MS = 700;
 export interface TraceVisualizerHandle {
   element: HTMLElement;
   setStep(index: number): void;
+  inspectStep(step: number): boolean;
   setBehavioralDiff(model: BehavioralDiffViewModel | null): void;
   setEditorSyncStatus(status: EditorTraceStatus): void;
   dispose(): void;
@@ -364,6 +365,7 @@ export function createTraceVisualizer(
   );
   const root = createElement("section", "trace-viewer");
   root.id = "trace-viewer";
+  root.dataset.sessionId = session.sessionId;
 
   const summary = createElement("div", "trace-viewer__summary");
   const summaryHeading = createElement("div", "trace-viewer__summary-heading");
@@ -492,6 +494,12 @@ export function createTraceVisualizer(
   const onNavigateStep = (step: number): void => {
     const index = traceIndex.stepToIndex.get(step);
     if (index !== undefined) navigateDirect(index);
+  };
+  const inspectStep = (step: number): boolean => {
+    const index = traceIndex.stepToIndex.get(step);
+    if (index === undefined) return false;
+    navigateDirect(index);
+    return true;
   };
   const storyModelAt = (step: number, frameId: number) => buildControlFlowUiModel({
     step, frameId, sourceCode: session.sourceCode, plan: session.controlFlowPlan,
@@ -801,6 +809,7 @@ export function createTraceVisualizer(
   return {
     element: root,
     setStep,
+    inspectStep,
     setBehavioralDiff,
     setEditorSyncStatus,
     dispose: () => {

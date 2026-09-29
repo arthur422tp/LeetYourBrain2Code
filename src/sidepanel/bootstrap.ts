@@ -2,7 +2,11 @@ import type { ExecutionRequest } from "../shared/execution-types";
 import type { TraceEvent, TraceSession } from "../shared/trace-types";
 import { sameEditorSource } from "../shared/editor-trace";
 import type { EditorTraceStatus } from "../shared/editor-trace";
-import { createEditorTraceSync, type EditorTraceTransport } from "./editor-trace-sync";
+import {
+  createEditorTraceSync,
+  isEditorReplaySafe,
+  type EditorTraceTransport
+} from "./editor-trace-sync";
 import {
   toRunnableSnapshot,
   type LeetCodePageState,
@@ -14,6 +18,8 @@ import {
   type LiveStatus
 } from "../execution/live-execution-scheduler";
 import { compareCrossRuns } from "../core/cross-run-diff";
+import type { CrossRunDiffResult } from "../core/cross-run-diff";
+import { compareCaseBehavioralDiff, type CaseBehavioralDiffResult } from "../core/case-behavioral-diff";
 import { prepareCrossRun, type PreparedCrossRun } from "../core/cross-run-prepare";
 import { interpretTraceSession } from "../core/trace-session-interpreter";
 import { getTestcaseCases } from "../execution/testcase-selection";
@@ -32,12 +38,25 @@ import {
 import {
   compareRunCompatibility,
   createRunComparisonState,
-  runRecordFromAcceptedSession
+  runRecordFromAcceptedSession,
+  type RunRecord
 } from "./run-comparison-state";
 import {
   buildBehavioralDiffViewModel,
   type BehavioralDiffViewModel
 } from "./behavioral-diff-view";
+import { buildCaseDivergencePresentation } from "./case-diff-presentation";
+import {
+  createCaseComparisonState
+} from "./case-comparison-state";
+import {
+  createCaseComparisonControls,
+  type CaseComparisonControlsHandle
+} from "./components/CaseComparisonControls";
+import {
+  createCaseBehavioralDiff,
+  type CaseBehavioralDiffHandle
+} from "./components/CaseBehavioralDiff";
 import { createAboutPrivacy } from "./components/AboutPrivacy";
 import {
   createReleaseOnboarding,
@@ -90,6 +109,8 @@ type SourceReadiness =
   | "waiting_for_testcase"
   | "unsupported_language"
   | "candidate";
+
+type DisplayMode = "live" | "left" | "right";
 
 const SAMPLE_SOURCE = `class Solution:
     def twoSum(self, numbers, target):
@@ -278,6 +299,8 @@ export function renderSidePanel(
   let editorSyncStatus: EditorTraceStatus = "unavailable";
   let pageBridgeStatus = "unavailable";
   let latestAcceptedSession: TraceSession | null = null;
+  let inspectedRun: RunRecord | null = null;
+  let inspectedStep: number | null = null;
   let visualizerKind: string | null = null;
   let rawCursor: string | null = null;
   const updateEditorSyncStatus = (nextStatus: EditorTraceStatus): void => {
@@ -286,10 +309,14 @@ export function renderSidePanel(
   };
   const editorSync = createEditorTraceSync(updateEditorSyncStatus, dependencies.editorTraceTransport);
   const comparisonState = createRunComparisonState();
+  const caseComparisonState = createCaseComparisonState();
   let baselinePrepared: PreparedCrossRun | null = null;
   let currentPrepared: PreparedCrossRun | null = null;
   let currentComparison: BehavioralDiffViewModel | null = null;
+  let caseComparisonResult: CaseBehavioralDiffResult | null = null;
   let baselineControls: BaselineControlsHandle | null = null;
+  let caseComparisonControls: CaseComparisonControlsHandle | null = null;
+  let caseBehavioralDiff: CaseBehavioralDiffHandle | null = null;
   let currentPageState: LeetCodePageState | null = hasActiveTabSource
     ? null
     : {
@@ -303,6 +330,7 @@ export function renderSidePanel(
   let selectedCaseIndex = 0;
   let ownershipGeneration = 0;
   let disposed = false;
+  let displayMode: DisplayMode = "live";
   let collapsedInitialMirrors = false;
   let behavioralDiffPanelOpen = false;
   let sessionReportedForLatestRun = false;
@@ -314,6 +342,7 @@ export function renderSidePanel(
   const diagnosticEnvironment = dependencies.diagnosticEnvironment ?? getDiagnosticEnvironment();
 
   const updateActiveComparison = (): void => {
+    if (displayMode !== "live") return;
     activeVisualizer?.setBehavioralDiff(currentComparison);
   };
 
@@ -335,6 +364,10 @@ export function renderSidePanel(
   };
 
   const renderReleaseOnboarding = (): void => {
+    if (displayMode !== "live") {
+      releaseOnboarding.element.remove();
+      return;
+    }
     const state = onboardingState();
     if (activeVisualizer && traceMatchesCurrentPage()) {
       releaseOnboarding.element.remove();
@@ -436,6 +469,9 @@ export function renderSidePanel(
     editorEvent = undefined;
     activeVisualizer?.dispose();
     activeVisualizer = null;
+    displayMode = "live";
+    inspectedRun = null;
+    inspectedStep = null;
     latestAcceptedSession = null;
     visualizerKind = null;
     rawCursor = null;
@@ -463,10 +499,13 @@ export function renderSidePanel(
 
   const clearComparisonForProblemChange = (): void => {
     comparisonState.clearForProblemChange();
+    caseComparisonState.clearForProblemChange();
     baselinePrepared = null;
     currentPrepared = null;
     currentComparison = null;
+    caseComparisonResult = null;
     renderBaselineControls();
+    renderCaseComparison();
   };
 
   const recomputeComparison = (): void => {
@@ -519,6 +558,122 @@ export function renderSidePanel(
     renderBaselineControls();
   };
 
+  const caseCoverageMessage = (diff: CrossRunDiffResult | undefined): string | undefined => {
+    if (!diff) return undefined;
+    const messages: string[] = [];
+    if (diff.stopReason === "coverage_ended") {
+      messages.push("No divergence observed before comparison coverage ended.");
+    } else if (
+      diff.stopReason === "ambiguous_alignment" ||
+      diff.stopReason === "alignment_boundary"
+    ) {
+      messages.push("Comparison stopped because the next evidence could not be aligned safely.");
+    } else if (diff.stopReason === "unmatched_function") {
+      messages.push("Comparison stopped because the next function occurrence could not be aligned safely.");
+    }
+    if (diff.coverage.callFrames !== "complete") {
+      messages.push(`Call-frame evidence is ${diff.coverage.callFrames}.`);
+    }
+    if (diff.coverage.decisions !== "complete") {
+      messages.push(`Decision evidence is ${diff.coverage.decisions}.`);
+    }
+    if (diff.coverage.expressions !== "complete") {
+      messages.push(`Expression evidence is ${diff.coverage.expressions}.`);
+    }
+    if (diff.coverage.controlFlow !== "complete") {
+      messages.push(`Control-flow evidence is ${diff.coverage.controlFlow}.`);
+    }
+    if (diff.coverage.mutations.status !== "complete") {
+      messages.push("Mutation evidence is partial.");
+    }
+    if (diff.coverage.values.incomparableCount > 0) {
+      messages.push(`${diff.coverage.values.incomparableCount} value comparison(s) were not comparable across runs.`);
+    }
+    if (diff.coverage.mutations.skippedUnstableObjectMutations > 0) {
+      messages.push("Some object-owned mutations were excluded from cross-run alignment.");
+    }
+    return messages.length > 0 ? messages.join(" ") : undefined;
+  };
+
+  const anchorIsAuthoritative = (
+    step: number | undefined,
+    run: ReturnType<typeof caseComparisonState.get>["left"]
+  ): boolean => step !== undefined && run !== null
+    && run.session.events.some((event) => event.step === step);
+
+  const renderCaseComparison = (): void => {
+    const selection = caseComparisonState.get();
+    const current = comparisonState.get().current;
+    const currentCaseIndex = current?.context.selectedCaseIndex ?? null;
+    const result = caseComparisonResult;
+    const diff = result?.diff;
+    const leftCaseIndex = result?.leftCaseIndex
+      ?? selection.left?.context.selectedCaseIndex
+      ?? null;
+    const rightCaseIndex = result?.rightCaseIndex
+      ?? selection.right?.context.selectedCaseIndex
+      ?? null;
+    const presentation = diff?.firstDivergence
+      && result?.leftCaseIndex !== undefined
+      && result.rightCaseIndex !== undefined
+      ? buildCaseDivergencePresentation(
+          diff.firstDivergence,
+          result.leftCaseIndex,
+          result.rightCaseIndex
+        )
+      : undefined;
+
+    caseComparisonControls?.update({
+      hasCurrent: current !== null && currentPrepared !== null,
+      currentCaseIndex,
+      caseAIndex: selection.left?.context.selectedCaseIndex ?? null,
+      caseBIndex: selection.right?.context.selectedCaseIndex ?? null,
+      ...(result ? { compatibility: result.compatibility } : {})
+    });
+    caseBehavioralDiff?.update({
+      leftCaseIndex,
+      rightCaseIndex,
+      displayMode,
+      ...(result ? { compatibility: result.compatibility } : {}),
+      ...(presentation ? { presentation } : {}),
+      ...(diff ? { coverageMessage: caseCoverageMessage(diff), stopReason: diff.stopReason } : {}),
+      leftAnchorAuthoritative: anchorIsAuthoritative(diff?.firstDivergence?.baseline?.step, selection.left),
+      rightAnchorAuthoritative: anchorIsAuthoritative(diff?.firstDivergence?.current?.step, selection.right)
+    });
+  };
+
+  const recomputeCaseComparison = (): void => {
+    const selection = caseComparisonState.get();
+    if (selection.left === null || selection.right === null) {
+      caseComparisonResult = null;
+      renderCaseComparison();
+      return;
+    }
+    caseComparisonResult = compareCaseBehavioralDiff(selection.left, selection.right);
+    renderCaseComparison();
+  };
+
+  const selectCurrentCaseAsLeft = (): void => {
+    const current = comparisonState.get().current;
+    if (current === null || currentPrepared === null) return;
+    caseComparisonState.selectLeft(current);
+    recomputeCaseComparison();
+  };
+
+  const selectCurrentCaseAsRight = (): void => {
+    const current = comparisonState.get().current;
+    const selection = caseComparisonState.get();
+    if (current === null || currentPrepared === null || selection.left === null) return;
+    caseComparisonState.selectRight(current);
+    recomputeCaseComparison();
+  };
+
+  const clearCaseComparison = (): void => {
+    caseComparisonState.clear();
+    caseComparisonResult = null;
+    renderCaseComparison();
+  };
+
   const isDifferentProblem = (state: LeetCodePageState): boolean => {
     if (!activeVisualizer || !renderedPageIdentity) return false;
 
@@ -528,6 +683,32 @@ export function renderSidePanel(
 
   const syncEditor = (): void => {
     const tabId = ownershipState?.kind === "leetcode" ? ownershipState.tabId : null;
+    if (displayMode !== "live") {
+      const replayRun = inspectedRun;
+      const event = replayRun !== null && inspectedStep !== null
+        ? replayRun.session.events.find(candidate => candidate.step === inspectedStep)
+        : undefined;
+      const safe = replayRun !== null
+        && currentPageState !== null
+        && isEditorReplaySafe(
+          replayRun.session.sourceCode,
+          currentPageState.code,
+          replayRun.context.problemSlug,
+          currentPageState.metadata.slug
+        );
+      if (tabId === null || !safe || event === undefined || event.line === null || event.line < 1) {
+        editorSync.update(tabId === null ? null : tabId, null);
+        updateEditorSyncStatus(tabId === null ? "unavailable" : "stale");
+        return;
+      }
+      editorSync.update(tabId, {
+        sourceCode: replayRun!.session.sourceCode,
+        problemSlug: replayRun!.context.problemSlug,
+        line: event.line,
+        follow: followEditor
+      });
+      return;
+    }
     const sourceMatches = currentPageState?.code !== null && currentPageState?.code !== undefined
       && renderedPageIdentity !== null
       && currentPageState.language === "python"
@@ -552,6 +733,97 @@ export function renderSidePanel(
     });
   };
 
+  const mountLiveVisualizer = (
+    session: TraceSession,
+    interpretation: ReturnType<typeof interpretTraceSession>,
+    sessionRecovery: RecoveryNoticeState | null = null
+  ): void => {
+    displayMode = "live";
+    clearRecoveryNotice();
+    activeVisualizer?.dispose();
+    activeVisualizer = createTraceVisualizer(session, {
+      interpretation,
+      comparison: currentComparison,
+      followEditor,
+      ...(hasActiveTabSource ? {
+        onStepChange: (event: TraceEvent | undefined) => {
+          editorEvent = event;
+          const eventIndex = event === undefined
+            ? -1
+            : session.events.findIndex(candidate => candidate.step === event.step);
+          rawCursor = eventIndex >= 0 ? `${eventIndex}/${session.events.length}` : null;
+          visualizerKind = eventIndex >= 0
+            ? interpretation.visualStates[eventIndex]?.visuals[0]?.kind ?? null
+            : null;
+          syncEditor();
+        },
+        onFollowEditorChange: (follow: boolean) => { followEditor = follow; syncEditor(); }
+      } : {})
+    });
+    if (!hasActiveTabSource) {
+      const firstEvent = session.events[0];
+      const firstIndex = firstEvent === undefined ? -1 : 0;
+      rawCursor = firstIndex >= 0 ? `${firstIndex}/${session.events.length}` : null;
+      visualizerKind = firstIndex >= 0
+        ? interpretation.visualStates[firstIndex]?.visuals[0]?.kind ?? null
+        : null;
+    }
+    if (hasActiveTabSource) syncEditor();
+    result.replaceChildren(activeVisualizer.element);
+    const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
+      ".trace-viewer__behavioral-diff-panel"
+    );
+    if (nextBehavioralDiffPanel) {
+      nextBehavioralDiffPanel.open = behavioralDiffPanelOpen;
+    }
+    if (sessionRecovery !== null) {
+      showRecoveryNotice(sessionRecovery);
+    }
+  };
+
+  const inspectCapturedCase = (side: "left" | "right", step: number): void => {
+    const selection = caseComparisonState.get();
+    const run = side === "left" ? selection.left : selection.right;
+    if (run === null) return;
+
+    displayMode = side;
+    inspectedRun = run;
+    inspectedStep = null;
+    activeVisualizer?.dispose();
+    activeVisualizer = null;
+    const interpretation = interpretTraceSession(run.session);
+    activeVisualizer = createTraceVisualizer(run.session, {
+      interpretation,
+      onStepChange: (event: TraceEvent | undefined) => {
+        inspectedStep = event?.step ?? null;
+        syncEditor();
+      },
+      onFollowEditorChange: (follow: boolean) => {
+        followEditor = follow;
+        syncEditor();
+      }
+    });
+    rawCursor = null;
+    visualizerKind = null;
+    result.replaceChildren(activeVisualizer.element);
+    if (!activeVisualizer.inspectStep(step)) {
+      inspectedStep = null;
+    }
+    syncEditor();
+    renderCaseComparison();
+  };
+
+  const returnToCurrentRun = (): void => {
+    if (latestAcceptedSession === null) return;
+    inspectedRun = null;
+    inspectedStep = null;
+    mountLiveVisualizer(
+      latestAcceptedSession,
+      currentPrepared?.interpretation ?? interpretTraceSession(latestAcceptedSession)
+    );
+    renderCaseComparison();
+  };
+
   baselineControls = createBaselineControls({
     model: {
       hasCurrent: false,
@@ -562,6 +834,27 @@ export function renderSidePanel(
     onReplace: replaceBaseline,
     onClear: clearBaseline
   });
+  caseComparisonControls = createCaseComparisonControls({
+    model: {
+      hasCurrent: false,
+      currentCaseIndex: null,
+      caseAIndex: null,
+      caseBIndex: null
+    },
+    onSelectLeft: selectCurrentCaseAsLeft,
+    onSelectRight: selectCurrentCaseAsRight,
+    onClear: clearCaseComparison
+  });
+  caseBehavioralDiff = createCaseBehavioralDiff({
+    model: {
+      leftCaseIndex: null,
+      rightCaseIndex: null
+    },
+    onInspectLeft: (step) => inspectCapturedCase("left", step),
+    onInspectRight: (step) => inspectCapturedCase("right", step),
+    onReturnToCurrent: returnToCurrentRun
+  });
+  renderCaseComparison();
 
   caseSelector.addEventListener("change", () => {
     const nextIndex = Number.parseInt(caseSelector.value, 10);
@@ -602,52 +895,17 @@ export function renderSidePanel(
       const interpretation = interpretTraceSession(session);
       currentPrepared = prepareCrossRun(session, interpretation);
       comparisonState.setCurrent(runRecordFromAcceptedSession(session, accepted));
+      displayMode = "live";
+      inspectedRun = null;
+      inspectedStep = null;
       recomputeComparison();
-      activeVisualizer?.dispose();
-      activeVisualizer = null;
+      recomputeCaseComparison();
       renderedPageIdentity = {
         slug: accepted.input.problemSlug,
         sourceCode: accepted.input.sourceCode,
         rawTestcase: accepted.input.rawTestcase
       };
-      activeVisualizer = createTraceVisualizer(session, {
-        interpretation,
-        comparison: currentComparison,
-        followEditor,
-        ...(hasActiveTabSource ? {
-          onStepChange: (event: TraceEvent | undefined) => {
-            editorEvent = event;
-            const eventIndex = event === undefined
-              ? -1
-              : session.events.findIndex(candidate => candidate.step === event.step);
-            rawCursor = eventIndex >= 0 ? `${eventIndex}/${session.events.length}` : null;
-            visualizerKind = eventIndex >= 0
-              ? interpretation.visualStates[eventIndex]?.visuals[0]?.kind ?? null
-              : null;
-            syncEditor();
-          },
-          onFollowEditorChange: (follow: boolean) => { followEditor = follow; syncEditor(); }
-        } : {})
-      });
-      if (!hasActiveTabSource) {
-        const firstEvent = session.events[0];
-        const firstIndex = firstEvent === undefined ? -1 : 0;
-        rawCursor = firstIndex >= 0 ? `${firstIndex}/${session.events.length}` : null;
-        visualizerKind = firstIndex >= 0
-          ? interpretation.visualStates[firstIndex]?.visuals[0]?.kind ?? null
-          : null;
-      }
-      if (hasActiveTabSource) syncEditor();
-      result.replaceChildren(activeVisualizer.element);
-      const nextBehavioralDiffPanel = activeVisualizer.element.querySelector<HTMLDetailsElement>(
-        ".trace-viewer__behavioral-diff-panel"
-      );
-      if (nextBehavioralDiffPanel) {
-        nextBehavioralDiffPanel.open = behavioralDiffPanelOpen;
-      }
-      if (sessionRecovery !== null) {
-        showRecoveryNotice(sessionRecovery);
-      }
+      mountLiveVisualizer(session, interpretation, sessionRecovery);
     }
   });
 
@@ -841,7 +1099,14 @@ export function renderSidePanel(
   settingsSummary.textContent = "Settings";
   const settingsBody = document.createElement("div");
   settingsBody.className = "app-settings__body";
-  settingsBody.append(aboutPrivacy.element, supportDiagnostics.element, inputPanel, baselineControls.element);
+  settingsBody.append(
+    aboutPrivacy.element,
+    supportDiagnostics.element,
+    inputPanel,
+    baselineControls.element,
+    caseComparisonControls.element,
+    caseBehavioralDiff.element
+  );
   settings.append(settingsSummary, settingsBody);
   subtitle.remove();
   header.append(status, settings);
@@ -904,6 +1169,8 @@ export function renderSidePanel(
       activeTabSource?.dispose();
       scheduler.dispose();
       baselineControls?.dispose();
+      caseComparisonControls?.dispose();
+      caseBehavioralDiff?.dispose();
       activeVisualizer?.dispose();
       activeVisualizer = null;
       controller.dispose?.();

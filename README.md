@@ -82,6 +82,7 @@ The MVP is designed to expose:
 - a Failure-First Entry Point for local `exception`, `trace_limit`, or `timeout` captures: it deterministically surfaces one validated behavioral evidence location near termination as an optional `Start Here` inspection point. It does not move the raw cursor automatically, and `Start Here` is an inspection priority—not a diagnosis.
 - **Call Tree / recursion execution story:** visualizes concrete user-function invocations, arguments, parent/child call structure, recursion depth, returns, exceptions, and incomplete timeout/trace prefixes while staying synchronized with the raw trace cursor.
 - **Pinned baseline behavioral diff:** pin one captured run and compare later executions of the same testcase to surface the earliest safely aligned difference in calls, decisions, control flow, stable mutations, expressions, or frame outcomes.
+- **Case-to-Case Behavioral Diff:** compare two testcase executions under the same source revision and inspect where their captured behavior first diverges.
 
 Python execution stays off the Side Panel's main thread. Pyodide is bundled with the extension and runs locally in a Web Worker; the MVP does not require a backend.
 
